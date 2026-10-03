@@ -287,7 +287,7 @@ export const KNOB_COLUMNS = 3;
  * build makes that a glance instead of an investigation; a test keeps it in step with the
  * import, so bumping one without the other fails the suite rather than confusing a user.
  */
-export const PANEL_BUILD = "h3sheet_v46";
+export const PANEL_BUILD = "h3sheet_v47";
 
 /** The frontend's own widget/host names, straight from the shipped frontend bundle. */
 export const PREVIEW_HOST_CLASS = "comfy-img-preview";
@@ -983,6 +983,8 @@ export const PANEL_CSS = `
   --mmx-fg: var(--fg-color, #e6e6ee);
   --mmx-muted: var(--descrip-text, #9aa0ae);
   --mmx-accent: var(--p-primary-color, #4f8cff);
+  /* The Cells tab's group names: the same yellow-orange as the Build cells outline. */
+  --mmx-tick: #ffb95e;
   --mmx-danger: #e05561;
   width: 100%; height: 100%; box-sizing: border-box; overflow: auto;
   /* Column layout so the active pane can claim the leftover height (see .mmx-pane). */
@@ -1064,8 +1066,22 @@ export const PANEL_CSS = `
 }
 .mmx-card.is-drop { border-color: var(--mmx-accent); }
 .mmx-card__head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
-.mmx-label { font-size: 10px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; color: var(--mmx-muted); }
-.mmx-count { font-size: 10px; color: var(--mmx-muted); }
+.mmx-label { font-size: 10px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; color: var(--mmx-muted); }.mmx-count { font-size: 10px; color: var(--mmx-muted); }
+/* The Cells tab's tick groups. Four rows of 15-20 checkboxes is a wall: each group gets its
+   own rounded panel and its own slightly lighter grey, so the boundaries are readable without
+   reading, and the group names are bold in the yellow-orange the Build cells outline uses
+   rather than the quiet muted grey every hint wears. The shades step up in the order the tab
+   is filled in (views -> poses -> expressions -> background), so the darkest panel is the one
+   the eye lands on first. */
+.mmx-tickgroup { border: 1px solid var(--mmx-line); border-radius: 8px; padding: 5px 7px; margin-bottom: 5px; }
+.mmx-tickgroup--views { background: rgba(255,255,255,.035); }
+.mmx-tickgroup--poses { background: rgba(255,255,255,.065); }
+.mmx-tickgroup--expressions { background: rgba(255,255,255,.095); }
+.mmx-tickgroup--background { background: rgba(255,255,255,.125); }
+.mmx-tickgroup__label {
+  color: var(--mmx-tick); font-weight: 700; font-size: 10px;
+  letter-spacing: .02em; align-self: center; white-space: nowrap;
+}
 .mmx-grid { display: grid; gap: 6px; align-items: start; }
 /* One grid for every reference. Tiles are sized to fit the box, and the box FILLS the space
    the card has in the pane (the tile maths reads clientHeight/clientWidth), so a taller node
@@ -1590,9 +1606,14 @@ export function clampAspect(ratio) {
 // --------------------------------------------------------------------------- //
 // panel
 // --------------------------------------------------------------------------- //
-function optionRow(label, options, selected, onToggle) {
-    const row = element("div", { className: "mmx-row" }, { marginBottom: "3px" });
-    row.append(element("span", { textContent: label, className: "mmx-muted" }, { flex: "0 0 62px" }));
+function optionRow(label, options, selected, onToggle, group = "") {
+    // Each group of ticks lives in its own rounded panel (see .mmx-tickgroup): the four
+    // groups are one wall of checkboxes otherwise, and "which row am I in" has to be
+    // answerable at a glance. The wrapper is returned AS the row, so call sites that just
+    // append `views.row` get the panel for free.
+    const wrap = element("div", { className: `mmx-tickgroup mmx-tickgroup--${group || "other"}` });
+    const row = element("div", { className: "mmx-row" }, { marginBottom: "0" });
+    row.append(element("span", { textContent: label, className: "mmx-tickgroup__label" }, { flex: "0 0 62px" }));
     const boxes = [];
     for (const [key, text] of options) {
         const id = `mmx-sheet-${label.replace(/\s+/g, "-")}-${key}`;
@@ -1603,7 +1624,8 @@ function optionRow(label, options, selected, onToggle) {
         boxes.push(box);
         row.append(box, caption);
     }
-    return { row, boxes };
+    wrap.append(row);
+    return { row: wrap, boxes };
 }
 
 function readChecks(boxes, fallback) {
@@ -2816,8 +2838,9 @@ export function buildSheetInterface({ state, hooks = {} }) {
 
     /** Backdrop for every cell: a preset, one of the references, or the user's own words. */
     function backgroundRow() {
-        const row = element("div", { className: "mmx-row" }, { marginTop: "4px", flexWrap: "wrap" });
-        row.append(element("span", { textContent: "Background", className: "mmx-muted" }));
+        const wrap = element("div", { className: "mmx-tickgroup mmx-tickgroup--background" });
+        const row = element("div", { className: "mmx-row" }, { flexWrap: "wrap" });
+        row.append(element("span", { textContent: "Background", className: "mmx-tickgroup__label" }));
         const box = textInput(
             state.backgroundCustom || "",
             "behind the character, e.g. deep red velvet curtain",
@@ -2870,7 +2893,8 @@ export function buildSheetInterface({ state, hooks = {} }) {
         box.style.display = choice === "custom" ? "" : "none";
 
         row.append(select, refWrap, box);
-        return row;
+        wrap.append(row);
+        return wrap;
     }
 
     // ------------------------------------------------------- prompt card
@@ -3588,9 +3612,9 @@ export function buildSheetInterface({ state, hooks = {} }) {
             updatePlanNote();
             refreshTabs();
         };
-        const views = optionRow("Views", VIEWS, new Set(state.build.views), syncBuild);
-        const poses = optionRow("Poses", POSES, new Set(state.build.poses), syncBuild);
-        const expressions = optionRow("Expressions", EXPRESSIONS, new Set(state.build.expressions), syncBuild);
+        const views = optionRow("Views", VIEWS, new Set(state.build.views), syncBuild, "views");
+        const poses = optionRow("Poses", POSES, new Set(state.build.poses), syncBuild, "poses");
+        const expressions = optionRow("Expressions", EXPRESSIONS, new Set(state.build.expressions), syncBuild, "expressions");
         const background = backgroundRow();
         const order = element("div", {
             textContent: "Cells render top to bottom - the Results tab fills in that order.",

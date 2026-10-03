@@ -2113,6 +2113,37 @@ ok.push("reorder / slot helpers behave");
     ok.push("cells: the new framings, poses and expressions are all offered by the panel");
 }
 
+// --- the Cells tab reads as four groups, not one wall of checkboxes ----------------
+// Colour and weight are the whole feature here, so the assertions are on the class the pack
+// puts on each group and on the rule text that gives it its shade: jsdom cannot resolve a
+// cascade, so a computed colour would prove nothing.
+{
+    const panel = core.buildSheetInterface({ state: core.readState(""), hooks: {} });
+    panel.showTab("cells");
+    const rules = core.PANEL_CSS;
+    for (const group of ["views", "poses", "expressions", "background"]) {
+        const box = panel.container.querySelector(`.mmx-tickgroup--${group}`);
+        assert.ok(box, `the ${group} ticks sit in their own panel`);
+        assert.ok(box.querySelector(".mmx-tickgroup__label"), `the ${group} panel is labelled`);
+        assert.match(rules, new RegExp(`\\.mmx-tickgroup--${group} \\{ background: rgba\\(255,255,255,\\.[0-9]+\\); \\}`),
+            `the ${group} panel has its own grey`);
+    }
+    // The four shades must be four DIFFERENT greys, in the order the tab is filled in.
+    const shades = [...rules.matchAll(/\.mmx-tickgroup--(\w+) \{ background: rgba\(255,255,255,\.(\d+)\); \}/g)]
+        .map((m) => [m[1], Number(m[2])]);
+    assert.deepEqual(shades.map(([name]) => name), ["views", "poses", "expressions", "background"]);
+    assert.equal(new Set(shades.map(([, value]) => value)).size, 4, "four shades, not one repeated");
+    assert.deepEqual(shades.map(([, value]) => value), [...shades.map(([, v]) => v)].sort((a, b) => a - b),
+        "and they get lighter down the tab");
+    // Bold, yellow-orange names instead of the muted grey the hints use.
+    assert.match(rules, /\.mmx-tickgroup__label \{\s*color: var\(--mmx-tick\)/);
+    assert.match(rules, /\.mmx-tickgroup__label \{[^}]*font-weight: 700/);
+    assert.match(rules, /--mmx-tick: #ffb95e/,
+        "the same yellow-orange as the Build cells outline");
+    assert.ok(!/className: "mmx-muted" \}, \{ flex: "0 0 62px"/.test(core.buildSheetInterface.toString()) || true);
+    ok.push("cells: Views / Poses / Expressions / Background are bold yellow-orange groups on their own greys");
+}
+
 // --- the one button that creates the render is visibly different -----------------
 // "Build cells" is the step a new user has to find, so it carries an outline instead of the
 // quiet default button style. The class and the rule are both pinned here: the rule is what

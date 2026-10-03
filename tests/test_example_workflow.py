@@ -63,7 +63,7 @@ def test_the_payload_is_a_sheet_the_node_can_run():
     sheet = next(node for node in data["nodes"] if node["type"] == "MiniMaxH3CharacterSheet")
     payload = next(value for value in sheet["widgets_values"] if isinstance(value, str) and value.startswith("{"))
     spec = ss.parse_sheet_spec(payload)
-    assert len(spec.cells) == 8, f"the example builds {len(spec.cells)} cells"
+    assert len(spec.cells) == 5, f"the example builds {len(spec.cells)} cells"
     assert [cell.id for cell in spec.cells][0] == "face-neutral-neutral"
     assert {cell.view for cell in spec.cells} == {"face", "portrait", "front", "profile", "back"}
     assert not spec.warnings, f"the shipped payload must parse cleanly: {spec.warnings}"
@@ -143,13 +143,18 @@ def test_widget_values_match_the_node_schema_order():
     assert settings["keep_frames"] is True
     assert settings["verbose_logging"] is False
     # Render settings live on the node's widgets (the payload carries references and
-    # cells), so the seed the node uses is the widget value.
-    assert settings["seed"] == 20261002
+    # cells), so the seed the node uses is the widget value. The shipped example is saved
+    # with seed mode `randomize`, so its stored seed is whatever the last run drew: pinning
+    # an exact number would only break the next time it is opened and saved.
+    assert isinstance(settings["seed"], int)
+    assert settings["control_after_generate"] == "randomize"
     spec = ss.parse_sheet_spec(settings["sheet_data"])
-    assert len(spec.cells) == 8
+    assert len(spec.cells) == 5
     assert spec.global_prompt == "" and spec.negative_prompt == "", "the user fills these in"
     # The node reads its render settings from the widgets, not from this payload
     # (see test_sheet_graph.py for the widget-authority contract).
     assert settings["steps"] == 8
     assert settings["shift_video"] == 12.0
-    assert settings["ref_image_size"] == "max"
+    # `match` (the node's default) rather than the identity preset's `max`: the shipped
+    # example is the plain one-click sheet, not a fidelity recipe.
+    assert settings["ref_image_size"] == "match"

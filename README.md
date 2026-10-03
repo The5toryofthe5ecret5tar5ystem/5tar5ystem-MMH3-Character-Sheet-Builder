@@ -51,12 +51,14 @@ no model it reports "no face model found" and wires your original reference unto
 
 ## Using it
 
-0. **Open the ready-made workflow**: `example_workflows/H3 Character Sheet - 8 view
-   matrix.json` (it is also installed into your ComfyUI workflow list as
-   *H3 Character Sheet - 8 view matrix*). It wires the H3 ref2va model, the Qwen3-VL
-   text encoder, both VAEs and a SaveImage, and pre-builds an 8-cell matrix: face,
-   face+smile, portrait, full body front, A-pose, T-pose, 90 deg profile and back.
-   Drop your references into the panel, type who the character is, press Queue.
+0. **Open the ready-made workflow**: `example_workflows/5tar5ystem MMH3 Character Sheet
+   Maker.json` (it is also installed into your ComfyUI workflow list as
+   *5tar5ystem MMH3 Character Sheet Maker*). It wires the H3 ref2va model, the Qwen3-VL
+   text encoder, both VAEs and a SaveImage, and pre-builds a 5-cell matrix: face close-up,
+   portrait, full body front, 90 deg profile and back, all neutral pose and expression -
+   the same five the *Full Character Sheet* presets build, so the file is the shortest path
+   from "opened it" to "queued it". Drop your references into the panel, type who the
+   character is, press Queue.
 
 ### Presets (top of the panel)
 

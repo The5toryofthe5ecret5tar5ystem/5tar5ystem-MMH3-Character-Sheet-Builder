@@ -1,0 +1,436 @@
+{
+  "id": "e33df930-397c-457c-b4eb-080b94dd2a33",
+  "revision": 0,
+  "last_node_id": 7,
+  "last_link_id": 5,
+  "nodes": [
+    {
+      "id": 2,
+      "type": "UNETLoader",
+      "pos": [
+        100,
+        50
+      ],
+      "size": [
+        270,
+        82
+      ],
+      "flags": {
+        "pinned": true
+      },
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            1
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
+        "Node name for S&R": "UNETLoader",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "Minimax/10Eros_Max_h3_TURBO-hybrid_beta5_w4a8_14gb_optimized.safetensors",
+        "default"
+      ],
+      "widgets_values_named": {
+        "unet_name": "Minimax/10Eros_Max_h3_TURBO-hybrid_beta5_w4a8_14gb_optimized.safetensors",
+        "weight_dtype": "default"
+      },
+      "color": "#233",
+      "bgcolor": "#355"
+    },
+    {
+      "id": 3,
+      "type": "CLIPLoader",
+      "pos": [
+        100,
+        170
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {
+        "pinned": true
+      },
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            2
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
+        "Node name for S&R": "CLIPLoader",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+        "minimax",
+        "default"
+      ],
+      "widgets_values_named": {
+        "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+        "type": "minimax",
+        "device": "default"
+      },
+      "color": "#233",
+      "bgcolor": "#355"
+    },
+    {
+      "id": 4,
+      "type": "VAELoader",
+      "pos": [
+        100,
+        320
+      ],
+      "size": [
+        270,
+        60
+      ],
+      "flags": {
+        "pinned": true
+      },
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            3
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
+        "Node name for S&R": "VAELoader",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "minimax_h3_video_vae_fp16.safetensors"
+      ],
+      "widgets_values_named": {
+        "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+      },
+      "color": "#233",
+      "bgcolor": "#355"
+    },
+    {
+      "id": 5,
+      "type": "VAELoader",
+      "pos": [
+        100,
+        420
+      ],
+      "size": [
+        270,
+        58
+      ],
+      "flags": {
+        "pinned": true
+      },
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            4
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
+        "Node name for S&R": "VAELoader",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "minimax_h3_audio_vae_fp32.safetensors"
+      ],
+      "widgets_values_named": {
+        "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+      },
+      "color": "#233",
+      "bgcolor": "#355"
+    },
+    {
+      "id": 6,
+      "type": "MiniMaxH3CharacterSheet",
+      "pos": [
+        400,
+        50
+      ],
+      "size": [
+        900,
+        702
+      ],
+      "flags": {
+        "pinned": true
+      },
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 1
+        },
+        {
+          "name": "video_vae",
+          "type": "VAE",
+          "link": 3
+        },
+        {
+          "name": "audio_vae",
+          "type": "VAE",
+          "link": 4
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 2
+        }
+      ],
+      "outputs": [
+        {
+          "name": "sheet",
+          "type": "IMAGE",
+          "links": [
+            5
+          ]
+        },
+        {
+          "name": "cells",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "report",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "MiniMaxH3CharacterSheet",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "",
+        "{\"version\":1,\"refs\":{\"pictures\":[],\"videos\":[],\"audios\":[]},\"cells\":[{\"id\":\"face-neutral-neutral\",\"view\":\"face\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"portrait-neutral-neutral\",\"view\":\"portrait\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"front-neutral-neutral\",\"view\":\"front\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"profile-neutral-neutral\",\"view\":\"profile\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"back-neutral-neutral\",\"view\":\"back\",\"pose\":\"neutral\",\"expression\":\"neutral\"}],\"build\":{\"views\":[\"face\",\"front\"],\"poses\":[\"neutral\"],\"expressions\":[\"neutral\"]},\"render\":{\"background\":\"neutral\",\"blurScope\":\"hair\",\"continuity\":\"auto\",\"exportVideo\":true},\"ui\":{\"compactKnobs\":true,\"nodePreviews\":\"compact\",\"autoRefresh\":false}}",
+        "character_sheet",
+        1024,
+        22,
+        8,
+        "res_multistep",
+        "simple",
+        379809507897564,
+        "randomize",
+        12,
+        3,
+        "match",
+        "hero-left",
+        2,
+        "3:2",
+        1536,
+        true,
+        "#101014",
+        "contain",
+        true,
+        false,
+        "9:16",
+        "per framing",
+        "auto",
+        true
+      ],
+      "widgets_values_named": {
+        "h3_character_sheet_ui": "",
+        "sheet_data": "{\"version\":1,\"refs\":{\"pictures\":[],\"videos\":[],\"audios\":[]},\"cells\":[{\"id\":\"face-neutral-neutral\",\"view\":\"face\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"portrait-neutral-neutral\",\"view\":\"portrait\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"front-neutral-neutral\",\"view\":\"front\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"profile-neutral-neutral\",\"view\":\"profile\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"back-neutral-neutral\",\"view\":\"back\",\"pose\":\"neutral\",\"expression\":\"neutral\"}],\"build\":{\"views\":[\"face\",\"front\"],\"poses\":[\"neutral\"],\"expressions\":[\"neutral\"]},\"render\":{\"background\":\"neutral\",\"blurScope\":\"hair\",\"continuity\":\"auto\",\"exportVideo\":true},\"ui\":{\"compactKnobs\":true,\"nodePreviews\":\"compact\",\"autoRefresh\":false}}",
+        "output_name": "character_sheet",
+        "cell_size": 1024,
+        "frames_per_cell": 22,
+        "steps": 8,
+        "sampler_name": "res_multistep",
+        "scheduler": "simple",
+        "seed": 379809507897564,
+        "control_after_generate": "randomize",
+        "shift_video": 12,
+        "shift_audio": 3,
+        "ref_image_size": "match",
+        "sheet_layout": "hero-left",
+        "sheet_columns": 2,
+        "sheet_aspect": "3:2",
+        "sheet_short_edge": 1536,
+        "sheet_captions": true,
+        "sheet_background": "#101014",
+        "sheet_fit": "contain",
+        "keep_frames": true,
+        "verbose_logging": false,
+        "cell_aspect": "9:16",
+        "ref_scope": "per framing",
+        "continuity": "auto",
+        "export_video": true
+      },
+      "color": "#332922",
+      "bgcolor": "#593930"
+    },
+    {
+      "id": 7,
+      "type": "SaveImage",
+      "pos": [
+        1330,
+        50
+      ],
+      "size": [
+        496.35404595156456,
+        282
+      ],
+      "flags": {
+        "pinned": true
+      },
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 5
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
+        "Node name for S&R": "SaveImage",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "minimax_sheets/character_sheet-%date:hhmmss%"
+      ],
+      "widgets_values_named": {
+        "filename_prefix": "minimax_sheets/character_sheet-%date:hhmmss%"
+      },
+      "color": "#232",
+      "bgcolor": "#353"
+    }
+  ],
+  "links": [
+    [
+      1,
+      2,
+      0,
+      6,
+      0,
+      "MODEL"
+    ],
+    [
+      2,
+      3,
+      0,
+      6,
+      3,
+      "CLIP"
+    ],
+    [
+      3,
+      4,
+      0,
+      6,
+      1,
+      "VAE"
+    ],
+    [
+      4,
+      5,
+      0,
+      6,
+      2,
+      "VAE"
+    ],
+    [
+      5,
+      6,
+      0,
+      7,
+      0,
+      "IMAGE"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ue_links": [],
+    "ds": {
+      "scale": 1.116781577942499,
+      "offset": [
+        51.681857891244334,
+        133.76752031166853
+      ]
+    },
+    "links_added_by_ue": [],
+    "frontendVersion": "1.53.6",
+    "VHS_latentpreview": true,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "extensions": {
+    "seed_widgets": {
+      "6": 8
+    }
+  },
+  "version": 0.4,
+  "seed_widgets": {
+    "6": 8
+  }
+}

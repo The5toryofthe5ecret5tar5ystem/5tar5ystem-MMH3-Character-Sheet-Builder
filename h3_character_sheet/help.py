@@ -32,8 +32,8 @@ log = logging.getLogger("H3-Character-Sheet.help")
 PROJECT = "5tar5ystem MMH3 Character Sheet Maker"
 
 #: Where the example workflow lives, relative to the pack, and its name in ComfyUI's list.
-EXAMPLE_WORKFLOW = "example_workflows/H3 Character Sheet - 8 view matrix.json"
-EXAMPLE_WORKFLOW_TITLE = "H3 Character Sheet - 8 view matrix"
+EXAMPLE_WORKFLOW = "example_workflows/5tar5ystem MMH3 Character Sheet Maker.json"
+EXAMPLE_WORKFLOW_TITLE = "5tar5ystem MMH3 Character Sheet Maker"
 
 #: ComfyUI's models folder names, as the node's own loaders see them.
 DIFFUSION_FOLDER = "diffusion_models"
