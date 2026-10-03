@@ -1,0 +1,19 @@
+[project]
+name = "5tar5ystem-mmh3-character-sheet-maker"
+version = "1.0.0"
+description = "5tar5ystem MMH3 Character Sheet Maker - Standalone MiniMax H3 character sheet maker: references with roles, a matrix of views / poses / expressions, and a composited sheet you can feed back into ref2va."
+readme = "README.md"
+license = { text = "GPL-3.0-only" }
+requires-python = ">=3.10"
+# Runtime needs nothing beyond ComfyUI itself (its MiniMax H3 core nodes, Pillow,
+# numpy). Deliberately empty so ComfyUI-Manager never re-pins torch/Pillow. The face
+# blur's detector is optional and documented in the Help tab - see requirements.txt.
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker"
+
+[tool.comfy]
+PublisherId = "5tar5ystem"
+DisplayName = "MMH3 Character Sheet"
+web = "web/js"

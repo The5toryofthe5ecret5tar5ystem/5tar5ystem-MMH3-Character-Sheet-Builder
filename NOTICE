@@ -1,0 +1,17 @@
+5tar5ystem MMH3 Character Sheet Maker
+(repo: 5tar5ystem-MMH3-Character-Sheet-Maker, node pack: ComfyUI-H3-Character-Sheet)
+Copyright (C) 2026 wakapedia
+
+This pack is distributed under GNU GPL v3.0 (see LICENSE).
+
+Derivation: the character-sheet modules (sheet_spec.py, sheet_layout.py,
+sheet_store.py, sheet_routes.py, sheet_pass_core.py, planner.py, the in-node panel
+under web/js/ and their tests) were originally written inside
+ComfyUI-MiniMax-H3-Motion-Director, which is itself distributed under GPL-3.0 and
+contains portions derived from ComfyUI_MiniMaxH3_Director (Apache-2.0, AIMixer) and
+ComfyUI-H3-Motion-Context (GPL-3.0, NikoDemon80). They are carried here unchanged in
+substance; this pack does not import that project at runtime and does not depend on
+it being installed.
+
+Rendering uses ComfyUI's own MiniMax H3 implementation
+(comfy_extras/nodes_minimax_h3.py).

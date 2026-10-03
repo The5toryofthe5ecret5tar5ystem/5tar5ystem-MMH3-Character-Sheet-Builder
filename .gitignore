@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+node_modules/
+.pytest_cache/
+web/js/tests/__pycache__/
+# Editors / tooling that must never end up in the pack
+dist/
+*.egg-info/
+.venv/
+.DS_Store

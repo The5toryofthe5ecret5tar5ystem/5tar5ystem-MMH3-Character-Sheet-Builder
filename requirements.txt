@@ -1,0 +1,19 @@
+# 5tar5ystem MMH3 Character Sheet Maker - runtime requirements.
+#
+# Everything this pack needs at runtime ships with ComfyUI itself:
+#   * the MiniMax H3 core nodes (comfy_extras/nodes_minimax_h3.py)
+#   * Pillow (sheet compositing) and numpy
+#
+# Nothing is pinned here on purpose: the pack must not force a torch/Pillow version
+# on a working ComfyUI install. The test suite additionally uses pytest, and the
+# frontend tests use jsdom (devDependencies in package.json).
+#
+# OPTIONAL - the face blur only. Left commented so a ComfyUI-Manager install never
+# touches an existing torch: the detector package pulls torch, and you already have
+# one that works. The in-node Help tab reports whether it is importable, and installs
+# into ComfyUI's own python like this:
+#
+#   python_embeded/python -m pip install ultralytics
+#
+# ultralytics>=8.2
+# opencv-python  # ships with ComfyUI already; only listed for clarity
