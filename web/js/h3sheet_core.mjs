@@ -1367,6 +1367,16 @@ export function buildSheetInterface({ state, hooks = {} }) {
                 : `found: ${item.found}`,
             className: "mmx-req__path",
         }));
+        // A model folder can hold several generations of the same checkpoint (10Eros beta4
+        // next to beta5) and the first match is not necessarily the one to render with, so
+        // every match is listed.
+        const others = (item.matches || []).filter((name) => name !== item.found);
+        if (others.length) {
+            card.append(element("div", {
+                textContent: `also here: ${others.join(", ")}`,
+                className: "mmx-req__path",
+            }));
+        }
         // A file can be right and the feature still dead (the blur needs the ultralytics
         // package), so the package state is its own line rather than folded into the ✓.
         for (const entry of item.packages || []) {

@@ -135,7 +135,11 @@ REQUIREMENTS: tuple[Requirement, ...] = (
                 "minimax_h3_ref2va_pruned_int8_convrot.safetensors works too, at ~20 steps.",
             ),
         ),
-        note="Any H3 ref2va checkpoint renders; the presets' 8 steps assume a turbo build.",
+        note=(
+            "Any H3 ref2va checkpoint renders; the presets' 8 steps assume a turbo build. "
+            "Stick to 10Eros **beta5**: the author states that beta_3 and beta_4 are corrupted "
+            "test versions that were never meant to ship, and model managers still offer them."
+        ),
     ),
     Requirement(
         id="clip",
@@ -355,6 +359,10 @@ SECTIONS: tuple[HelpSection, ...] = (
             "with a plain one. More steps on a turbo model buys nothing.",
             "**10Eros' own advice**: with a TURBO file, do not also load a turbo LoRA, and "
             "skip cache/Spectrum nodes on reference (ref2va) runs - they cost accuracy.",
+            "**Check WHICH beta you downloaded**: 10Eros beta_3 and beta_4 are the author's own "
+            "\"corrupted test versions\" - beta5 is the first functional one, and old betas are "
+            "still sitting in model folders (and in old workflows). The Files section above "
+            "lists every matching checkpoint it can see, not just the first.",
             "**Prompt side**: name each reference's job in its role box. The cell prompt is "
             "built from those roles, and the Prompt tab shows the exact text before you "
             "queue.",
@@ -389,8 +397,13 @@ def _resolve_paths(folder: str) -> str:
         return ""
 
 
-def _requirement_state(requirement: Requirement) -> tuple[bool, str, str]:
-    """``(found, what_was_found, where_we_looked)`` for one requirement.
+def _requirement_state(requirement: Requirement) -> tuple[bool, str, str, list[str]]:
+    """``(found, what_was_found, where_we_looked, every_match)`` for one requirement.
+
+    Every matching file is reported, not just the first: a model folder can hold several
+    generations of the same checkpoint (10Eros beta4 next to beta5, a pruned official build
+    next to a community merge), and "found: the beta4 file" is a very different answer from
+    "found: the beta5 file".
 
     Every lookup is guarded: a folder that a custom node registered badly, a broken
     extra_model_paths entry or a ComfyUI that simply is not there must not take the guide
@@ -405,20 +418,22 @@ def _requirement_state(requirement: Requirement) -> tuple[bool, str, str]:
             log.warning("Character sheet: face model lookup failed (%s)", exc)
             found = None
         if found is not None:
-            return True, str(found), str(Path(found).parent)
+            return True, str(found), str(Path(found).parent), [str(found)]
         looked = ", ".join("models/" + "/".join(parts) for parts in MODEL_CANDIDATES)
-        return False, "", looked
+        return False, "", looked, []
     try:
         names = _resolve_names(requirement.folder)
         looked = _resolve_paths(requirement.folder) or requirement.where
     except Exception as exc:  # noqa: BLE001 - a folder listing must never break the guide
         log.warning("Character sheet: could not list %s (%s)", requirement.folder, exc)
-        return False, "", requirement.where
-    for name in names:
-        low = name.lower()
-        if any(token in low for token in requirement.match):
-            return True, name, looked
-    return False, "", looked
+        return False, "", requirement.where, []
+    matches = [
+        name for name in names
+        if any(token in name.lower() for token in requirement.match)
+    ]
+    if matches:
+        return True, matches[0], looked, matches
+    return False, "", looked, []
 
 
 def _package_state(package: str) -> bool:
@@ -449,7 +464,7 @@ def check_requirements() -> list[dict[str, Any]]:
     """
     out: list[dict[str, Any]] = []
     for requirement in REQUIREMENTS:
-        found, name, looked = _requirement_state(requirement)
+        found, name, looked, matches = _requirement_state(requirement)
         packages = [
             {"name": package, "ok": _package_state(package)}
             for package in requirement.packages
@@ -468,6 +483,8 @@ def check_requirements() -> list[dict[str, Any]]:
                 "ok": bool(found) and not missing_packages,
                 "file_ok": bool(found),
                 "found": name,
+                "matches": matches[:8],
+                "match_count": len(matches),
                 "looked": looked,
                 "packages": packages,
                 "missing_packages": missing_packages,

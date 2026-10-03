@@ -206,6 +206,39 @@ def test_a_file_in_a_subfolder_still_counts(monkeypatch):
     assert state["found"].startswith("Minimax/10Eros")
 
 
+def test_every_matching_checkpoint_is_reported(monkeypatch):
+    """The first match is not necessarily the one to render with.
+
+    A model folder can hold several generations of the same checkpoint - and 10Eros beta3/
+    beta4 are the author's own "corrupted test versions" that old downloads still contain.
+    """
+    names = [
+        "Minimax/10Eros_Max_h3_TURBO-hybrid_beta4_int8_convrot.safetensors",
+        "Minimax/10Eros_Max_h3_TURBO-hybrid_beta5_int8.safetensors",
+        "Minimax/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+    ]
+    monkeypatch.setattr(
+        help_mod, "_resolve_names",
+        lambda folder: list(names) if folder == "diffusion_models" else [],
+    )
+    monkeypatch.setattr(help_mod, "_resolve_paths", lambda folder: f"/models/{folder}")
+    state = {item["id"]: item for item in help_mod.check_requirements()}["unet"]
+    assert state["match_count"] == 3
+    assert sorted(state["matches"]) == sorted(names), "all of them, so a stale beta cannot hide"
+    assert "beta4" in state["found"] or "beta5" in state["found"]
+
+
+def test_the_guide_warns_about_the_beta4_trap():
+    """The 10Eros author's own words: beta_3 and beta_4 are corrupted test versions."""
+    requirement = next(req for req in help_mod.REQUIREMENTS if req.id == "unet")
+    text = " ".join(
+        [requirement.note]
+        + [part for section in help_mod.SECTIONS for part in (section.intro, *section.bullets)]
+    )
+    assert "beta5" in text, "the guide has to name the good one"
+    assert "beta4" in text or "beta_4" in text, "and warn about the bad ones"
+
+
 def test_the_check_never_raises_when_comfyui_is_absent(monkeypatch):
     """Import-time and runtime: the guide has to render even without folder_paths."""
     def boom(folder):

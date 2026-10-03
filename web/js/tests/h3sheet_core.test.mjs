@@ -1335,6 +1335,9 @@ ok.push("reorder / slot helpers behave");
               what: "The checkpoint that samples.", note: "", expect: ["10eros"],
               ok: true, file_ok: true, found: "Minimax/10Eros_Max_h3_TURBO-hybrid_beta5_int8.safetensors",
               looked: "/models/diffusion_models", packages: [], missing_packages: [],
+              matches: ["Minimax/10Eros_Max_h3_TURBO-hybrid_beta5_int8.safetensors",
+                        "Minimax/10Eros_Max_h3_TURBO-hybrid_beta4_int8_convrot.safetensors"],
+              match_count: 2,
               links: [{ label: "10Eros-Max", url: "https://huggingface.co/TenStrip/10Eros-Max/tree/main", note: "take a TURBO file" }] },
             { id: "clip", label: "Text encoder (Qwen3-VL)", node: "CLIPLoader",
               folder: "text_encoders", where: "ComfyUI/models/text_encoders/",
@@ -1381,6 +1384,8 @@ ok.push("reorder / slot helpers behave");
     assert.ok(reqs[0].classList.contains("mmx-req--ok"));
     assert.ok(reqs[0].textContent.includes("✓"), "a present file is ticked");
     assert.ok(reqs[0].textContent.includes("10Eros_Max_h3_TURBO-hybrid_beta5_int8"), "and named");
+    assert.ok(reqs[0].textContent.includes("also here: Minimax/10Eros_Max_h3_TURBO-hybrid_beta4"),
+        "a second match is listed too - the first one is not automatically the right one");
     assert.ok(reqs[1].classList.contains("mmx-req--missing"), "a missing file is flagged");
     assert.ok(reqs[1].textContent.includes("✗"));
     assert.ok(reqs[1].textContent.includes("ComfyUI/models/text_encoders/"), "with where it goes");
