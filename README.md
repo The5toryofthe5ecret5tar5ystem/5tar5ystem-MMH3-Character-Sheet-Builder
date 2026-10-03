@@ -258,6 +258,32 @@ Removing the widget (the frontend's own remover does `onRemove()` + `splice`, so
 move) leaves nothing to argue with. The sweep runs on every draw pass and on the 400ms keeper, because
 the frontend re-adds the widget whenever new outputs arrive.
 
+**The render mutes ComfyUI's own sampler preview.** Every mode above governs the *output*
+previews - the images the node produced - which the frontend sizes itself. There is a second,
+independent channel: while a sampler runs, ComfyUI can stream a per-step preview of the latent
+(TAESD/tiny-VAE or latent2rgb), which the frontend paints in the node's preview area *during* the
+render. The node never sees it: the sampler builds it in `latent_preview.prepare_callback` and
+sends it from the progress hook as a binary websocket frame. So a sheet render wraps the model with
+an `OUTER_SAMPLE` wrapper (`h3_character_sheet/preview_silence.py`) that swaps
+`decode_latent_to_preview_image` for a no-op while sampling runs and restores it in a `finally`,
+leaving the progress callback (and the progress bar) untouched. That is the lever KJNodes'
+*Model Preview Override* uses for its `suppress_default_preview`.
+
+Two things worth knowing:
+
+* **On this box it changes nothing you can see**, because the launcher passes no `--preview-method`
+  and ComfyUI's own default for that flag is `none`: the sampler was never producing previews here.
+  It matters on any install that enables them (`--preview-method auto|taesd|latent2rgb` - common in
+  other launchers), where a sheet render would otherwise stream a preview per step.
+* Set `"comfyPreview": true` in the node's `render` payload to keep that stream for a run (it
+  round-trips through the panel payload and the saved workflow). It is deliberate insurance rather
+  than a switch you need day to day.
+
+If you *want* a live preview during a sheet render, put *Model Preview Override* (KJNodes) between
+the UNET loader and this node: it decodes the latent itself with a tiny VAE (`taeh3` is already
+installed) and streams its own preview to its own panel widget, independent of the server's
+`--preview-method`. It also mutes the built-in stream itself, so the two behaviours do not fight.
+
 **Panel preview** is its own select next to *previews*: `Off` / `Small` (240px) / `Medium` (420px,
 default) / `Full width`. It sizes the sheet image the **panel** draws in its Results tab - the sheet
 plus the newest cell clip, both served from the output folder, both openable full size by clicking.

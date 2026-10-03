@@ -921,3 +921,27 @@ def test_cell_label_defaults_to_view_pose_and_expression():
     )
     assert "T-pose" in spec.cells[0].label
     assert "Smirk" in spec.cells[1].label
+
+
+# --------------------------------------------------------------------------- #
+# ComfyUI's own preview (off unless the payload asks for it)
+# --------------------------------------------------------------------------- #
+def test_comfy_preview_is_off_unless_the_payload_asks_for_it():
+    """The render mutes ComfyUI's own preview by default; the payload can keep it."""
+    assert ss.parse_sheet_spec("{}").render.comfy_preview is False
+    assert ss.parse_sheet_spec(_payload()).render.comfy_preview is False
+
+    kept = ss.parse_sheet_spec(_payload(render={"steps": 8, "comfyPreview": True}))
+    assert kept.render.comfy_preview is True
+
+    # Snake case, for payloads written by hand rather than by the panel.
+    assert ss.parse_sheet_spec({"render": {"comfy_preview": True}}).render.comfy_preview is True
+    # A string is not a truthy flag: only real boolean-ish values count.
+    assert ss.parse_sheet_spec({"render": {"comfyPreview": "false"}}).render.comfy_preview is False
+
+
+def test_comfy_preview_survives_the_round_trip():
+    spec = ss.parse_sheet_spec(_payload(render={"steps": 8, "comfyPreview": True}))
+    assert spec.to_dict()["render"]["comfyPreview"] is True
+    again = ss.parse_sheet_spec(spec.to_dict())
+    assert again.render.comfy_preview is True

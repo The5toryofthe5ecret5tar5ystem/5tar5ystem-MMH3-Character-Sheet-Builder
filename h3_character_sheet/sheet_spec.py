@@ -744,6 +744,11 @@ class SheetRenderSpec:
     #: still the deliverable; the clips are the takes it was picked from, and what feeds
     #: a finished video edit.
     export_video: bool = True
+    #: Keep ComfyUI's own per-step preview for this run. Off by default: the sampler's
+    #: preview stream is what puts a preview area under the node at all, and the sheet is
+    #: shown in the panel instead (see ``preview_silence``). Set ``render.comfyPreview``
+    #: when the preview is wanted - it is the switch the live A/B test renders flip.
+    comfy_preview: bool = False
     #: Which recommended preset these settings came from (see ``presets.py``). A record, not
     #: a lock: applied presets write their values, and editing a knob afterwards leaves the
     #: id in place so a sheet can still say how it started.
@@ -851,6 +856,8 @@ class SheetSpec:
                 # cells were chained or independent.
                 "continuity": self.render.continuity,
                 "exportVideo": bool(self.render.export_video),
+                # Round-trips so a run's own preview choice comes back with its settings.
+                "comfyPreview": bool(self.render.comfy_preview),
                 "preset": self.render.preset,
             },
             "cells": [
@@ -1301,6 +1308,9 @@ def parse_sheet_spec(raw: Any) -> SheetSpec:
         continuity=_parse_continuity(render_raw, warnings),
         export_video=_as_bool(
             render_raw.get("exportVideo", render_raw.get("export_video")), True
+        ),
+        comfy_preview=_as_bool(
+            render_raw.get("comfyPreview", render_raw.get("comfy_preview")), False
         ),
         preset=str(render_raw.get("preset") or "").strip(),
     )

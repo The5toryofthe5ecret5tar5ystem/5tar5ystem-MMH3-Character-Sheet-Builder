@@ -43,6 +43,7 @@ from ..planner import (
     work_summary,
 )
 from ..name_tokens import expand_tokens, has_tokens
+from ..preview_silence import silence_model_previews
 from ..sheet_plan import drop_empty_payload_warning, plan_payload
 from ..sheet_spec import (
     CELL_ASPECTS,
@@ -87,12 +88,20 @@ def build_sheet_graph(
     scheduler: str = "simple",
     export_video: bool = True,
     clip_fps: float = CLIP_FPS,
+    comfy_preview: bool = False,
+    node_id: Any = None,
 ) -> tuple[Any, Any, Any]:
     """Build the expansion; returns the (sheet, cells, report) output links.
 
     Split out of ``execute`` so the wiring can be asserted in tests without a GPU:
     it only builds graph nodes.
     """
+    # No ComfyUI preview for a sheet render: the pack draws the sheet in its own panel, and the
+    # sampler's own per-step preview is what puts a preview area under the node at all (see
+    # preview_silence). Wrapped BEFORE the sigma shift so every cell inherits it.
+    if not comfy_preview:
+        model = silence_model_previews(model, node_id=node_id)
+
     shifted_model = graph.node(
         "MiniMaxH3SigmaShift",
         id="sigma_shift",
@@ -589,6 +598,7 @@ class MiniMaxH3CharacterSheet(io.ComfyNode):
             sampler_name=str(sampler_name),
             scheduler=str(scheduler),
             export_video=bool(spec.render.export_video),
+            comfy_preview=bool(spec.render.comfy_preview),
         )
         for line in work_summary(spec, work_items):
             log.info("Character sheet: %s", line)
