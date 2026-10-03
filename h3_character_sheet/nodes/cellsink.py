@@ -41,7 +41,7 @@ class H3SheetCellSink(io.ComfyNode):
             node_id="H3SheetCellSink",
             display_name="H3 Sheet Cell Saver",
             description=(
-                "Internal to the Character Sheet Maker: saves one cell's frames as soon "
+                "Internal to the Character Sheet Builder: saves one cell's frames as soon "
                 "as that cell is rendered so the panel can show progress. Passes the "
                 "frames through to the sheet grid."
             ),

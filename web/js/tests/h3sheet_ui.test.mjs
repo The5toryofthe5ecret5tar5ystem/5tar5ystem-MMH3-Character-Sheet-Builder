@@ -1,4 +1,4 @@
-// Character Sheet Maker wiring contract (standalone pack).
+// Character Sheet Builder wiring contract (standalone pack).
 //
 // Guards the two things that silently produce a node with "no interface":
 // importing `app` from the wrong ComfyUI module (the whole panel module then fails

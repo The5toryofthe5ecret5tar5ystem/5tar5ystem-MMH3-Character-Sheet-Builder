@@ -1,4 +1,4 @@
-"""Character Sheet Maker - the per-cell clip export.
+"""Character Sheet Builder - the per-cell clip export.
 
 A sheet renders one short H3 clip per cell and, by default, keeps only the frames plus
 one picked frame per cell. The clip itself - 22 frames at H3's fixed 24 fps, with the

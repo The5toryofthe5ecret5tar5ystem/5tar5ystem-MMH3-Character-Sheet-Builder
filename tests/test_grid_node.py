@@ -1,4 +1,4 @@
-"""Character Sheet Maker - the grid node (frames in, sheet out).
+"""Character Sheet Builder - the grid node (frames in, sheet out).
 
 No GPU needed: fake IMAGE batches in, real files on disk out. Pinned here: slot
 ordering, keeping every frame, the pick contract, missing cells, and the tensors

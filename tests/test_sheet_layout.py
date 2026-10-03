@@ -1,4 +1,4 @@
-"""Character Sheet Maker - placement, compositing and frame picking.
+"""Character Sheet Builder - placement, compositing and frame picking.
 
 Pinned here:
 

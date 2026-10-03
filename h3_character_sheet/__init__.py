@@ -1,7 +1,7 @@
 # ComfyUI-H3-Character-Sheet
 # Distributed under GNU GPL v3.0. See repository LICENSE and NOTICE.
 
-"""Standalone MiniMax H3 character sheet maker for ComfyUI.
+"""Standalone MiniMax H3 character sheet builder for ComfyUI.
 
 Two nodes and an in-node panel:
 
@@ -45,7 +45,7 @@ else:
     }
 
     NODE_DISPLAY_NAME_MAPPINGS = {
-        "MiniMaxH3CharacterSheet": "MiniMax H3 Character Sheet Maker",
+        "MiniMaxH3CharacterSheet": "MiniMax H3 Character Sheet Builder",
         "H3SheetGrid": "H3 Character Sheet Grid",
         "H3SheetCellSink": "H3 Sheet Cell Saver (internal)",
         "H3SheetOrderGate": "H3 Sheet Order Gate (internal)",

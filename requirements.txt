@@ -1,4 +1,4 @@
-# 5tar5ystem MMH3 Character Sheet Maker - runtime requirements.
+# 5tar5ystem MMH3 Character Sheet Builder - runtime requirements.
 #
 # Everything this pack needs at runtime ships with ComfyUI itself:
 #   * the MiniMax H3 core nodes (comfy_extras/nodes_minimax_h3.py)

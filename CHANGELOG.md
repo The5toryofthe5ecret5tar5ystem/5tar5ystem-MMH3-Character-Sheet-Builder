@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to **5tar5ystem MMH3 Character Sheet Maker** are recorded here. This pack
+All notable changes to **5tar5ystem MMH3 Character Sheet Builder** are recorded here. This pack
 follows [semantic versioning](https://semver.org/): the node type (`MiniMaxH3CharacterSheet`) and
 the payload contract are what "breaking" refers to, not the panel's layout.
 
@@ -8,6 +8,10 @@ the payload contract are what "breaking" refers to, not the panel's layout.
 
 ### Changed
 
+* **Renamed to `5tar5ystem MMH3 Character Sheet Builder`** (it was "…Maker"): the repository, the
+  node's display name in ComfyUI's menu, the panel's Help title, the package metadata and the docs
+  all follow. Nothing technical moved - the node type (`MiniMaxH3CharacterSheet`), the pack folder
+  and the payload contract are unchanged, so saved workflows keep loading.
 * **The Settings tab is laid out in rows that mean something.** Every knob now declares which line
   of its group it belongs on (`row` in `knobs.py`), instead of the grid deciding: *Cell size /
   Cell shape / Frames*, then *Steps / Sampler / Scheduler*, then **the seed next to its *Seed
@@ -103,4 +107,4 @@ ComfyUI **core H3 nodes** - no other custom node pack required.
 * The standalone frontend tests are importable on a checkout that cannot install `node_modules`
   (jsdom is injected through `globalThis.__JSDOM__`).
 
-[1.0.0]: https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker/releases/tag/v1.0.0
+[1.0.0]: https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/releases/tag/v1.0.0

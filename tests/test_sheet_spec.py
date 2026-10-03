@@ -1,4 +1,4 @@
-"""Character Sheet Maker - spec parsing, vocabulary and prompt assembly.
+"""Character Sheet Builder - spec parsing, vocabulary and prompt assembly.
 
 Pinned here:
 

@@ -1,4 +1,4 @@
-// MiniMax H3 Character Sheet Maker — panel DOM + state (no ComfyUI imports).
+// MiniMax H3 Character Sheet Builder — panel DOM + state (no ComfyUI imports).
 //
 // Kept free of `app`/`api` on purpose: the panel's structure (drag-and-drop
 // reference tiles with roles, the cell matrix, the frame picker) is testable in

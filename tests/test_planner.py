@@ -1,4 +1,4 @@
-"""Character Sheet Maker - run planning (pack standalone, no ComfyUI needed).
+"""Character Sheet Builder - run planning (pack standalone, no ComfyUI needed).
 
 Pinned here: the cell work items the graph is built from (prompt / frames / seed /
 size), the reference slot mapping the core H3 node expects, and the payload the

@@ -1,7 +1,7 @@
 # MiniMax H3 Motion Director - character sheet HTTP routes.
 # Distributed under GNU GPL v3.0. See repository LICENSE.
 
-"""Character Sheet Maker backend: list a sheet, pick a frame, re-composite.
+"""Character Sheet Builder backend: list a sheet, pick a frame, re-composite.
 
 The node renders and writes everything (``director/sheet_pass.py`` +
 ``director/sheet_store.py``); these routes let the embedded panel work on a

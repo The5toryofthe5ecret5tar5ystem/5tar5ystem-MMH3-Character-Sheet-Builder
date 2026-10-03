@@ -1,7 +1,7 @@
 # ComfyUI-H3-Character-Sheet - the character sheet node.
 # Distributed under GNU GPL v3.0. See repository LICENSE.
 
-"""MiniMax H3 Character Sheet Maker.
+"""MiniMax H3 Character Sheet Builder.
 
 One node that renders a whole character sheet and returns it. It owns no model
 code: it expands into **ComfyUI core MiniMax H3 nodes** (one short render per cell)
@@ -332,7 +332,7 @@ class MiniMaxH3CharacterSheet(io.ComfyNode):
     def define_schema(cls) -> io.Schema:
         return io.Schema(
             node_id="MiniMaxH3CharacterSheet",
-            display_name="MiniMax H3 Character Sheet Maker",
+            display_name="MiniMax H3 Character Sheet Builder",
             category=_CATEGORY,
             description=(
                 "Render a character sheet from up to 9 picture / 3 video / 3 audio "
@@ -702,7 +702,7 @@ def _payload(sheet_data: Any) -> dict[str, Any]:
 
 NODE_CLASS_MAPPINGS = {"MiniMaxH3CharacterSheet": MiniMaxH3CharacterSheet}
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "MiniMaxH3CharacterSheet": "MiniMax H3 Character Sheet Maker"
+    "MiniMaxH3CharacterSheet": "MiniMax H3 Character Sheet Builder"
 }
 
 __all__ = [

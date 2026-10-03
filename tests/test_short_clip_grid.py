@@ -1,4 +1,4 @@
-"""Character Sheet Maker - short clips, the frame grid, and continuation.
+"""Character Sheet Builder - short clips, the frame grid, and continuation.
 
 H3 samples 5, 22, 39, 56... frames and nothing in between, so a requested length is rounded
 UP: asking for 8 or 12 frames renders 22. That matters twice over, and both halves are

@@ -1,4 +1,4 @@
-"""Character Sheet Maker - latent continuation between cells.
+"""Character Sheet Builder - latent continuation between cells.
 
 Cells are independent H3 clips: each one starts from its own noise and its own
 derived seed, which is what makes a sheet's poses independent. Continuation is the

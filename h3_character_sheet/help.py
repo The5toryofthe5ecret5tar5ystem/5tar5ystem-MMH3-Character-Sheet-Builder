@@ -1,4 +1,4 @@
-# 5tar5ystem MMH3 Character Sheet Maker - the in-node guide, as data.
+# 5tar5ystem MMH3 Character Sheet Builder - the in-node guide, as data.
 # Distributed under GNU GPL v3.0. See repository LICENSE.
 
 """The Help tab's content, and a live check of the files the node needs.
@@ -29,7 +29,7 @@ from typing import Any
 log = logging.getLogger("H3-Character-Sheet.help")
 
 #: The project's name (the repo, the README, the node's display name).
-PROJECT = "5tar5ystem MMH3 Character Sheet Maker"
+PROJECT = "5tar5ystem MMH3 Character Sheet Builder"
 
 #: Where the example workflow lives, relative to the pack, and its name in ComfyUI's list.
 EXAMPLE_WORKFLOW = "example_workflows/5tar5ystem MMH3 Character Sheet Builder.json"

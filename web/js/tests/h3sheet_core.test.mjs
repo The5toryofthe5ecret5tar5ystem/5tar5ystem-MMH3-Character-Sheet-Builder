@@ -1,4 +1,4 @@
-// Character Sheet Maker panel (jsdom): the interface a user actually sees.
+// Character Sheet Builder panel (jsdom): the interface a user actually sees.
 //
 // Two regressions are pinned here:
 //   1. the bug that shipped first - the node rendered its knobs with no interface
@@ -1710,7 +1710,7 @@ ok.push("reorder / slot helpers behave");
     // Served by help.py, so the panel cannot drift from what the node loads. The check reads
     // the RUNNING install: a ✗ has to say where the file goes and where to get it.
     const HELP_FIXTURE = {
-        project: "5tar5ystem MMH3 Character Sheet Maker",
+        project: "5tar5ystem MMH3 Character Sheet Builder",
         ready: false,
         missing: ["Text encoder (Qwen3-VL)", "Face detector (only for the face blur)"],
         missing_packages: ["ultralytics"],
@@ -1801,7 +1801,7 @@ ok.push("reorder / slot helpers behave");
     assert.ok(face.textContent.includes("pip install ultralytics"), "with the command that fixes it");
     assert.ok(!face.textContent.includes("expect a file named like"),
         "a package problem must not be reported as a missing file");
-    assert.ok(help.textContent.includes("5tar5ystem MMH3 Character Sheet Maker"), "the project name");
+    assert.ok(help.textContent.includes("5tar5ystem MMH3 Character Sheet Builder"), "the project name");
     assert.ok(help.textContent.includes("2 of 3 required files are missing or unusable"),
         "the header counts what is unusable, not just what is absent");
     assert.ok(help.textContent.includes("python package: ultralytics"), "and names it up front");

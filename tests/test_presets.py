@@ -1,4 +1,4 @@
-"""Character Sheet Maker - the recommended whole-node presets.
+"""Character Sheet Builder - the recommended whole-node presets.
 
 Presets are data, not prose: each one has to survive the real spec parser, name only real
 node widgets, and describe a configuration that is actually coherent (a 5-frame preset

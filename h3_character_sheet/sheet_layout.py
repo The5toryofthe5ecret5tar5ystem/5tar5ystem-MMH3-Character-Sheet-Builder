@@ -1,7 +1,7 @@
 # MiniMax H3 Motion Director - character sheet layout and compositing.
 # Distributed under GNU GPL v3.0. See repository LICENSE.
 
-"""Character Sheet Maker: cell placement, frame picking and sheet compositing.
+"""Character Sheet Builder: cell placement, frame picking and sheet compositing.
 
 The sheet is composited locally with PIL from the frames the H3 render produced,
 so a sheet can be rebuilt (different layout, different picked frames) without

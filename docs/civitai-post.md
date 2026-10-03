@@ -1,4 +1,4 @@
-# Civitai post - 5tar5ystem MMH3 Character Sheet Maker (v1.0.0)
+# Civitai post - 5tar5ystem MMH3 Character Sheet Builder (v1.0.0)
 
 Copy from the line below into the Civitai article/description, then attach the images from
 `images/` in the repo (they are the ones the README shows).
@@ -13,7 +13,7 @@ Suggested gallery order, and what each one is:
 
 ---
 
-# 5tar5ystem MMH3 Character Sheet Maker - turn your references into a finished H3 character sheet
+# 5tar5ystem MMH3 Character Sheet Builder - turn your references into a finished H3 character sheet
 
 Make a **character sheet** for MiniMax H3 out of the photos, videos and audio you already have:
 say what each reference is for, tick the views / poses / expressions you want, and get one
@@ -22,10 +22,10 @@ composited sheet you can feed straight back into a **ref2va** workflow as a sing
 Built for ComfyUI's MiniMax H3. Renders on **ComfyUI core H3 nodes** - this pack adds the sheet,
 nothing else.
 
-**Node pack (GitHub):** https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker
-**Release page (v1.0.0):** https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker/releases/tag/v1.0.0
-**Ready-made workflow** (drag it onto the canvas): https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker/blob/main/example_workflows/5tar5ystem%20MMH3%20Character%20Sheet%20Builder.json
-**Workflow, direct download** (no GitHub account needed): https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker/releases/download/v1.0.0/5tar5ystem.MMH3.Character.Sheet.Builder.json
+**Node pack (GitHub):** https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder
+**Release page (v1.0.0):** https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/releases/tag/v1.0.0
+**Ready-made workflow** (drag it onto the canvas): https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/blob/main/example_workflows/5tar5ystem%20MMH3%20Character%20Sheet%20Builder.json
+**Workflow, direct download** (no GitHub account needed): https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/releases/download/v1.0.0/5tar5ystem.MMH3.Character.Sheet.Builder.json
 **Full manual:** the README in the repo (every knob, every option) - in-node too: the node's **Help** tab carries the same guide and checks your model files for you (✓/✗ with the exact folder to drop each one in).
 
 ## What it does
@@ -57,7 +57,7 @@ Both sheets above are straight out of the node, captions included. The panel sho
 ## Install (the node)
 
 1. **ComfyUI-Manager** → *Custom Nodes Manager* → search **MMH3 Character Sheet** (publisher `5tar5ystem`) → Install.
-   By hand instead: `cd ComfyUI/custom_nodes && git clone https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker.git ComfyUI-H3-Character-Sheet`
+   By hand instead: `cd ComfyUI/custom_nodes && git clone https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder.git ComfyUI-H3-Character-Sheet`
 2. **Restart ComfyUI**, then hard-refresh the browser (`Ctrl+Shift+R`).
 3. Load the **ready-made workflow** above (drag it onto the canvas) - it already wires the H3 ref2va checkpoint, the Qwen3-VL text encoder, both VAEs and a SaveImage, and pre-builds a 5-cell matrix.
 

@@ -1,4 +1,4 @@
-// MiniMax H3 Character Sheet Maker — panel wiring.
+// MiniMax H3 Character Sheet Builder — panel wiring.
 //
 // The panel itself lives in `h3sheet_core.mjs` (no ComfyUI imports, so its DOM is
 // testable in jsdom). This file does the four things that need ComfyUI:

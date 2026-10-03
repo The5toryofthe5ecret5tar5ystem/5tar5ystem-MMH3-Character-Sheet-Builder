@@ -50,7 +50,7 @@ class H3SheetGrid(io.ComfyNode):
                     "sheet_data",
                     default="",
                     multiline=True,
-                    tooltip="Sheet payload written by the Character Sheet Maker node / panel.",
+                    tooltip="Sheet payload written by the Character Sheet Builder node / panel.",
                 ),
                 io.String.Input("name", default="character_sheet", tooltip="Sheet folder and file name."),
                 io.Boolean.Input(

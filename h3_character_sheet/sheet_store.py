@@ -1,7 +1,7 @@
 # MiniMax H3 Motion Director - character sheet on-disk store.
 # Distributed under GNU GPL v3.0. See repository LICENSE.
 
-"""Character Sheet Maker: where a sheet's frames, picks and composites live.
+"""Character Sheet Builder: where a sheet's frames, picks and composites live.
 
 Layout (user-facing on purpose - a sheet is an asset you keep and reuse)::
 

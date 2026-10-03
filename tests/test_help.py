@@ -1,4 +1,4 @@
-# 5tar5ystem MMH3 Character Sheet Maker - the in-node guide and its live file check.
+# 5tar5ystem MMH3 Character Sheet Builder - the in-node guide and its live file check.
 # Distributed under GNU GPL v3.0. See repository LICENSE.
 
 """The Help tab is documentation, and documentation goes stale silently.

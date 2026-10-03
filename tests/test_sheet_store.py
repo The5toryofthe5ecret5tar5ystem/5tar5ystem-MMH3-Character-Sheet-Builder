@@ -1,4 +1,4 @@
-"""Character Sheet Maker - the on-disk store (frames, picks, composites).
+"""Character Sheet Builder - the on-disk store (frames, picks, composites).
 
 Pinned here:
 

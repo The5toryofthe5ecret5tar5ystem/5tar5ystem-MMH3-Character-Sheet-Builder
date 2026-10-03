@@ -1,13 +1,13 @@
 {
-  "name": "5tar5ystem-mmh3-character-sheet-maker",
+  "name": "5tar5ystem-mmh3-character-sheet-builder",
   "version": "1.0.0",
   "private": true,
   "license": "GPL-3.0-only",
-  "description": "Frontend tests for the MMH3 Character Sheet Maker panel (jsdom; no bundler, no build step).",
+  "description": "Frontend tests for the MMH3 Character Sheet Builder panel (jsdom; no bundler, no build step).",
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker.git"
+    "url": "https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder.git"
   },
   "scripts": {
     "test": "node scripts/run_js_tests.mjs"

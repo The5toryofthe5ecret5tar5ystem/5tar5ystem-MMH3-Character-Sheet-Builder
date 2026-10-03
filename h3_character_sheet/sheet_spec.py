@@ -1,7 +1,7 @@
 # MiniMax H3 Motion Director - character sheet specification (views/poses/expressions).
 # Distributed under GNU GPL v3.0. See repository LICENSE.
 
-"""Character Sheet Maker: the sheet specification and its prompt assembly.
+"""Character Sheet Builder: the sheet specification and its prompt assembly.
 
 A *sheet* is a small matrix of single-character images ("cells") that a user can
 feed back into an r2v/ref2va workflow as a reference set. Every cell is rendered

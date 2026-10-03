@@ -1,14 +1,14 @@
-# 5tar5ystem MMH3 Character Sheet Maker
+# 5tar5ystem MMH3 Character Sheet Builder
 
-**Repo**: [The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker](https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker) ·
+**Repo**: [The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder](https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder) ·
 **License**: GPL-3.0 · **ComfyUI node**: `MiniMaxH3CharacterSheet` · **Installs as**: a
 custom-node folder (any name), typically `ComfyUI-H3-Character-Sheet`
 **Version**: 1.0.0 (initial release) · [`CHANGELOG.md`](CHANGELOG.md) ·
-[releases](https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker/releases) ·
+[releases](https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/releases) ·
 [`docs/civitai-post.md`](docs/civitai-post.md) is the short public writeup (features, model
 links, install steps)
 
-Standalone **MiniMax H3 character sheet maker** for ComfyUI: give it photos, videos
+Standalone **MiniMax H3 character sheet builder** for ComfyUI: give it photos, videos
 and audio of a person, say what each reference is for, pick a matrix of views /
 poses / expressions, and get a composited character sheet you can feed straight
 back into a **ref2va** workflow as a single reference image.
@@ -123,7 +123,7 @@ more - but the ratio between the two tiers is what to plan around.
 
 | Node | What it does |
 |---|---|
-| `MiniMax H3 Character Sheet Maker` | The whole feature: references + cells -> N short H3 renders -> `H3SheetGrid`. Outputs `sheet` (IMAGE), `cells` (IMAGE batch) and `report`. |
+| `MiniMax H3 Character Sheet Builder` | The whole feature: references + cells -> N short H3 renders -> `H3SheetGrid`. Outputs `sheet` (IMAGE), `cells` (IMAGE batch) and `report`. |
 | `H3 Character Sheet Grid` | Composites a sheet from per-cell frames. Use it on its own to re-composite a finished sheet, or with any other H3 workflow. |
 
 ## Using it
@@ -217,7 +217,7 @@ If a "reference" backdrop points at a slot that has since been emptied or unchec
 falls back to the neutral backdrop and says so in the plan warnings, rather than rendering a
 setting nobody chose.
 
-1. Add **MiniMax H3 Character Sheet Maker** and connect `model`, `video_vae`,
+1. Add **MiniMax H3 Character Sheet Builder** and connect `model`, `video_vae`,
    `audio_vae`, `clip` (the same loaders any H3 workflow uses).
 2. In the node's panel, fill the three **References** cards - **9 pictures, 3 videos,
    3 audios** - and say who the character is. Each card starts as a single dashed tile
@@ -765,7 +765,7 @@ a closer cell - set that cell (or the sheet) to `auto`.
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker.git \
+git clone https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder.git \
   ComfyUI-H3-Character-Sheet
 # restart ComfyUI, then hard-refresh the browser (Ctrl+Shift+R)
 ```

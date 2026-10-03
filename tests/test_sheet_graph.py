@@ -1,4 +1,4 @@
-"""Character Sheet Maker - the expansion into ComfyUI core MiniMax H3 nodes.
+"""Character Sheet Builder - the expansion into ComfyUI core MiniMax H3 nodes.
 
 This is the independence test as much as a wiring test: the graph the sheet node
 builds may only contain ComfyUI core nodes plus this pack's own grid node. If a
