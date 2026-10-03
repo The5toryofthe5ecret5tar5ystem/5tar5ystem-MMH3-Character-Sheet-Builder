@@ -113,8 +113,9 @@ ok.push("panel mounts as an in-node container (no popup, not in document.body)")
 assert.equal(panel.container.querySelectorAll(".mmx-card--refs").length, 1, "one unified reference card");
 assert.equal(panel.container.querySelectorAll(".mmx-sheet-ref").length, 0, "no reference tiles before anything is added");
 const refBox = () => panel.container.querySelector(".mmx-refbox");
-assert.ok(refBox(), "the references live in one fixed-size box");
-assert.equal(refBox().style.height, `${core.REF_SECTION.height}px`, "the box has a static height");
+assert.ok(refBox(), "the references live in one box");
+assert.equal(refBox().style.minHeight, `${core.REF_SECTION.height}px`,
+    "the box's height is a FLOOR: it grows with the pane so a taller node shows bigger tiles");
 let addTiles = panel.container.querySelectorAll(".mmx-tile--add");
 assert.equal(addTiles.length, 1, "one Add Media tile, not one per kind");
 assert.ok(addTiles[0].textContent.includes("Add Media"), "the tile says Add Media");
@@ -752,16 +753,31 @@ ok.push("reorder / slot helpers behave");
     assert.ok(core.panelFitHeight({}) >= core.PANEL_FIT.headerTop, "garbage in, a sane floor out");
     assert.equal(core.panelFitHeight({ top: 86, panelHeight: 0, rows: 0 }), 106,
         "an empty panel keeps the header and the pad");
+    // The ceiling: panes grow with their content, so a long Results list must not ask for a
+    // 3000px node. Past the ceiling the pane scrolls again.
+    assert.equal(core.PANEL_FIT.maxHeight, 1200, "a fallback ceiling when there is no viewport");
+    assert.equal(core.panelFitHeight({ top: 86, panelHeight: 5000, rows: 0 }), 1200,
+        "content taller than the ceiling is clamped to it");
+    assert.equal(core.panelFitHeight({ top: 86, panelHeight: 5000, rows: 0, ceiling: 900 }), 900,
+        "and the wiring can pass its own (viewport-derived) ceiling");
+    assert.equal(core.panelFitHeight({ top: 86, panelHeight: 400, rows: 0, ceiling: 900 }), 506,
+        "content under the ceiling is untouched");
 
     const stylesheet = panel.container.querySelector("style")?.textContent || "";
-    assert.ok(/\.mmx-pane\.is-active\s*\{[^}]*max-height:/.test(stylesheet),
-        "a long Results list scrolls inside the panel instead of growing the node");
-    const settingsRule = stylesheet.match(/\.mmx-pane--settings\.is-active\s*\{([^}]*)\}/);
-    assert.ok(settingsRule, "the settings pane must have its own rule, after the capped one");
-    assert.ok(/max-height:\s*none/.test(settingsRule[1]),
-        "the settings grid is not capped: it is the pane that exists to show every knob at once");
-    assert.ok(stylesheet.indexOf(".mmx-pane--settings.is-active") > stylesheet.indexOf(".mmx-pane.is-active {"),
-        "and it has to come after the rule it overrides");
+    // Every pane fills the panel: a capped pane left empty space under the content of a node
+    // that was already tall enough (the settings grid was the first one to be fixed).
+    const paneRule = stylesheet.match(/\.mmx-pane\.is-active\s*\{([^}]*)\}/);
+    assert.ok(paneRule, "the active pane has a rule");
+    assert.ok(/flex:\s*1 1 auto/.test(paneRule[1]), "it claims the leftover height");
+    assert.ok(/min-height:\s*0/.test(paneRule[1]), "and may shrink, or flex never lets it scroll");
+    assert.ok(/overflow-y:\s*auto/.test(paneRule[1]), "scrolling only when the content is taller");
+    assert.ok(!/max-height/.test(paneRule[1]), "no fixed height cap any more");
+    assert.ok(!/\.mmx-pane--settings\.is-active\s*\{/.test(stylesheet),
+        "the settings-only exception is gone: it is the general behaviour now");
+    assert.ok(/\.mmx-sheet\s*\{[^}]*display:\s*flex/.test(stylesheet),
+        "the panel is a column, so the pane can fill it");
+    assert.ok(!/width:\s*640px/.test(stylesheet) && /\.mmx-card--refs\s*\{[^}]*flex:\s*1 1 auto/.test(stylesheet),
+        "the references card stretches its box instead of sitting at a fixed height");
     // A JS-style comment in a stylesheet swallows the NEXT rule, and if that rule is
     // the active pane the whole panel renders blank - it shipped once, so pin it.
     assert.ok(!/^\s*\/\//m.test(stylesheet), "the stylesheet must use /* */ comments only");
@@ -1564,6 +1580,85 @@ ok.push("reorder / slot helpers behave");
     assert.ok(/color:\s*var\(--mmx-build/.test(rule[1]), "same colour for the label");
     assert.ok(/\.mmx-btn--build:hover\s*\{/.test(styles), "with a hover state that fills in");
     ok.push("Build cells is outlined in yellow-orange (the rest of the buttons stay quiet)");
+}
+
+// --- auto-refresh is off by default, and Refresh is a button ---------------------
+// Polling the sheet folder is a background read the user did not ask for; the Results tab is
+// one click (or one button) away. A run still polls while it renders, so cells appear as they
+// land - that timer stops with the run.
+{
+    let listed = 0;
+    const notices = [];
+    const state = core.readState("");
+    const panel = core.buildSheetInterface({
+        state,
+        hooks: {
+            status: (text) => notices.push(String(text)),
+            listResults: async () => { listed += 1; return null; },
+        },
+    });
+    await tick();
+    await tick();
+    const auto = panel.container.querySelector("[data-mmx-sheet-auto]");
+    assert.ok(auto, "the header still offers the auto-refresh switch");
+    assert.equal(auto.checked, false, "off by default");
+    assert.equal(panel.autoRefresh.checked, false);
+    assert.equal(core.autoRefresh({}), false, "and the payload default agrees");
+    assert.equal(core.readState(JSON.stringify({ ui: { autoRefresh: true } })).autoRefresh, true,
+        "a workflow that turned it on keeps it");
+    assert.equal(core.toPayload(core.readState("")).ui.autoRefresh, false);
+    auto.checked = true;
+    auto.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    assert.equal(state.autoRefresh, true, "the switch is remembered");
+
+    // The manual refresh: one read of the sheet folder per press.
+    const refresh = panel.container.querySelector('[data-action="refresh-results"]');
+    assert.ok(refresh, "the header offers a Refresh button");
+    assert.equal(refresh.textContent, "Refresh");
+    const before = listed;
+    click(refresh);
+    await tick();
+    await tick();
+    assert.ok(listed > before, "pressing it re-reads the results");
+    assert.ok(notices.some((text) => text.includes("refreshed")), "and says so");
+    ok.push("auto-refresh off by default, Refresh does one read on demand");
+}
+
+// --- the tabs use the space they are given --------------------------------------
+// The reference tiles and the paint surface are measured into their box, so a node the user
+// resized must re-lay-out instead of keeping the small layout with empty space around it.
+{
+    const observed = [];
+    class FakeObserver {
+        constructor(callback) { this.callback = callback; observed.push(this); }
+        observe(target) { this.target = target; }
+        disconnect() { this.disconnected = true; }
+    }
+    const previous = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = FakeObserver;
+    try {
+        const panel = core.buildSheetInterface({
+            state: core.readState(""), hooks: { status: () => {}, listResults: async () => null },
+        });
+        assert.equal(observed.length, 1, "the panel watches its own size");
+        assert.equal(observed[0].target, panel.container, "the container is the observed element");
+        // A resize that matters re-renders the visible tab (debounced); jitter does not.
+        const before = panel.container.querySelectorAll(".mmx-sheet-ref").length
+            || panel.container.textContent.length;
+        Object.defineProperty(panel.container, "clientHeight", { value: 900, configurable: true });
+        Object.defineProperty(panel.container, "clientWidth", { value: 800, configurable: true });
+        panel.noteResize();
+        await tick();
+        await tick();
+        assert.ok(panel.container.textContent.length > 0, "the tab is still rendered");
+        assert.ok(before >= 0);
+        panel.dispose();
+        assert.ok(observed[0].disconnected, "dispose stops watching");
+    } finally {
+        if (previous === undefined) delete globalThis.ResizeObserver;
+        else globalThis.ResizeObserver = previous;
+    }
+    ok.push("a resized node re-lays-out the tab (ResizeObserver, debounced)");
 }
 
 console.log("h3sheet_core: PASS");

@@ -395,6 +395,11 @@ export function compactKnobs(state) {
     return state?.compactKnobs !== false;
 }
 
+/** Auto-refresh (the background poll of the sheet folder) - off unless a workflow says so. */
+export function autoRefresh(state) {
+    return state?.autoRefresh === true;
+}
+
 /** The value the node's widget should get from a panel control. */
 export function knobValue(knob, raw) {
     if (!knob) return raw;
@@ -531,7 +536,12 @@ export const REF_SECTION = { height: 178, width: 640, gap: 6, roleHeight: 24, mi
 //: keeps 20px below the panel of its own (measured: node height - widget.y - panel
 //: clientHeight). The node is exactly as tall as that stack - a node taller than its panel
 //: is the runaway "very very tall node" state, which only ever grows on its own.
-export const PANEL_FIT = { headerTop: 86, rowGap: 20, rowHeight: 24, bottomPad: 20 };
+//:
+//: `maxHeight` is the ceiling for that stack: panes grow with their content now, so without
+//: it a 110-thumbnail Results list would ask for a 3000px node. Past the ceiling the pane
+//: scrolls again - inside a node that is already as tall as the screen. The wiring prefers a
+//: viewport-derived ceiling and falls back to this one.
+export const PANEL_FIT = { headerTop: 86, rowGap: 20, rowHeight: 24, bottomPad: 20, maxHeight: 1200 };
 
 /** Height the node needs for this panel: header + panel + knob rows.
  *
@@ -540,14 +550,16 @@ export const PANEL_FIT = { headerTop: 86, rowGap: 20, rowHeight: 24, bottomPad: 
  * this number - otherwise a sheet that was tall while it was rendering stays tall
  * for good, leaving a huge empty area under the panel.
  */
-export function panelFitHeight({ top, panelHeight, rows, rowsHeight } = {}) {
+export function panelFitHeight({ top, panelHeight, rows, rowsHeight, ceiling } = {}) {
     const header = Number.isFinite(top) && top > 0 ? Number(top) : PANEL_FIT.headerTop;
     const height = Math.max(0, Number(panelHeight) || 0);
     const knobHeight = Number.isFinite(rowsHeight)
         ? Math.max(0, Number(rowsHeight))
         : Math.max(0, Number(rows) || 0) * PANEL_FIT.rowHeight;
     const gap = knobHeight > 0 ? PANEL_FIT.rowGap : 0;
-    return Math.round(header + height + gap + knobHeight + PANEL_FIT.bottomPad);
+    const wanted = Math.round(header + height + gap + knobHeight + PANEL_FIT.bottomPad);
+    const limit = Number.isFinite(ceiling) && ceiling > 0 ? Number(ceiling) : PANEL_FIT.maxHeight;
+    return Math.min(wanted, Math.round(limit));
 }
 
 /** The reference group for a media kind. */
@@ -640,6 +652,8 @@ export const PANEL_CSS = `
   --mmx-accent: var(--p-primary-color, #4f8cff);
   --mmx-danger: #e05561;
   width: 100%; height: 100%; box-sizing: border-box; overflow: auto;
+  /* Column layout so the active pane can claim the leftover height (see .mmx-pane). */
+  display: flex; flex-direction: column;
   padding: 6px; font-size: 11px; line-height: 1.35;
   background: var(--mmx-bg); color: var(--mmx-fg);
   font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
@@ -694,17 +708,16 @@ export const PANEL_CSS = `
   border-bottom: none; border-radius: 6px 6px 0 0; padding: 4px 10px; cursor: pointer; font-size: 11px;
 }
 .mmx-tab.is-active { background: var(--mmx-card); color: var(--mmx-fg); border-color: var(--mmx-line); }
-/* One pane at a time. A long pane (a run's 110 frame thumbnails) scrolls INSIDE the
-   panel instead of growing the node: the node is only as tall as panel + knobs.
-   Keep these as real CSS comments - a double-slash line in here eats the whole next
-   rule, and then every tab renders blank. */
+/* The panel is a column and the ACTIVE PANE fills what is left of it. Panes used to cap
+   themselves at 520px "so a long Results list scrolls inside the panel" - which left an empty
+   box under the content of a node the user had already made tall enough (every tab, not just
+   the settings one). Now a pane grows with its content, the node fit measures that and sizes
+   the node to it, and the ceiling in PANEL_FIT is what stops a 110-thumbnail Results list
+   from making a 3000px node - past the ceiling the pane scrolls again, but inside a node that
+   is already full-height. Keep these as real CSS comments: a double-slash line in here eats
+   the whole next rule, and then every tab renders blank. */
 .mmx-pane { display: none; }
-.mmx-pane.is-active { display: block; max-height: 520px; overflow-y: auto; }
-/* The Settings grid is the exception to that cap: it is the one pane whose whole purpose is
-   "every knob at once", its content is bounded (a few dozen fields), and a scrollbar inside a
-   node the user has already made big enough is exactly what this tab exists to avoid. The
-   wiring then grows the node to fit it (see fitNodeToPanel) instead of scrolling it. */
-.mmx-pane--settings.is-active { max-height: none; }
+.mmx-pane.is-active { display: block; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .mmx-card {
   background: var(--mmx-card); border: 1px solid var(--mmx-line); border-radius: 8px;
   padding: 6px; margin: 0 0 8px;
@@ -714,12 +727,17 @@ export const PANEL_CSS = `
 .mmx-label { font-size: 10px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; color: var(--mmx-muted); }
 .mmx-count { font-size: 10px; color: var(--mmx-muted); }
 .mmx-grid { display: grid; gap: 6px; align-items: start; }
-/* One grid for every reference. Fixed height, tiles sized to fit inside. */
+/* One grid for every reference. Tiles are sized to fit the box, and the box FILLS the space
+   the card has in the pane (the tile maths reads clientHeight/clientWidth), so a taller node
+   means bigger tiles instead of a 178px strip with empty space under it. 178px is the floor. */
 .mmx-refbox {
   display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px;
+  flex: 1 1 auto; min-height: 178px;
   padding: 4px; box-sizing: border-box; overflow: auto;
   background: rgba(0,0,0,.14); border: 1px solid var(--mmx-line); border-radius: 6px;
 }
+/* The references card is the one card that stretches: its head stays put, its box grows. */
+.mmx-card--refs { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .mmx-refbox .mmx-sheet-ref { flex: 0 0 auto; }
 .mmx-refbox .mmx-tile { width: 100%; max-height: none; }
 .mmx-refbox .mmx-role { font-size: 10px; height: 20px; padding: 0 4px; }
@@ -967,8 +985,10 @@ export function readState(payload) {
         presetId: String(data.render?.preset || ""),
         // Whether the node keeps its own knob rows or lets the panel draw them.
         compactKnobs: data?.ui?.compactKnobs !== false,
-        // How big ComfyUI's own output previews under the panel are allowed to be.
+        // How big ComfyUI's own output previews under the panel may be.
         nodePreviews: nodePreviews({ nodePreviews: data?.ui?.nodePreviews }),
+        // Whether the panel polls the sheet folder on its own (off by default).
+        autoRefresh: autoRefresh({ autoRefresh: data?.ui?.autoRefresh }),
         build: {
             views: Array.isArray(data.build?.views) ? data.build.views.map(String) : ["face", "front"],
             poses: Array.isArray(data.build?.poses) ? data.build.poses.map(String) : ["neutral"],
@@ -1004,7 +1024,11 @@ export function toPayload(state) {
     if (String(state?.presetId || "").trim()) payload.render.preset = String(state.presetId).trim();
     // A view preference, not a render setting: it decides whether the node draws its own
     // knob rows or leaves that to the panel. Recorded so it survives a reload.
-    payload.ui = { compactKnobs: compactKnobs(state), nodePreviews: nodePreviews(state) };
+    payload.ui = {
+        compactKnobs: compactKnobs(state),
+        nodePreviews: nodePreviews(state),
+        autoRefresh: autoRefresh(state),
+    };
     for (const group of REF_GROUPS) {
         payload.refs[group.key] = (state.refs?.[group.key] || [])
             .filter((item) => item && item.file)
@@ -1211,10 +1235,29 @@ export function buildSheetInterface({ state, hooks = {} }) {
             }
         }),
     );
-    const auto = element("input", { type: "checkbox", checked: true });
-    auto.title = "Poll the sheet folder while the panel is open";
+    // Auto-refresh OFF by default: polling the sheet folder is a background read the user did
+    // not ask for, and the Results tabs are one click away. The button beside it does the same
+    // read once, on demand. (A run still polls while it renders, so cells appear as they land -
+    // that timer stops with the run.) The choice is remembered in the payload.
+    const auto = element("input", { type: "checkbox", checked: autoRefresh(state) });
+    auto.title = "Poll the sheet folder in the background (off: use Refresh)";
     auto.dataset.mmxSheetAuto = "1";
-    header.append(auto, element("span", { textContent: "auto-refresh", className: "mmx-muted" }));
+    auto.addEventListener("change", () => {
+        state.autoRefresh = auto.checked;
+        persist();
+        notify(auto.checked ? "auto-refresh on - the Results tab follows the sheet folder" : "auto-refresh off - use Refresh");
+    });
+    const refreshButton = button("Refresh", async () => {
+        await refreshResults();
+        notify("results refreshed from the sheet folder");
+    });
+    refreshButton.dataset.action = "refresh-results";
+    refreshButton.title = "Read the sheet folder again (new cells, new picks, new clips)";
+    header.append(
+        refreshButton,
+        auto,
+        element("span", { textContent: "auto-refresh", className: "mmx-muted" }),
+    );
     container.append(header);
 
     // -------------------------------------------------------------- presets
@@ -2224,7 +2267,10 @@ export function buildSheetInterface({ state, hooks = {} }) {
         );
 
         const boxHost = element("div", { className: "mmx-refbox" });
-        boxHost.style.height = `${REF_SECTION.height}px`;
+        // The floor only: the box grows with the pane (`.mmx-refbox` is a flex item), and the
+        // tile maths below reads its live clientHeight/clientWidth, so a taller or wider node
+        // means bigger tiles rather than a 178px strip with empty space beneath it.
+        boxHost.style.minHeight = `${REF_SECTION.height}px`;
         renderedTiles = [];
         for (const entry of filled) boxHost.append(tile(entry.group, entry.index, entry.ordinal));
         if (filled.length < capacity) boxHost.append(addMediaTile({ empty: filled.length === 0 }));
@@ -3283,6 +3329,7 @@ export function buildSheetInterface({ state, hooks = {} }) {
     function dispose() {
         if (liveTimer) clearInterval(liveTimer);
         liveTimer = null;
+        disposeObservers();
     }
 
     /**
@@ -3301,6 +3348,11 @@ export function buildSheetInterface({ state, hooks = {} }) {
         // A loaded workflow can carry a different compact preference and different knob
         // values, and the fields here must show what will actually render.
         state.compactKnobs = compactKnobs(fresh);
+        // ...and its own answer to "should the panel poll the sheet folder?", which the header
+        // switch has to agree with.
+        state.autoRefresh = autoRefresh(fresh);
+        auto.checked = state.autoRefresh;
+        previewSelect.value = nodePreviews(fresh);
         syncSettings();
         refresh();
         return state;
@@ -3324,12 +3376,51 @@ export function buildSheetInterface({ state, hooks = {} }) {
         }
     });
 
+    // Re-lay-out the content when the node is resized.
+    //
+    // The tabs are built from the space they are given: the reference tiles are measured into
+    // the box, the paint surface scales the picture into the pane, the results grid wraps. All
+    // of that was computed once at render time, so a node the user made taller or wider kept
+    // the small layout with empty space around it. The container's size comes from the node
+    // (height: 100%), so re-rendering into it cannot start a resize loop.
+    let lastSize = { width: 0, height: 0 };
+    let relayoutTimer = null;
+    const observers = [];
+    function observeResize() {
+        noteResize();
+        if (typeof ResizeObserver !== "function") return;
+        const observer = new ResizeObserver(() => noteResize());
+        observer.observe(container);
+        observers.push(observer);
+    }
+
+    function noteResize() {
+        const width = Number(container.clientWidth) || 0;
+        const height = Number(container.clientHeight) || 0;
+        if (Math.abs(width - lastSize.width) < 12 && Math.abs(height - lastSize.height) < 12) return;
+        lastSize = { width, height };
+        clearTimeout(relayoutTimer);
+        // Debounced: a drag emits a stream of sizes and only the last one matters.
+        relayoutTimer = setTimeout(() => {
+            relayoutTimer = null;
+            renderReferences();
+            refreshTabs();
+        }, 180);
+    }
+
+    function disposeObservers() {
+        clearTimeout(relayoutTimer);
+        relayoutTimer = null;
+        while (observers.length) observers.pop()?.disconnect?.();
+    }
+
     showTab("references");
     refresh();
     renderResults(null);
+    observeResize();
     return {
         container, status, results, refresh, renderResults, refreshResults, refreshTabs,
-        refreshPlan, refreshSettings, syncSettings, renderHelp,
+        refreshPlan, refreshSettings, syncSettings, renderHelp, noteResize,
         autoRefresh: auto, openBrowse, openPreview, closeOverlay, showTab, setState, dispose,
         setRunning,
         get activeTab() { return activeTab; },

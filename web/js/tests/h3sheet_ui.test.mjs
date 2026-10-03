@@ -83,7 +83,7 @@ assert.ok(wiring.includes("`/media?${params.toString()}`"), "the hook must call 
 assert.ok(wiring.includes('api.fetchApi("/upload/image"'), "drops must upload through core /upload/image");
 assert.ok(wiring.includes('body.append("subfolder", "h3_character_sheet")'),
     "uploads go to a dedicated input subfolder");
-assert.ok(wiring.includes("boot=h3sheet_v38"),
+assert.ok(wiring.includes("boot=h3sheet_v39"),
     "core module imports must carry a fresh boot tag (bump it on every JS change, or browsers keep the cached panel)");
 assert.ok(wiring.includes("panelFitHeight") && wiring.includes("resizing_node === node"),
     "the wiring must re-measure the node from its panel and never fight a drag");
@@ -118,6 +118,11 @@ assert.ok(wiring.includes("isPreviewWidget(item, widget)"),
     "the node fit must count a capped preview at its capped height, not at the frontend's");
 assert.ok(wiring.includes("schedulePreviewMode(node)"),
     "the frontend rebuilds the previews after a run, so the size is re-applied then too");
+// Panes fill the node now, so the fit needs a ceiling and the panel watches its own size.
+assert.ok(wiring.includes("ceiling: fitCeiling()"),
+    "the node fit is capped by the viewport, or a long Results list asks for a 3000px node");
+assert.ok(wiring.includes("panel?.dispose?.()"),
+    "the resize observer goes with the node (onRemoved disposes the panel)");
 assert.ok(routes.includes('"knobs"'), "the action route must list knobs among its actions");
 assert.ok(wiring.includes("widget.value = value"),
     "applying a preset has to write the node's own widgets (cell_size, steps, layout...)");

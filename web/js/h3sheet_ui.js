@@ -24,7 +24,7 @@ import {
     REF_GROUPS,
     PANEL_FIT,
     panelFitHeight,
-} from "./h3sheet_core.mjs?boot=h3sheet_v38";
+} from "./h3sheet_core.mjs?boot=h3sheet_v39";
 
 const CLASS = "MiniMaxH3CharacterSheet";
 const DOM_WIDGET = "h3_character_sheet_ui";
@@ -84,6 +84,7 @@ function fitNodeToPanel(node) {
         top: Number(widget.y),
         panelHeight: content + overflow,
         rowsHeight,
+        ceiling: fitCeiling(),
     });
     const current = Math.round(Number(node.size?.[1]) || 0);
     if (!Number.isFinite(target) || target < 240) return;
@@ -414,6 +415,19 @@ function mountPanel(node) {
     return panel;
 }
 
+/**
+ * The tallest the node may get before a pane is allowed to scroll again.
+ *
+ * Panes grow with their content now, so a Results list with a few hundred thumbnails would
+ * otherwise ask for a 3000px node. The ceiling is the viewport, so the node fills the screen
+ * and scrolls after that; without a viewport (a test, an odd embed) it is PANEL_FIT.maxHeight.
+ */
+function fitCeiling() {
+    const viewport = Number(globalThis.innerHeight) || 0;
+    if (viewport <= 0) return PANEL_FIT.maxHeight;
+    return Math.max(600, Math.round(viewport - 140));
+}
+
 /** Is this widget one of ComfyUI's own output previews (image host or the animation one)? */
 function isPreviewWidget(widget, panelWidget = null) {
     if (!widget || widget === panelWidget) return false;
@@ -482,6 +496,9 @@ function wrapNode(nodeType) {
         this._mmxSheetPoll = null;
         for (const timer of this._mmxSheetFitTimers || []) clearTimeout(timer);
         this._mmxSheetFitTimers = null;
+        // The panel watches its own size to re-lay-out a resized node: that observer has to go
+        // with the node, or it keeps a detached container alive.
+        this._mmxSheet?.panel?.dispose?.();
         this._mmxSheet = null;
         return onRemoved?.apply(this, arguments);
     };
