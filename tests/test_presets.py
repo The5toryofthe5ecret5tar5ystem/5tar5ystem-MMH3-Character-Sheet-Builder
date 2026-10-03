@@ -201,6 +201,64 @@ def test_the_identity_preset_is_independent_and_slow():
     balanced = preset_by_id(preset_mod.DEFAULT_PRESET_ID)
     assert preset.widgets["ref_image_size"] != balanced.widgets["ref_image_size"]
     assert "ref_image_size" in preset.deviates
+    # Same 2048px cells on a 3840px sheet as the fidelity sheet: if the likeness is the point,
+    # it has to survive being cut out and enlarged.
+    assert preset.widgets["cell_size"] == 2048
+    assert preset.widgets["sheet_short_edge"] == 3840
+    assert preset.sheet["shortEdge"] == 3840
+
+
+# --------------------------------------------------------------------------- #
+# the full character sheet: the same five cells, two resolution tiers
+# --------------------------------------------------------------------------- #
+def test_the_full_sheet_presets_are_the_same_five_cells_in_the_same_order():
+    """One definition of "full character sheet", shared by both tiers.
+
+    Headshot, chest-up portrait, full body front, the 90-degree side and from behind - read
+    front to back so the sheet doubles as a turnaround; neutral expression and neutral pose,
+    because a sheet is a reference someone else will pose from.
+    """
+    for preset_id in ("full-balanced", "full-fidelity"):
+        preset = preset_by_id(preset_id)
+        assert preset.build == {
+            "views": ["face", "portrait", "front", "profile", "back"],
+            "poses": ["neutral"],
+            "expressions": ["neutral"],
+        }, preset_id
+        assert len(preset.build["views"]) == 5
+        for view in preset.build["views"]:
+            assert view in ss.VIEW_KEYS, f"{preset_id}: unknown view {view}"
+
+
+def test_the_full_sheet_presets_are_neutral_tan():
+    """"Neutral tan backdrop setting" is the point of these two, not a leftover default."""
+    for preset_id in ("full-balanced", "full-fidelity"):
+        preset = preset_by_id(preset_id)
+        assert preset.render["background"] == "tan", preset_id
+        payload = apply_to_payload(_payload(), preset_id)
+        spec = ss.parse_sheet_spec(payload)
+        assert ss.describe_background(spec) == "Neutral tan (tan)"
+        # The backdrop travels in the prompt itself, not only in the panel.
+        cells = ss.cell_matrix(views=preset.build["views"], poses=["neutral"])
+        spec.cells = ss.parse_sheet_spec({**payload, "cells": cells}).cells
+        for cell in spec.cells:
+            assert ss.TAN_HEX in ss.build_cell_prompt(spec, cell), cell.view
+
+
+def test_the_two_full_sheet_tiers_differ_only_in_resolution():
+    balanced = preset_by_id("full-balanced")
+    fidelity = preset_by_id("full-fidelity")
+    assert balanced.widgets["cell_size"] == 1024
+    assert balanced.widgets["sheet_short_edge"] == 1536
+    assert fidelity.widgets["cell_size"] == 2048
+    assert fidelity.widgets["sheet_short_edge"] == 3840
+    assert {**fidelity.widgets, "cell_size": 1024, "sheet_short_edge": 1536} == balanced.widgets
+    assert fidelity.render == balanced.render
+    assert fidelity.build == balanced.build
+    # Only the resolution is a departure from a fresh node (plus the chaining the
+    # recommendation adds); the fidelity tier has to say so.
+    assert set(fidelity.deviates) == {"cell_size", "sheet_short_edge", "continuity"}
+    assert set(balanced.deviates) == {"continuity"}
 
 
 def test_every_preset_and_the_node_use_the_turbo_step_count():

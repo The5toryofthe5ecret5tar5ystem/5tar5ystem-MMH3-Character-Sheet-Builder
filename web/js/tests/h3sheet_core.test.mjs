@@ -553,12 +553,17 @@ ok.push("an empty node renders (and can materialise) exactly what the ticks ask 
     const select = panel.container.querySelector(".mmx-sheet-background");
     assert.ok(select, "the Cells tab offers a background picker");
     assert.deepEqual([...select.options].map((o) => o.value),
-        ["neutral", "white", "grey", "black", "green", "blue", "custom"]);
+        ["neutral", "tan", "white", "grey", "black", "green", "blue", "reference", "custom"]);
+    assert.equal(select.options[1].textContent, "Neutral tan", "the flat tan backdrop is offered");
     // the custom text box only shows up when it is needed
     assert.equal(panel.container.querySelector(".mmx-sheet-background-custom").style.display, "none");
+    assert.equal(panel.container.querySelector(".mmx-sheet-background-ref").parentElement.style.display, "none",
+        "and the reference picker stays out of the way for the presets");
     select.value = "green";
     select.dispatchEvent(new dom.window.Event("change"));
     assert.equal(payload.render.background, "green");
+    assert.equal("backgroundRef" in payload.render, false,
+        "a preset backdrop writes no reference (there is nothing to point at)");
     select.value = "custom";
     select.dispatchEvent(new dom.window.Event("change"));
     assert.equal(panel.container.querySelector(".mmx-sheet-background-custom").style.display, "");
@@ -567,6 +572,78 @@ ok.push("an empty node renders (and can materialise) exactly what the ticks ask 
     box.dispatchEvent(new dom.window.Event("input"));
     assert.equal(payload.render.backgroundCustom, "deep red velvet curtain");
     ok.push("background picker (presets + custom text) writes the payload");
+}
+
+// --- reference backdrop: borrow the setting from one of the sheet's refs -------
+{
+    // The interesting failure is a mismatch in NUMBERING: the node renumbers the references
+    // it actually wires (a disabled tile consumes no number), so the picker has to speak the
+    // same numbering as the prompt's <Picture N> tags or the backdrop is taken from the wrong
+    // photo. Hence the disabled picture below: it must neither shift the others nor appear.
+    const refState = core.readState("");
+    refState.refs.pictures[0] = { file: "face.png", role: "face and hair", enabled: true };
+    refState.refs.pictures[1] = { file: "living-room.png", role: "the room", enabled: true };
+    refState.refs.pictures[2] = { file: "unchecked.png", role: "props", enabled: false };
+    refState.refs.videos[0] = { file: "interior.mp4", role: "the apartment", enabled: true };
+    let saved = null;
+    const panel = core.buildSheetInterface({
+        state: refState,
+        hooks: { stateChanged: (next) => { saved = next; }, status: () => {} },
+    });
+    click([...panel.container.querySelectorAll(".mmx-tab")].find((tab) => tab.dataset.tab === "cells"));
+    const picker = () => panel.container.querySelector(".mmx-sheet-background-ref");
+    assert.equal(picker().parentElement.style.display, "none",
+        "the picker is not offered while a flat preset is chosen");
+
+    const background = panel.container.querySelector(".mmx-sheet-background");
+    background.value = "reference";
+    background.dispatchEvent(new dom.window.Event("change"));
+    assert.equal(picker().parentElement.style.display, "", "choosing 'reference' shows the picker");
+    assert.deepEqual([...picker().options].map((o) => o.value), ["pictures:0", "pictures:1", "videos:0"],
+        "only the wired pictures and videos, in the numbering the render uses");
+    assert.ok(picker().options[1].textContent.startsWith("<Picture 2>"), "labelled with its H3 tag");
+    assert.ok(picker().options[1].textContent.includes("the room"), "and the role the user gave it");
+    assert.ok(picker().options[2].textContent.includes("<Video 1>"), "videos can supply a setting too");
+    assert.equal(picker().disabled, false);
+
+    picker().value = "pictures:1";
+    picker().dispatchEvent(new dom.window.Event("change"));
+    assert.equal(refState.backgroundRef, "pictures:1");
+    assert.equal(saved.render.backgroundRef, "pictures:1", "the chosen reference reaches the payload");
+    assert.equal(saved.render.background, "reference");
+
+    // Restored from a workflow, the choice comes back selected - and a choice whose
+    // reference has since been emptied is shown as-is rather than silently swapped for the
+    // first option, which would render a backdrop the user never picked.
+    refState.backgroundRef = "pictures:7";
+    const again = core.buildSheetInterface({ state: refState, hooks: { status: () => {} } });
+    click([...again.container.querySelectorAll(".mmx-tab")].find((tab) => tab.dataset.tab === "cells"));
+    const stale = again.container.querySelector(".mmx-sheet-background-ref");
+    assert.equal(stale.value, "pictures:7", "an unwired choice is still what the select shows");
+    assert.ok(stale.options[0].textContent.includes("not wired any more"), "and says so");
+
+    // Nothing to point at: the picker says what to do instead of offering an empty list, and
+    // the payload still records that the backdrop is a reference (the node warns and falls
+    // back to neutral rather than inventing a setting).
+    const emptyState = core.readState("");
+    emptyState.background = "reference";
+    let emptySaved = null;
+    const none = core.buildSheetInterface({
+        state: emptyState,
+        hooks: { stateChanged: (next) => { emptySaved = next; }, status: () => {} },
+    });
+    click([...none.container.querySelectorAll(".mmx-tab")].find((tab) => tab.dataset.tab === "cells"));
+    const emptyPicker = none.container.querySelector(".mmx-sheet-background-ref");
+    assert.equal(emptyPicker.disabled, true, "with no references there is nothing to choose");
+    assert.equal(emptyPicker.options.length, 1, "and the picker says so instead of listing nothing");
+    // Changing the backdrop still records the choice, so a saved workflow says "a reference
+    // backdrop, nothing picked yet" rather than looking like a flat preset.
+    none.container.querySelector(".mmx-sheet-background").dispatchEvent(new dom.window.Event("change"));
+    assert.equal(emptySaved.render.backgroundRef, "", "and the payload says so explicitly");
+    // readState is the other half of the round trip.
+    assert.equal(core.readState(JSON.stringify({ render: { background: "reference", backgroundRef: "pictures:0" } }))
+        .backgroundRef, "pictures:0");
+    ok.push("reference backdrop: picker numbers references like the prompt, round-trips the choice");
 }
 
 // --- the ticks are part of the payload -----------------------------------------
@@ -1079,7 +1156,7 @@ ok.push("reorder / slot helpers behave");
         {
             id: "balanced", label: "Balanced (recommended)",
             hint: "What this pack is tuned for.",
-            render: { continuity: "auto", exportVideo: true, framesPerCell: 22 },
+            render: { continuity: "auto", exportVideo: true, framesPerCell: 22, background: "tan" },
             sheet: { layout: "hero-left", columns: 2, aspect: "3:2", shortEdge: 1536 },
             widgets: { cell_size: 1024, frames_per_cell: 22, steps: 8, continuity: "auto",
                        export_video: true, sheet_layout: "hero-left" },
@@ -1136,6 +1213,7 @@ ok.push("reorder / slot helpers behave");
     await settled();
     assert.equal(presetState.continuity, "auto", "continuation is applied to the panel state");
     assert.equal(presetState.exportVideo, true, "so is the clip export");
+    assert.equal(presetState.background, "tan", "and the backdrop the preset is built around");
     assert.equal(presetState.presetId, "balanced", "and the workflow records which preset it came from");
     assert.deepEqual(presetState.build.expressions, ["neutral", "smile"], "its ticks are offered");
     assert.equal(applied.length, 1, "the node's widgets are written");
@@ -1145,6 +1223,7 @@ ok.push("reorder / slot helpers behave");
     assert.ok(bar.textContent.includes("Changes: Continuity"), "the bar says what it changed");
     const payload = presetSaved.at(-1);
     assert.equal(payload.render.continuity, "auto", "the payload carries the applied settings");
+    assert.equal(payload.render.background, "tan", "including the backdrop");
     assert.equal(payload.render.preset, "balanced");
 
     // A preset never rewrites the sheet's content.
@@ -1154,6 +1233,8 @@ ok.push("reorder / slot helpers behave");
     await settled();
     assert.deepEqual(presetState.cells.map((c) => c.id), ["keep-me"], "cells survive a preset");
     assert.equal(presetState.continuity, "off", "the new preset replaced the old settings");
+    assert.equal(presetState.background, "tan",
+        "a preset that says nothing about the backdrop leaves the user's choice alone");
 
     // Choosing "custom" records nothing and changes nothing.
     select.value = "";

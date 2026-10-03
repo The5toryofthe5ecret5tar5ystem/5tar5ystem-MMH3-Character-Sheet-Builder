@@ -196,39 +196,61 @@ _NO_SET = (
     "walls, no floor, no ceiling, no doors, no windows, no furniture, no props"
 )
 
+#: Every backdrop is FLAT: no gradient, no vignette, and nothing casting a shadow onto it.
+#: A backdrop that is only "evenly lit" still comes back with a falloff, a hot spot behind the
+#: head and a shadow under the subject - which is what makes a sheet look like N different
+#: photos instead of one. Said out loud in every clause, custom text included.
+_FLAT = (
+    "flat and completely uniform, evenly lit with no gradient, no vignette, no lighting "
+    "falloff, no hot spot, and no shadow of the subject cast onto it"
+)
+
+#: Neutral tan, as a colour the composite and the prompt agree on.
+TAN_HEX = "#c8b39b"
+
 BACKGROUNDS: tuple[SheetOption, ...] = (
     SheetOption(
         "neutral",
         "Neutral grey",
-        f"a plain neutral background, {_NO_SET}",
+        f"a plain neutral background, {_FLAT}, {_NO_SET}",
+    ),
+    SheetOption(
+        "tan",
+        "Neutral tan",
+        f"a flat seamless neutral tan backdrop ({TAN_HEX}), {_FLAT}, {_NO_SET}",
     ),
     SheetOption(
         "white",
         "Flat white",
-        f"a flat seamless pure white background, evenly lit, {_NO_SET}",
+        f"a flat seamless pure white background, {_FLAT}, {_NO_SET}",
     ),
     SheetOption(
         "grey",
         "Mid grey",
-        f"a flat seamless mid-grey studio background, evenly lit, {_NO_SET}",
+        f"a flat seamless mid-grey studio background, {_FLAT}, {_NO_SET}",
     ),
     SheetOption(
         "black",
         "Flat black",
-        f"a flat seamless black background, the subject lit separately from it, {_NO_SET}",
+        f"a flat seamless black background, {_FLAT}, the subject lit separately from it, "
+        f"{_NO_SET}",
     ),
     SheetOption(
         "green",
         "Green screen",
-        f"a flat uniform chroma-key green screen (#00B140), evenly lit and unwrinkled, "
+        f"a flat uniform chroma-key green screen (#00B140), {_FLAT}, unwrinkled, "
         f"no green spill or green reflections anywhere on the subject, {_NO_SET}",
     ),
     SheetOption(
         "blue",
         "Blue screen",
-        f"a flat uniform chroma-key blue screen (#0000FF), evenly lit, no blue spill "
+        f"a flat uniform chroma-key blue screen (#0000FF), {_FLAT}, no blue spill "
         f"anywhere on the subject, {_NO_SET}",
     ),
+    # The one backdrop that comes from a reference instead of the presets - see
+    # ``background_reference`` and ``reference_background_clause``; its prompt text is built
+    # per sheet because it has to name the reference.
+    SheetOption("reference", "Reference image/video", ""),
     SheetOption("custom", "Custom...", ""),
 )
 
@@ -467,6 +489,10 @@ class SheetRenderSpec:
     cell_aspect: str = DEFAULT_CELL_ASPECT
     background: str = "neutral"
     background_custom: str = ""
+    #: Which reference supplies the backdrop when ``background`` is ``"reference"``, as
+    #: ``"<group>:<slot>"`` (``"pictures:1"`` = the second picture). A backdrop can come from a
+    #: picture or a video's setting; audio has no picture to take a room from.
+    background_ref: str = ""
     #: How much of the head a face blur covers: ``face`` / ``hair`` / ``head`` (see
     #: :data:`BLUR_SCOPES`). One value for the sheet, because it is a look rather than a
     #: per-picture decision - *whether* a picture is blurred stays per reference.
@@ -581,6 +607,7 @@ class SheetSpec:
                 "cellAspect": self.render.cell_aspect,
                 "background": self.render.background,
                 "backgroundCustom": self.render.background_custom,
+                "backgroundRef": self.render.background_ref,
                 "blurScope": self.render.blur_scope,
                 # Written even at the default: a saved workflow should say whether its
                 # cells were chained or independent.
@@ -1029,6 +1056,9 @@ def parse_sheet_spec(raw: Any) -> SheetSpec:
         background_custom=str(
             render_raw.get("backgroundCustom", render_raw.get("background_custom")) or ""
         ).strip(),
+        background_ref=str(
+            render_raw.get("backgroundRef", render_raw.get("background_ref")) or ""
+        ).strip().lower(),
         blur_scope=_parse_blur_scope(render_raw, warnings),
         continuity=_parse_continuity(render_raw, warnings),
         export_video=_as_bool(
@@ -1036,7 +1066,6 @@ def parse_sheet_spec(raw: Any) -> SheetSpec:
         ),
         preset=str(render_raw.get("preset") or "").strip(),
     )
-
     sheet_raw = data.get("sheet") if isinstance(data.get("sheet"), dict) else {}
     layout_name = str(sheet_raw.get("layout") or "hero-left").strip().lower()
     if layout_name not in LAYOUTS:
@@ -1066,6 +1095,16 @@ def parse_sheet_spec(raw: Any) -> SheetSpec:
     cells = _parse_cells(data.get("cells"), render, warnings)
     if not cells:
         warnings.append("No cells in the payload; the node cannot render an empty sheet.")
+
+    # A reference backdrop can only be checked once the references are parsed: say so here
+    # rather than let a cell prompt promise a setting that is not wired in. The backdrop
+    # then falls back to neutral (see background_clause) instead of rendering something
+    # nobody chose.
+    if render.background == "reference" and resolve_background_ref(refs, render.background_ref) is None:
+        warnings.append(
+            f"background 'reference' names {render.background_ref or 'nothing'!r}, which is "
+            "not an enabled picture or video; using the neutral backdrop."
+        )
 
     # Warnings raised by whoever resolved this payload (the sheet node's fallback
     # notices, for example) come first: they explain the cells that follow.
@@ -1158,6 +1197,12 @@ def describe_background(spec: SheetSpec) -> str:
             continue
         if key == "custom":
             return f"{spec.render.background_custom.strip()} (custom)"
+        if key == "reference":
+            reference = background_reference(spec)
+            if reference is not None:
+                label = "setting" if reference.kind == "video" else "background"
+                return f"the {label} of {reference.tag} ({key})"
+            return f"{option.label} - no reference chosen ({key})"
         return f"{option.label} ({key})"
     return key
 
@@ -1698,6 +1743,53 @@ def blur_detects_faces(spec: SheetSpec) -> dict[tuple[str, int], bool]:
     return detects
 
 
+def resolve_background_ref(refs: list[SheetRef], background_ref: Any) -> SheetRef | None:
+    """Find the reference a ``"<group>:<slot>"`` backdrop key names, or ``None``.
+
+    ``background_ref`` is written the way the payload stores references (``"pictures:1"``
+    = the second picture), and only a picture or a video can supply a backdrop: audio has
+    no picture to take a room from. The reference also has to be enabled - pointing the
+    backdrop at a muted slot would quietly render a setting the user cannot see.
+    """
+    key = str(background_ref or "").strip().lower()
+    group, _, slot = key.partition(":")
+    kind = group.rstrip("s") if group else ""
+    if kind not in ("picture", "video") or not slot.strip().isdigit():
+        return None
+    wanted = int(slot)
+    for ref in refs:
+        if ref.kind == kind and ref.index == wanted and ref.enabled:
+            return ref
+    return None
+
+
+def background_reference(spec: SheetSpec) -> SheetRef | None:
+    """The reference a ``reference`` backdrop names, or ``None`` when it is not usable."""
+    if spec.render.background != "reference":
+        return None
+    return resolve_background_ref(spec.refs, spec.render.background_ref)
+
+
+def reference_background_clause(spec: SheetSpec, reference: SheetRef) -> str:
+    """The backdrop clause when a reference supplies the setting.
+
+    ``_NO_SET`` must NOT be part of this one: here the place is exactly what is wanted. What
+    is not wanted is the rest of the reference - the people and props around whoever stood
+    there - so the subject replaces them, and the backdrop stays as flat as the presets.
+    """
+    tag = reference.tag
+    place = (
+        "the same place, room and lighting"
+        if reference.kind == "video"
+        else "the same setting and backdrop"
+    )
+    return (
+        f"{place} as {tag}: the subject stands where {tag} is, with {tag}'s backdrop and "
+        f"lighting unchanged - use {tag} for the BACKGROUND ONLY, nobody and nothing else "
+        f"from {tag} appears in shot, no extra people, no props added, {_FLAT}"
+    )
+
+
 def background_clause(spec: SheetSpec) -> str:
     """What the model is told to put behind the figure, as a noun phrase.
 
@@ -1705,15 +1797,21 @@ def background_clause(spec: SheetSpec) -> str:
     ``custom`` drops the user's own words into the same frame ("a flat uniform
     backdrop of neutral tan, filling the frame behind the subject with nothing
     else in shot...") - saying only "neutral tan" makes H3 build a tan room.
+    ``reference`` builds its wording from the reference it names, and falls back to
+    the neutral backdrop when that reference is not there any more.
     """
     choice = spec.render.background
     if choice == "custom":
         text = spec.render.background_custom.strip().rstrip(".")
         if text:
             lower = text if text[0].islower() else text[0].lower() + text[1:]
-            return f"a flat uniform backdrop of {lower}, {_NO_SET}"
+            return f"a flat uniform backdrop of {lower}, {_FLAT}, {_NO_SET}"
+    if choice == "reference":
+        reference = background_reference(spec)
+        if reference is not None:
+            return reference_background_clause(spec, reference)
     option = _BACKGROUND_BY_KEY.get(choice) or _BACKGROUND_BY_KEY["neutral"]
-    return option.prompt
+    return option.prompt or _BACKGROUND_BY_KEY["neutral"].prompt
 
 
 def build_cell_prompt(spec: SheetSpec, cell: SheetCell, *, refs: list[SheetRef] | None = None) -> str:

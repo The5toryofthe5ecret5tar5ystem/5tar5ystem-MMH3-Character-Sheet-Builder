@@ -90,6 +90,24 @@ _BALANCED_WIDGETS: dict[str, Any] = {
     "sheet_fit": "contain",
 }
 
+#: The five cells a "full character sheet" is made of: a headshot, a chest-up portrait, the
+#: full body from the front, the 90-degree side and from behind - neutral expression, neutral
+#: pose. Read from the front to the back, so the sheet works as a turnaround.
+_FULL_SHEET_VIEWS = ("face", "portrait", "front", "profile", "back")
+
+#: The sheet these two presets are: 5 cells, hero on the left, 3:2 canvas.
+_FULL_SHEET_SHEET = {"layout": "hero-left", "columns": 2, "aspect": "3:2"}
+
+
+def _full_sheet_widgets(*, cell_size: int, short_edge: int) -> dict[str, Any]:
+    """The shared body of the two full-sheet presets, differing only in resolution."""
+    return {
+        **_BALANCED_WIDGETS,
+        "cell_size": cell_size,
+        "sheet_short_edge": short_edge,
+    }
+
+
 PRESETS: tuple[SheetPreset, ...] = (
     SheetPreset(
         id=DEFAULT_PRESET_ID,
@@ -106,6 +124,44 @@ PRESETS: tuple[SheetPreset, ...] = (
         # The one deliberate departure: a fresh node renders cells independently (the safe
         # default), while the recommendation is to chain where the framing already matches.
         deviates=("continuity",),
+    ),
+    SheetPreset(
+        id="full-balanced",
+        label="Full Character Sheet - Balanced",
+        hint=(
+            "The finished article: headshot, chest-up portrait, full body front, full body "
+            "90-degree side and from behind - neutral expression, neutral pose, on a flat "
+            "neutral tan backdrop. 1024px cells on a 1536px sheet."
+        ),
+        render={
+            "continuity": "auto",
+            "exportVideo": True,
+            "framesPerCell": 22,
+            "background": "tan",
+        },
+        sheet={**_FULL_SHEET_SHEET, "shortEdge": 1536},
+        widgets=_full_sheet_widgets(cell_size=1024, short_edge=1536),
+        build={"views": list(_FULL_SHEET_VIEWS), "poses": ["neutral"], "expressions": ["neutral"]},
+        deviates=("continuity",),
+    ),
+    SheetPreset(
+        id="full-fidelity",
+        label="Full Character Sheet - Fidelity",
+        hint=(
+            "The same five cells and the same neutral tan backdrop at print resolution: "
+            "2048px cells on a 3840px sheet. Several times the render time of Balanced, and "
+            "a very large PNG - worth it for a sheet that will be enlarged or cut out."
+        ),
+        render={
+            "continuity": "auto",
+            "exportVideo": True,
+            "framesPerCell": 22,
+            "background": "tan",
+        },
+        sheet={**_FULL_SHEET_SHEET, "shortEdge": 3840},
+        widgets=_full_sheet_widgets(cell_size=2048, short_edge=3840),
+        build={"views": list(_FULL_SHEET_VIEWS), "poses": ["neutral"], "expressions": ["neutral"]},
+        deviates=("cell_size", "continuity", "sheet_short_edge"),
     ),
     SheetPreset(
         id="fast",
@@ -136,14 +192,20 @@ PRESETS: tuple[SheetPreset, ...] = (
         id="identity",
         label="Max identity fidelity",
         hint=(
-            "The 2048px reference pipeline (several times slower per cell) with independent "
-            "cells: for when the likeness is the whole point of the sheet. Same 8 steps - the "
-            "likeness comes from the reference, not from more sampling."
+            "The 2048px reference pipeline (several times slower per cell), 2048px cells on a "
+            "3840px sheet, and independent cells: for when the likeness is the whole point. "
+            "Same 8 steps - the likeness comes from the reference, not from more sampling."
         ),
         render={"continuity": "off", "exportVideo": True, "framesPerCell": 22},
-        sheet={"layout": "hero-left", "columns": 2, "aspect": "3:2", "shortEdge": 1536},
-        widgets={**_BALANCED_WIDGETS, "ref_image_size": "max", "continuity": "off"},
-        deviates=("ref_image_size",),
+        sheet={"layout": "hero-left", "columns": 2, "aspect": "3:2", "shortEdge": 3840},
+        widgets={
+            **_BALANCED_WIDGETS,
+            "cell_size": 2048,
+            "sheet_short_edge": 3840,
+            "ref_image_size": "max",
+            "continuity": "off",
+        },
+        deviates=("ref_image_size", "cell_size", "sheet_short_edge"),
     ),
     SheetPreset(
         id="turnaround",

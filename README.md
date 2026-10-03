@@ -68,8 +68,10 @@ bar prints that as *"Changes: Continuity, …"* rather than changing settings si
 | Preset | What it sets |
 | --- | --- |
 | **Balanced (recommended)** | 1024px cells, 22 frames, 8 steps, `per framing` references, continuation `auto` (chains only where the camera distance matches), clips exported. What this pack is tuned for. |
+| **Full Character Sheet - Balanced** | The finished article, 1024px cells on a 1536px sheet: headshot, chest-up portrait, full body front, full body 90-degree side and full body from behind - neutral expression, neutral pose, on a flat neutral tan backdrop. |
+| **Full Character Sheet - Fidelity** | The same five cells and the same neutral tan backdrop at print resolution: 2048px cells on a 3840px sheet. Several times the render time and a very large PNG - for a sheet that will be enlarged or cut out. |
 | **Fast look (no chains, no clips)** | 768px cells at H3's 5-frame minimum, every cell independent, nothing encoded - to find the framing, not to keep the result. |
-| **Max identity fidelity** | The 2048px reference pipeline (several times slower) with independent cells. |
+| **Max identity fidelity** | The 2048px reference pipeline (several times slower) with independent cells, 2048px cells on a 3840px sheet. |
 | **Turnaround (chained full body)** | Front -> profile -> back in one row; all three share a camera distance, so continuation holds the room, light and scale while the subject turns. |
 | **Expression sheet (chained face)** | Five face close-ups in one row: identical framing, so the chain carries the light and the head position while only the expression changes. |
 
@@ -87,6 +89,29 @@ continuation, clip export, layout, shape) plus the settings the panel owns, and 
 references. Editing a knob afterwards is expected; the applied preset id is recorded in the
 payload (`render.preset`) so a saved workflow can say how its numbers started, and picking
 *Custom (no preset)* only clears that record.
+
+### Backdrops (Cells tab)
+
+Every cell is rendered against the backdrop chosen in the **Cells** tab, and every one of them
+is written as **flat**: no gradient, no vignette, no lighting falloff and no shadow of the
+subject cast onto it. That is what makes a sheet read as one shoot instead of N photos. H3 is a
+video model - told only "neutral tan" it builds a tan *room* - so each backdrop also says what
+is **not** there (no room, no walls, no floor, no furniture) and that the subject is lit
+separately from it. The same wording goes into every cell prompt, so the framing holds from
+cell to cell.
+
+| Backdrop | What it tells the model |
+| --- | --- |
+| **Neutral grey** (default) | A plain neutral background. |
+| **Neutral tan** | A flat seamless neutral tan backdrop (`#c8b39b`) - the backdrop both **Full Character Sheet** presets are built around. |
+| **Flat white** / **Mid grey** / **Flat black** | Studio backdrops; black also states the subject is lit separately from it. |
+| **Green screen** / **Blue screen** | Chroma keys (`#00B140` / `#0000FF`) with the matching spill guard, so a keyed cut-out stays clean. |
+| **Reference image/video** | Borrow *one reference's* own setting: choose a picture or a video in the box beside it and its location, backdrop and lighting are used behind the character - nobody and nothing else from that reference appears in shot. The picker counts the references the render actually **wires**, so its `<Picture 2>` is the same `<Picture 2>` the prompt names (an unchecked tile takes no number). |
+| **Custom...** | Your own words, framed the same way: *"a flat uniform backdrop of deep red velvet curtain, flat and completely uniform, … nothing else in shot"*. |
+
+If a "reference" backdrop points at a slot that has since been emptied or unchecked, the render
+falls back to the neutral backdrop and says so in the plan warnings, rather than rendering a
+setting nobody chose.
 
 1. Add **MiniMax H3 Character Sheet Maker** and connect `model`, `video_vae`,
    `audio_vae`, `clip` (the same loaders any H3 workflow uses).

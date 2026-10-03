@@ -47,14 +47,18 @@ export const EXPRESSIONS = [
 export const PICKS = ["auto", "last", "sharpest"];
 
 //: What the model is told to put behind the figure. Mirrors BACKGROUNDS in
-//: h3_character_sheet/sheet_spec.py (the wiring test compares the two).
+//: h3_character_sheet/sheet_spec.py (the wiring test compares the two). Every preset is a
+//: FLAT backdrop - no gradient, no vignette, no shadow - and ``reference`` takes its setting
+//: from one of the sheet's own references.
 export const BACKGROUNDS = [
     ["neutral", "Neutral grey"],
+    ["tan", "Neutral tan"],
     ["white", "Flat white"],
     ["grey", "Mid grey"],
     ["black", "Flat black"],
     ["green", "Green screen"],
     ["blue", "Blue screen"],
+    ["reference", "Reference image/video"],
     ["custom", "Custom..."],
 ];
 
@@ -578,6 +582,19 @@ export function groupForFile(file) {
     return null;
 }
 
+/** H3's own names for the reference kinds (``<Picture 2>`` and friends).
+ *
+ *  Module level on purpose: the Cells tab's background row is built before the panel's own
+ *  constants run, so it cannot borrow a helper defined further down the interface body.
+ */
+export const REF_TAG_LABEL = { image: "Picture", video: "Video", audio: "Audio" };
+
+/** The H3 tag for one wired reference (``refTagLabel("image", 2)`` -> ``"<Picture 2>"``). */
+export function refTagLabel(kind, ordinal) {
+    const label = REF_TAG_LABEL[kind] || "Reference";
+    return `<${label} ${ordinal}>`;
+}
+
 /**
  * Every filled reference in display order: pictures, then video, then audio, each
  * keeping its own ``<Picture N>`` numbering.
@@ -975,6 +992,8 @@ export function readState(payload) {
         negative: String(data.negativePrompt || data.negative_prompt || ""),
         background: String(data.render?.background || "neutral"),
         backgroundCustom: String(data.render?.backgroundCustom || ""),
+        // Which reference supplies the backdrop when the choice above is "reference".
+        backgroundRef: String(data.render?.backgroundRef || ""),
         blurScope: blurScope({ blurScope: data.render?.blurScope }),
         // Latent continuation: a render policy like the blur area, so it comes back with
         // the workflow and is applied to the cells the panel shows.
@@ -1013,6 +1032,13 @@ export function toPayload(state) {
     payload.render = { background: String(state.background || "neutral") };
     const custom = String(state.backgroundCustom || "").trim();
     if (custom) payload.render.backgroundCustom = custom;
+    // Which reference the backdrop comes from. Written whenever one is chosen, and written
+    // even when empty for a "reference" backdrop so a saved workflow says it is one and
+    // says nothing is picked (the node then falls back to neutral and warns).
+    const backdropRef = String(state.backgroundRef || "").trim();
+    if (backdropRef || payload.render.background === "reference") {
+        payload.render.backgroundRef = backdropRef;
+    }
     // How far a face blur reaches. Written even at the default so a saved workflow says
     // what it renders - the node's own default is the same value.
     payload.render.blurScope = blurScope(state);
@@ -1309,10 +1335,12 @@ export function buildSheetInterface({ state, hooks = {} }) {
     }
 
     async function applyPreset(entry) {
-        // render.* keys the panel owns (continuation, clip export, ...).
+        // render.* keys the panel owns (continuation, clip export, backdrop, ...).
         for (const [key, value] of Object.entries(entry.render || {})) {
             if (key === "continuity") state.continuity = value;
             else if (key === "exportVideo") state.exportVideo = value;
+            else if (key === "background") state.background = String(value || "neutral");
+            else if (key === "backgroundRef") state.backgroundRef = String(value || "");
         }
         if (entry.build && Object.keys(entry.build).length) {
             // Ticks only: the preset says which cells it is FOR, and building them stays the
@@ -2129,9 +2157,38 @@ export function buildSheetInterface({ state, hooks = {} }) {
     }
 
     // ------------------------------------------------------------- background
-    /** Backdrop for every cell: a preset, or the user's own words. */
+    /**
+     * The wired references a ``reference`` backdrop can borrow a setting from.
+     *
+     * Value = ``"<group key>:<index>"`` with the index the RUN uses (0-based, counting only
+     * the enabled references), which is exactly the number in the prompt's ``<Picture N>``
+     * tag - so the panel and the node cannot disagree about which photo is meant. Audio has
+     * no picture to take a room from and is not offered.
+     */
+    function backgroundRefOptions() {
+        return mediaSlots(state.refs)
+            .filter((entry) => entry.active !== false && entry.group.kind !== "audio")
+            .map((entry) => {
+                const slot = state.refs?.[entry.group.key]?.[entry.index] || {};
+                const role = String(slot.role || "").trim();
+                const file = String(slot.file || "").split("/").pop();
+                const tag = refTagLabel(entry.group.kind, entry.ordinal);
+                return { value: `${entry.group.key}:${entry.ordinal - 1}`, label: `${tag} \u00b7 ${role || file}` };
+            });
+    }
+
+    /** ``"pictures:1"`` -> ``"<Picture 2>"`` (used to name a reference that is gone). */
+    function backgroundRefKeyLabel(key) {
+        const [group, slot] = String(key || "").split(":");
+        const kind = String(group || "").replace(/s$/, "");
+        return Number.isFinite(Number(slot)) && slot !== ""
+            ? refTagLabel(kind, Number(slot) + 1)
+            : String(key || "");
+    }
+
+    /** Backdrop for every cell: a preset, one of the references, or the user's own words. */
     function backgroundRow() {
-        const row = element("div", { className: "mmx-row" }, { marginTop: "4px" });
+        const row = element("div", { className: "mmx-row" }, { marginTop: "4px", flexWrap: "wrap" });
         row.append(element("span", { textContent: "Background", className: "mmx-muted" }));
         const box = textInput(
             state.backgroundCustom || "",
@@ -2149,8 +2206,42 @@ export function buildSheetInterface({ state, hooks = {} }) {
             persist();
             refresh();
         }, "mmx-select mmx-sheet-background");
-        if ((state.background || "neutral") !== "custom") box.style.display = "none";
-        row.append(select, box);
+
+        // The reference picker only exists for the one backdrop that needs it, but the
+        // custom text box stays in the row (hidden) so switching back does not move things.
+        const choice = state.background || "neutral";
+        const options = backgroundRefOptions();
+        const chosen = String(state.backgroundRef || "").trim();
+        if (chosen && !options.some((entry) => entry.value === chosen)) {
+            // The chosen reference was emptied or unchecked since: show it as-is so the
+            // picker never silently displays a different reference than the payload sends.
+            options.unshift({ value: chosen, label: `${backgroundRefKeyLabel(chosen)} \u00b7 not wired any more` });
+        }
+        const refWrap = element("div", { className: "mmx-row" }, { flex: "1 1 220px", gap: "4px" });
+        const refSelect = selectBox(
+            options.length
+                ? options.map((entry) => [entry.value, entry.label])
+                : [["", "no picture or video references yet"]],
+            chosen,
+            (value) => {
+                state.backgroundRef = value;
+                persist();
+            },
+            "mmx-select mmx-sheet-background-ref",
+        );
+        refSelect.title = "Use this reference's own setting behind the character - nobody and nothing from it is kept";
+        if (!options.length) refSelect.disabled = true;
+        refWrap.append(refSelect);
+        if (!options.length) {
+            refWrap.append(element("span", {
+                textContent: "add a picture or video on the References tab first",
+                className: "mmx-muted",
+            }, { fontSize: "10px" }));
+        }
+        refWrap.style.display = choice === "reference" ? "" : "none";
+        box.style.display = choice === "custom" ? "" : "none";
+
+        row.append(select, refWrap, box);
         return row;
     }
 
@@ -3110,13 +3201,12 @@ export function buildSheetInterface({ state, hooks = {} }) {
     // read here is exactly what the render sends, including which references that
     // cell is wired with.
     let planCells = [];
-    const TAG_LABEL = { image: "Picture", video: "Video", audio: "Audio" };
 
     /** Every reference the RUN sends, as H3 tags (``<Picture 1>`` and friends). */
     function runRefTags() {
         return (mediaSlots(state.refs) || [])
             .filter((entry) => entry.active !== false)
-            .map((entry) => `<${TAG_LABEL[entry.group.kind]} ${entry.ordinal}>`);
+            .map((entry) => refTagLabel(entry.group.kind, entry.ordinal));
     }
 
     function renderPlan(payload) {

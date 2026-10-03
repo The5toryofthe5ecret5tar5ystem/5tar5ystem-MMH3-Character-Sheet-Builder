@@ -276,6 +276,11 @@ SECTIONS: tuple[HelpSection, ...] = (
             "**Cells** tab: tick the views / poses / expressions you want and press *Build "
             "cells* - or tick nothing and the node renders its default 8-cell matrix. Use "
             "the *Latent continuation* switch here (Auto is usually right).",
+            "Want the whole thing in one click? The **Preset** bar at the top has two full "
+            "character sheets - *Full Character Sheet - Balanced* (1024px cells, 1536px "
+            "sheet) and *... - Fidelity* (2048 / 3840) - each one headshot, portrait, full "
+            "body front, 90-degree side and back, neutral pose and expression, on a flat "
+            "neutral tan backdrop.",
             "Everything else is in the **Settings** tab: every knob the node has (cell size, "
             "frames, steps, sampler, reference sizing, layout, shape, clip export), three to "
             "a row instead of one per node row. 8 steps is the default - the turbo "
@@ -357,6 +362,11 @@ SECTIONS: tuple[HelpSection, ...] = (
             "continuation off for it.",
             "**Steps**: 8 with a TURBO checkpoint (the presets and the node default), 20-30 "
             "with a plain one. More steps on a turbo model buys nothing.",
+            "**Backdrop**: every option in the *Cells* tab is written as flat - no gradient, "
+            "no vignette, no shadow - because a backdrop with a falloff makes the sheet look "
+            "like N different photos. *Reference image/video* uses one reference's own "
+            "setting behind the character (nobody from it is kept); it counts the references "
+            "the render wires, so an unchecked tile takes no number.",
             "**10Eros' own advice**: with a TURBO file, do not also load a turbo LoRA, and "
             "skip cache/Spectrum nodes on reference (ref2va) runs - they cost accuracy.",
             "**Check WHICH beta you downloaded**: 10Eros beta_3 and beta_4 are the author's own "

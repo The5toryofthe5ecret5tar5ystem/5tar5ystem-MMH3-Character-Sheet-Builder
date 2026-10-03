@@ -416,6 +416,104 @@ def test_background_survives_the_payload_round_trip():
     assert again.render.background_custom == "unused"
 
 
+def test_neutral_tan_is_a_backdrop_of_its_own():
+    """The sheet's own backdrop: the tan the composite and the prompt name together."""
+    assert "tan" in ss.BACKGROUND_KEYS
+    option = next(item for item in ss.BACKGROUNDS if item.key == "tan")
+    assert option.label == "Neutral tan"
+    assert ss.TAN_HEX in option.prompt
+
+    payload = _payload()
+    payload["render"] = {"background": "tan"}
+    spec = ss.parse_sheet_spec(payload)
+    prompt = ss.build_cell_prompt(spec, spec.cells[0])
+    assert f"a flat seamless neutral tan backdrop ({ss.TAN_HEX})" in prompt
+    assert ss.describe_background(spec) == "Neutral tan (tan)"
+    assert not spec.warnings, spec.warnings
+
+
+def test_every_backdrop_is_flat_and_casts_no_shadow():
+    """A sheet is one look; a backdrop with a falloff or a shadow makes it N photos.
+
+    Every preset (and the user's own words) has to say so - "evenly lit" on its own still
+    comes back with a gradient behind the head and a shadow under the subject.
+    """
+    for option in ss.BACKGROUNDS:
+        if option.key in ("reference", "custom"):
+            continue
+        assert "flat and completely uniform" in option.prompt, option.key
+        assert "no gradient" in option.prompt and "no vignette" in option.prompt, option.key
+        assert "no shadow of the subject cast onto it" in option.prompt, option.key
+        assert "no room, no walls" in option.prompt, f"{option.key} forgot the no-set guard"
+
+    payload = _payload()
+    payload["render"] = {"background": "custom", "backgroundCustom": "Brushed steel"}
+    spec = ss.parse_sheet_spec(payload)
+    prompt = ss.build_cell_prompt(spec, spec.cells[0])
+    assert "no shadow of the subject cast onto it" in prompt, "custom wording is flat too"
+
+
+def test_reference_backdrop_borrows_the_setting_of_the_reference_it_names():
+    """'Reference' keeps the place and replaces the people - and says which is which.
+
+    H3's tags number the references the run actually wires, so the backdrop has to be named
+    with the same tag the legend uses, or the setting is taken from the wrong picture.
+    """
+    payload = _payload()
+    payload["render"] = {"background": "reference", "backgroundRef": "pictures:1"}
+    spec = ss.parse_sheet_spec(payload)
+    assert not spec.warnings, spec.warnings
+    reference = ss.background_reference(spec)
+    assert reference is not None and reference.tag == "<Picture 2>", "the second picture"
+    prompt = ss.build_cell_prompt(spec, spec.cells[0])
+    assert "the same setting and backdrop as <Picture 2>" in prompt
+    assert "use <Picture 2> for the BACKGROUND ONLY" in prompt
+    assert "no extra people, no props added" in prompt
+    # The place IS wanted here, so the no-set guard must not be part of this clause.
+    assert "no room, no walls, no floor" not in prompt
+    # Flat still applies: the backdrop should not gain a shadow the reference did not have.
+    assert "no shadow of the subject cast onto it" in prompt
+
+    # A video supplies a place rather than a backdrop, and says so.
+    payload["render"] = {"background": "reference", "backgroundRef": "videos:0"}
+    spec = ss.parse_sheet_spec(payload)
+    assert "the same place, room and lighting as <Video 1>" in ss.background_clause(spec)
+    assert ss.describe_background(spec) == "the setting of <Video 1> (reference)"
+
+
+def test_reference_backdrop_falls_back_when_its_reference_is_gone():
+    """A stale key (or none at all) renders neutral, and says why rather than silently."""
+    for key, expected in (("", "nothing"), ("pictures:9", "'pictures:9'"), ("audios:0", "'audios:0'")):
+        payload = _payload()
+        payload["render"] = {"background": "reference", "backgroundRef": key}
+        spec = ss.parse_sheet_spec(payload)
+        assert ss.background_reference(spec) is None
+        assert any(expected in warning for warning in spec.warnings), spec.warnings
+        prompt = ss.build_cell_prompt(spec, spec.cells[0])
+        assert "a plain neutral background" in prompt, "the fallback is the neutral preset"
+        assert "no room, no walls, no floor" in prompt
+        assert "reference" in ss.describe_background(spec)
+
+    # A disabled slot is not wired, so it cannot supply a backdrop either.
+    payload = _payload()
+    payload["refs"]["pictures"][1]["enabled"] = False
+    payload["render"] = {"background": "reference", "backgroundRef": "pictures:1"}
+    spec = ss.parse_sheet_spec(payload)
+    assert ss.background_reference(spec) is None
+    assert any("pictures:1" in warning for warning in spec.warnings), spec.warnings
+
+
+def test_reference_backdrop_survives_the_payload_round_trip():
+    payload = _payload()
+    payload["render"] = {"background": "reference", "backgroundRef": "Videos:0"}
+    spec = ss.parse_sheet_spec(payload)
+    assert spec.render.background_ref == "videos:0", "keys are normalised"
+    assert spec.to_dict()["render"]["backgroundRef"] == "videos:0"
+    again = ss.parse_sheet_spec(json.dumps(spec.to_dict()))
+    assert ss.describe_background(again) == "the setting of <Video 1> (reference)"
+    assert not again.warnings, again.warnings
+
+
 def test_global_prompt_leads_every_cell_prompt():
     payload = _payload()
     payload["globalPrompt"] = "young woman with long silver hair"
