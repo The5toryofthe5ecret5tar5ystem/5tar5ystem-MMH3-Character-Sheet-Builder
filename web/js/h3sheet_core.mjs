@@ -21,17 +21,40 @@
 //   clearSheet()                           -> Promise<void>
 //   status(text)                           -> optional, called on notable events
 
+//: The tick lists for the Cells tab. Mirrors VIEWS / POSES / EXPRESSIONS in
+//: h3_character_sheet/sheet_spec.py - the backend owns the prompt text, this is only what
+//: the panel offers, and the labels stay short because they sit in a legible grid.
 export const VIEWS = [
     ["face", "Face close up"],
     ["portrait", "Portrait"],
     ["front", "Full body front"],
     ["profile", "Full body side"],
     ["back", "Full body back"],
+    ["three-quarter", "3/4 front"],
+    ["three-quarter-back", "3/4 back"],
+    ["high-angle", "Full body high angle"],
+    ["low-angle", "Full body low angle"],
+    ["over-shoulder", "Over the shoulder"],
+    ["face-profile", "Head profile"],
+    ["head-back", "Back of head"],
+    ["hands", "Hands"],
+    ["eyes", "Eyes"],
+    ["legs", "Legs & footwear"],
 ];
 export const POSES = [
     ["neutral", "Neutral"],
     ["a-pose", "A-pose"],
     ["t-pose", "T-pose"],
+    ["sitting", "Sitting"],
+    ["kneeling", "Kneeling"],
+    ["crouching", "Crouching"],
+    ["lying", "Lying on back"],
+    ["walking", "Walking"],
+    ["contrapposto", "Contrapposto"],
+    ["hands-on-hips", "Hands on hips"],
+    ["arms-crossed", "Arms crossed"],
+    ["reach-camera", "Reach to camera"],
+    ["hair-touch", "Hand through hair"],
 ];
 export const EXPRESSIONS = [
     ["neutral", "Neutral"],
@@ -43,6 +66,17 @@ export const EXPRESSIONS = [
     ["surprised", "Surprised"],
     ["embarrassed", "Embarrassed"],
     ["crying", "Crying"],
+    ["closed-eyes", "Eyes closed"],
+    ["lips-parted", "Lips parted"],
+    ["laugh", "Laugh"],
+    ["pout", "Pout"],
+    ["wink", "Wink"],
+    ["disgust", "Disgust"],
+    ["determined", "Determined"],
+    ["pain", "Pain"],
+    ["aroused", "Aroused"],
+    ["pleasure", "Pleasure"],
+    ["orgasm", "Orgasm"],
 ];
 export const PICKS = ["auto", "last", "sharpest"];
 
@@ -253,7 +287,7 @@ export const KNOB_COLUMNS = 3;
  * build makes that a glance instead of an investigation; a test keeps it in step with the
  * import, so bumping one without the other fails the suite rather than confusing a user.
  */
-export const PANEL_BUILD = "h3sheet_v45";
+export const PANEL_BUILD = "h3sheet_v46";
 
 /** The frontend's own widget/host names, straight from the shipped frontend bundle. */
 export const PREVIEW_HOST_CLASS = "comfy-img-preview";
@@ -296,16 +330,44 @@ export const PREVIEW_WIDTH_MIN_HEIGHT = 120;
 //: only letterboxes it. So err long.
 export const PREVIEW_WIDTH_SLACK = 16;
 
-/** `compact` = small and side by side (default), `width` = fills the node width, `off` = none. */
-export const NODE_PREVIEW_MODES = ["compact", "width", "full", "off"];
-export const DEFAULT_NODE_PREVIEWS = "compact";
+/**
+ * `panel` = ComfyUI's own previews are removed, the panel shows the sheet (default),
+ * `compact` = small and side by side, `width` = fills the node width, `off` = nothing.
+ *
+ * `panel` exists because SIZING the frontend's previews is a losing game. Measured on a real
+ * node: the frontend creates `$$canvas-image-preview` when the sheet image finishes loading,
+ * with its own `computeLayoutSize(){return{minHeight:220,minWidth:1}}` and NO maximum - so the
+ * preview absorbed 1053px and the node became 2442px tall. Caps only land on it if a draw pass
+ * or the keeper happens to run afterwards, which is exactly the case a background tab (or a
+ * render that ends while the tab is busy) does not hit. So the panel stops feeding it instead:
+ * the widget is removed from the node and `node.imgs` is cleared, every pass.
+ */
+export const NODE_PREVIEW_MODES = ["panel", "compact", "width", "full", "off"];
+export const DEFAULT_NODE_PREVIEWS = "panel";
 
 export const NODE_PREVIEW_LABELS = [
+    ["panel", "Panel only (no node preview)"],
     ["compact", "Small (side by side)"],
     ["width", "Full width (stacked)"],
     ["full", "Full size (ComfyUI default)"],
-    ["off", "Hidden"],
+    ["off", "Hidden (no preview anywhere)"],
 ];
+
+/** How big the panel's OWN preview of the composed sheet may be. */
+export const PANEL_PREVIEW_SIZES = [
+    ["off", "Off"],
+    ["small", "Small"],
+    ["medium", "Medium"],
+    ["full", "Full width"],
+];
+export const PANEL_PREVIEW_HEIGHTS = { off: 0, small: 240, medium: 420 };
+export const DEFAULT_PANEL_PREVIEW = "medium";
+
+/** The panel's own preview size, defaulting to a medium sheet. */
+export function panelPreview(state) {
+    const value = String(state?.panelPreview || "").toLowerCase();
+    return PANEL_PREVIEW_SIZES.some(([key]) => key === value) ? value : DEFAULT_PANEL_PREVIEW;
+}
 
 /** The node-preview mode, defaulting to the compact one. */
 export function nodePreviews(state) {
@@ -336,6 +398,40 @@ export function previewParts(node, { skip = [] } = {}) {
         if (host && !hosts.includes(host)) hosts.push(host);
     }
     return { widgets, hosts };
+}
+
+/**
+ * Remove ComfyUI's own preview widgets from a node, and take away what they would draw.
+ *
+ * The frontend's own remover (`removeCanvasImagePreview`) does the same two things - call the
+ * widget's `onRemove` so it can unregister its listeners, then splice it out of `node.widgets` -
+ * which is why this is a supported thing to do rather than poking at internals. `node.imgs` is
+ * cleared as well: the widget is built FROM it, so leaving it populated is leaving the door open
+ * for the next pass of the frontend's preview service to rebuild the widget.
+ *
+ * Returns how many widgets were removed, so the caller can re-fit the node once.
+ */
+export function removeNodePreviews(node, { skip = [] } = {}) {
+    let removed = 0;
+    for (const widget of [...(node?.widgets || [])]) {
+        if (!widget || (widget.name && skip.includes(widget.name))) continue;
+        if (!PREVIEW_WIDGET_NAMES.includes(widget.name)) continue;
+        try {
+            widget.onRemove?.();
+        } catch (error) {
+            // A widget that fails to clean up is still a widget we want gone.
+        }
+        const index = node.widgets.indexOf(widget);
+        if (index >= 0) node.widgets.splice(index, 1);
+        removed += 1;
+    }
+    if (removed) {
+        if (Array.isArray(node?.imgs) && node.imgs.length) node.imgs = [];
+        if (Array.isArray(node?.animatedImages) && node.animatedImages.length) node.animatedImages = [];
+        node.setDirtyCanvas?.(true, true);
+        node.graph?.setDirtyCanvas?.(true, true);
+    }
+    return removed;
 }
 
 /**
@@ -480,6 +576,11 @@ export function ensurePreviewRule() {
  */
 export function applyPreviewMode(node, mode, { skip = [] } = {}) {
     const wanted = nodePreviews({ nodePreviews: mode });
+    if (wanted === "panel") {
+        // Not a size: the widgets go away and the panel shows the sheet (see PANEL_PREVIEW_*).
+        removeNodePreviews(node, { skip });
+        return { mode: wanted, widgets: 0, hosts: 0 };
+    }
     const { widgets, hosts } = previewParts(node, { skip });
     const compact = wanted === "compact";
     if (compact) ensurePreviewRule();
@@ -553,6 +654,9 @@ export function applyPreviewMode(node, mode, { skip = [] } = {}) {
  */
 export function enforcePreviewCaps(node, mode, { skip = [] } = {}) {
     const wanted = nodePreviews({ nodePreviews: mode });
+    if (wanted === "panel") {
+        return { mode: wanted, changed: removeNodePreviews(node, { skip }) };
+    }
     const { widgets } = previewParts(node, { skip });
     if (wanted === "full") return { mode: wanted, changed: 0 };
     let changed = 0;
@@ -1311,6 +1415,8 @@ export function readState(payload) {
         compactKnobs: data?.ui?.compactKnobs !== false,
         // How big ComfyUI's own output previews under the panel may be.
         nodePreviews: nodePreviews({ nodePreviews: data?.ui?.nodePreviews }),
+        // How big the panel's OWN preview of the sheet is (its Results tab).
+        panelPreview: panelPreview({ panelPreview: data?.ui?.panelPreview }),
         // Whether the panel polls the sheet folder on its own (off by default).
         autoRefresh: autoRefresh({ autoRefresh: data?.ui?.autoRefresh }),
         build: {
@@ -1358,6 +1464,7 @@ export function toPayload(state) {
     payload.ui = {
         compactKnobs: compactKnobs(state),
         nodePreviews: nodePreviews(state),
+        panelPreview: panelPreview(state),
         autoRefresh: autoRefresh(state),
     };
     for (const group of REF_GROUPS) {
@@ -1946,12 +2053,29 @@ export function buildSheetInterface({ state, hooks = {} }) {
             hooks.setPreviewMode?.(state.nodePreviews);
             persist();
             const label = (NODE_PREVIEW_LABELS.find(([id]) => id === state.nodePreviews) || [])[1];
-            notify(state.nodePreviews === "off"
-                ? "node previews hidden - the Results tab still has the sheet and the frames"
-                : `node previews: ${String(label || state.nodePreviews).toLowerCase()}`);
+            notify(state.nodePreviews === "panel"
+                ? "ComfyUI's own node previews are off - the sheet is in the Results tab"
+                : state.nodePreviews === "off"
+                    ? "no previews at all - the Results tab still has the sheet and the frames"
+                    : `node previews: ${String(label || state.nodePreviews).toLowerCase()}`);
         },
     );
     previewSelect.dataset.action = "node-previews";
+
+    // How big the panel's OWN preview of the finished sheet is (see renderResults). Independent
+    // of the node previews above on purpose: with `panel` mode the node has none at all, so this
+    // is the only place the sheet is visible without leaving the node.
+    const panelPreviewSelect = selectBox(
+        PANEL_PREVIEW_SIZES.map(([key, label]) => [key, `Panel preview: ${label}`]),
+        panelPreview(state),
+        (value) => {
+            state.panelPreview = panelPreview({ panelPreview: value });
+            persist();
+            renderResults();
+            scheduleFit(node);
+        },
+    );
+    panelPreviewSelect.dataset.action = "panel-preview";
     previewSelect.title =
         "ComfyUI's own preview under this node is sized from the node width. 'Small' caps it "
         + "and lets two fit side by side; 'Hidden' leaves the Results tab as the viewer.";
@@ -1965,6 +2089,7 @@ export function buildSheetInterface({ state, hooks = {} }) {
         ),
         element("span", { className: "mmx-muted", textContent: "previews" }, { marginLeft: "8px" }),
         previewSelect,
+        panelPreviewSelect,
         element("span", {}, { flex: "1 1 auto" }),
         button("Re-read node", () => {
             syncSettings();
@@ -3778,9 +3903,41 @@ export function buildSheetInterface({ state, hooks = {} }) {
             return;
         }
         if (shown.sheetUrl) {
-            results.append(element("img", { src: viewUrl(shown.sheetUrl), className: "mmx-sheet-preview" }, {
-                maxWidth: "100%", border: "1px solid var(--mmx-line)", borderRadius: "6px", marginBottom: "4px",
-            }));
+            const size = panelPreview(state);
+            const height = PANEL_PREVIEW_HEIGHTS[size] || 0;
+            if (size !== "off") {
+                const image = element("img", {
+                    src: viewUrl(shown.sheetUrl),
+                    className: "mmx-sheet-preview",
+                    title: `${shown.sheetFile || "sheet"} - click to open it full size`,
+                }, height
+                    ? { maxHeight: `${height}px`, width: "auto", maxWidth: "100%" }
+                    : { width: "100%", height: "auto" });
+                const link = element("a", {
+                    href: viewUrl(shown.sheetUrl), target: "_blank", rel: "noreferrer",
+                }, { display: "block", marginBottom: "4px" });
+                link.append(image);
+                results.append(link);
+                // The newest cell clip, playable in place: with `panel` preview mode this is the
+                // only preview the node has, and a <video> beats a link you have to leave for.
+                const withClip = (shown.cells || []).find((cell) => cell.clipUrl);
+                if (withClip && size !== "small") {
+                    const video = element("video", {
+                        src: viewUrl(withClip.clipUrl),
+                        controls: true, loop: true, muted: true, playsInline: true,
+                        className: "mmx-clip-preview",
+                        title: `${withClip.id} - the clip this cell rendered (${withClip.clipFile || ""})`,
+                    }, height
+                        ? { maxHeight: `${height}px`, maxWidth: "100%", marginBottom: "4px" }
+                        : { width: "100%", maxWidth: "100%", marginBottom: "4px" });
+                    results.append(video);
+                }
+            } else {
+                results.append(element("div", {
+                    textContent: `sheet: ${shown.sheetFile || shown.sheetUrl}`,
+                    className: "mmx-muted",
+                }, { marginBottom: "4px" }));
+            }
         }
         results.append(element("div", {
             textContent: `${shown.counts?.rendered ?? 0}/${shown.counts?.cells ?? 0} cell(s) rendered · `
@@ -3944,7 +4101,10 @@ export function buildSheetInterface({ state, hooks = {} }) {
         // switch has to agree with.
         state.autoRefresh = autoRefresh(fresh);
         auto.checked = state.autoRefresh;
-        previewSelect.value = nodePreviews(fresh);
+        state.panelPreview = panelPreview(fresh);
+        state.nodePreviews = nodePreviews(fresh);
+        previewSelect.value = state.nodePreviews;
+        panelPreviewSelect.value = state.panelPreview;
         syncSettings();
         refresh();
         return state;

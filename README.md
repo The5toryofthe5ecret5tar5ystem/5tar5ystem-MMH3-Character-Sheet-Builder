@@ -176,10 +176,21 @@ setting nobody chose.
    wall of knobs.
 3. In **Cells** - tick views / poses / expressions and press **Build cells**:
    * Views: face close up, portrait (chest + face), full body front, full body
-     90 deg side, full body from behind
-   * Poses: neutral, A-pose, T-pose
-   * Expressions: neutral, smile, smirk, frown, anger, fear, surprised,
-     embarrassed, crying
+     90 deg side, full body from behind, **3/4 front**, **3/4 back**, **full body from
+     above (high angle)**, **full body from below (low angle)**, **over the shoulder**,
+     **head profile**, **back of the head and hair**, **hands**, **eyes**, **legs and
+     footwear**
+   * Poses: neutral, A-pose, T-pose, **sitting, kneeling, crouching, lying on the back,
+     walking, contrapposto, hands on hips, arms crossed, reach to camera (POV), hand
+     through hair**
+   * Expressions: neutral, smile, smirk, frown, anger, fear, surprised, embarrassed,
+     crying, **eyes closed, lips parted, laugh, pout, wink, disgust, determined, pain,
+     aroused, pleasure, orgasm (peak)**
+   Pick which axis a view expands along by which ticks you leave on: a whole-body framing
+   gets one cell per ticked pose, a facial framing one per ticked expression, and a detail
+   crop (hands / legs / back of the head) exactly one neutral cell - it looks the same
+   whatever the pose or the mouth is doing. The **eyes** close-up is the deliberate
+   exception: an expression *is* what an eye shot is about.
    Then edit each cell (extra prompt, frames, seed, pick mode, continuation, order).
    The **Latent continuation** switch at the top of the tab is the sheet-wide
    setting (`Off` / `Auto` / `On` - use `Auto`); each cell's `cont:` control overrides
@@ -226,14 +237,30 @@ space) - so 24 knobs cost roughly 500px of node height that the grid fits into ~
 ### Node previews (the same Settings tab)
 
 ComfyUI's own output previews under the node are sized by the frontend, and two of them stack into a
-very tall node. The **previews** selector next to *Compact node* changes that:
+very tall node. The **previews** selector next to *Compact node* decides what happens to them:
 
 | Mode | What it does |
 | --- | --- |
-| **Small (side by side)** (default) | Caps the sheet preview and the cell-clip preview at 200px tall, width following each media's own shape - so the node stays the height of its panel and two previews sit next to each other instead of stacking. |
-| **Full width (stacked)** | Gives each preview the height its own aspect ratio needs for the node's current width, so the media fills the width edge to edge (~580px for a 16:9 sheet in a 1000px node). Two previews stack, because two full-width images cannot sit side by side. Follows the node when it is resized, and stops at 720px tall - a portrait cell clip would otherwise ask for ~1780px. |
-| **Full size (ComfyUI default)** | Hands the previews back to ComfyUI's own sizing (the pack restores each widget's original layout function). The preview then takes whatever height the node has left over, which is why it can be much taller than the media needs. |
-| **Hidden** | No node previews at all; the **Results** tab is the viewer. |
+| **Panel only (no node preview)** (default) | **Removes** ComfyUI's own preview widgets from the node and clears the images they are built from, so the node is only as tall as its panel. The sheet is shown inside the panel instead (Results tab) - see *Panel preview* below. |
+| **Small (side by side)** | Caps the sheet preview and the cell-clip preview at 200px tall, width following each media's own shape - two previews sit next to each other instead of stacking. |
+| **Full width (stacked)** | Gives each preview the height its own aspect ratio needs for the node's current width, so the media fills the width edge to edge (~580px for a 16:9 sheet in a 1000px node). Two previews stack. Follows the node when it is resized, and stops at 720px tall. |
+| **Full size (ComfyUI default)** | Hands the previews back to ComfyUI's own sizing. |
+| **Hidden (no preview anywhere)** | No node previews, and the panel's own preview is set to *Off* as well. |
+
+**Why "Panel only" is the default.** Sizing the frontend's previews is a losing game: it creates
+`$$canvas-image-preview` **when the sheet image finishes loading**, with its own
+`computeLayoutSize(){return{minHeight:220,minWidth:1}}` and no maximum. Measured on a real node that is
+1053px of preview and a **2442px** node - and a cap only lands if a draw pass or the background keeper
+happens to run afterwards, which is exactly what a render finishing in a background tab does not do.
+Removing the widget (the frontend's own remover does `onRemove()` + `splice`, so this is a supported
+move) leaves nothing to argue with. The sweep runs on every draw pass and on the 400ms keeper, because
+the frontend re-adds the widget whenever new outputs arrive.
+
+**Panel preview** is its own select next to *previews*: `Off` / `Small` (240px) / `Medium` (420px,
+default) / `Full width`. It sizes the sheet image the **panel** draws in its Results tab - the sheet
+plus the newest cell clip, both served from the output folder, both openable full size by clicking.
+Two independent knobs on purpose: the node can keep a small ComfyUI preview while the panel shows a
+big one, or the other way round.
 
 **Why the compact cap cannot also be full width.** ComfyUI *contains* a preview inside the box the
 layout hands it and never upscales it - both the grid calculation and the canvas draw end in

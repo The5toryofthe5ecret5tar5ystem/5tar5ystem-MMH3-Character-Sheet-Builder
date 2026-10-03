@@ -1844,8 +1844,8 @@ ok.push("reorder / slot helpers behave");
 
     assert.equal(core.previewHeight("compact"), core.PREVIEW_COMPACT_HEIGHT);
     assert.equal(core.previewHeight("full"), 0, "full size is the frontend's own business");
-    assert.equal(core.nodePreviews({}), "compact", "compact is the default");
-    assert.equal(core.nodePreviews({ nodePreviews: "nonsense" }), "compact");
+    assert.equal(core.nodePreviews({}), "panel", "the panel's own preview is the default");
+    assert.equal(core.nodePreviews({ nodePreviews: "nonsense" }), "panel");
 
     const parts = core.previewParts(node, { skip });
     assert.equal(parts.widgets.length, 2, "the image host and the animation widget");
@@ -1905,7 +1905,7 @@ ok.push("reorder / slot helpers behave");
 
     // The preference travels in the payload and the panel offers it next to the results.
     assert.equal(core.readState(JSON.stringify({ ui: { nodePreviews: "off" } })).nodePreviews, "off");
-    assert.equal(core.toPayload(core.readState("")).ui.nodePreviews, "compact");
+    assert.equal(core.toPayload(core.readState("")).ui.nodePreviews, "panel");
     const previewCalls = [];
     const previewState = core.readState("");
     const previewPanel = core.buildSheetInterface({
@@ -1917,8 +1917,8 @@ ok.push("reorder / slot helpers behave");
     });
     const select = previewPanel.container.querySelector('[data-action="node-previews"]');
     assert.ok(select, "the Results tab offers a node-preview control");
-    assert.deepEqual([...select.options].map((o) => o.value), ["compact", "width", "full", "off"]);
-    assert.equal(select.value, "compact");
+    assert.deepEqual([...select.options].map((o) => o.value), ["panel", "compact", "width", "full", "off"]);
+    assert.equal(select.value, "panel", "the panel's own preview is the default");
     select.value = "off";
     select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
     assert.deepEqual(previewCalls, ["off"], "the wiring is asked to resize them");
@@ -2004,6 +2004,113 @@ ok.push("reorder / slot helpers behave");
     core.applyPreviewMode(widthNode, "full", {});
     assert.equal("computeLayoutSize" in widthHostWidget, false);
     ok.push("node previews: full width - the height is computed from the media's aspect");
+}
+
+// --- panel-only previews: remove them instead of sizing them ----------------------
+// Sizing lost: the frontend creates `$$canvas-image-preview` when the sheet image lands,
+// with its own 220-min/unbounded function, and the cap only lands if a draw pass happens
+// afterwards. Measured on a real node: 1053px of preview, a 2442px node. So the default
+// mode takes the widget away and the panel shows the sheet itself.
+{
+    const hostWrap = document.createElement("div");
+    hostWrap.className = core.PREVIEW_HOST_CLASS;
+    const lateWidget = { name: "$$canvas-image-preview", options: {} };
+    const hostWidget = { name: "video-preview", element: hostWrap, options: {} };
+    const panelWidget = { name: "h3_character_sheet_ui", element: document.createElement("div") };
+    const node = {
+        size: [620, 2400], widgets: [panelWidget, hostWidget, lateWidget],
+        imgs: [{ naturalWidth: 1200, naturalHeight: 800 }], animatedImages: [{}, {}],
+        setDirtyCanvas() {}, graph: { setDirtyCanvas() {} },
+    };
+    const skip = ["h3_character_sheet_ui", "sheet_data"];
+
+    assert.equal(core.previewHeight("panel"), 0, "the fit gets no preview height to add");
+    assert.equal(core.nodePreviews({ nodePreviews: "panel" }), "panel");
+    const applied = core.applyPreviewMode(node, "panel", { skip });
+    assert.equal(applied.mode, "panel");
+    assert.deepEqual(node.widgets.map((w) => w.name), ["h3_character_sheet_ui"],
+        "both of ComfyUI's preview widgets are gone, the panel's own survives");
+    assert.deepEqual(node.imgs, [], "and the images they are built FROM are cleared");
+    assert.deepEqual(node.animatedImages, []);
+
+    // The frontend re-adds them when new outputs land: the next pass takes them away again.
+    node.widgets.push({ name: "$$canvas-image-preview", options: {} });
+    node.imgs = [{ naturalWidth: 1200, naturalHeight: 800 }];
+    const swept = core.enforcePreviewCaps(node, "panel", { skip });
+    assert.equal(swept.changed, 1, "a late preview widget is reported, so the node re-fits");
+    assert.deepEqual(node.widgets.map((w) => w.name), ["h3_character_sheet_ui"]);
+    assert.deepEqual(node.imgs, []);
+    assert.equal(core.enforcePreviewCaps(node, "panel", { skip }).changed, 0,
+        "and a clean pass costs nothing");
+
+    // The panel's own preview has its own size, independent of the node previews.
+    assert.equal(core.panelPreview({}), "medium", "a medium sheet by default");
+    assert.equal(core.panelPreview({ panelPreview: "nonsense" }), "medium");
+    assert.equal(core.PANEL_PREVIEW_HEIGHTS.off, 0);
+    const panel = core.buildSheetInterface({
+        state: core.readState(""),
+        hooks: { status: () => {}, listResults: async () => null },
+    });
+    const sizeSelect = panel.container.querySelector('[data-action="panel-preview"]');
+    assert.ok(sizeSelect, "the Settings tab offers a panel-preview size");
+    assert.deepEqual([...sizeSelect.options].map((o) => o.value), ["off", "small", "medium", "full"]);
+    assert.equal(sizeSelect.value, "medium");
+
+    // The panel's own preview: the sheet at the chosen size, plus the newest clip.
+    const listing = {
+        sheetUrl: "/view?filename=sheet.png&type=output",
+        sheetFile: "sheet.png",
+        dir: "/tmp/sheet",
+        counts: { rendered: 1, cells: 1, frames: 4 },
+        cells: [
+            { id: "c1", view: "front", pose: "neutral", expression: "neutral", frames: [],
+                clipUrl: "/view?filename=c1.mp4&type=output", clipFile: "c1.mp4" },
+        ],
+    };
+    const previewPanel = core.buildSheetInterface({
+        state: core.readState(""),
+        hooks: { status: () => {}, listResults: async () => listing },
+    });
+    previewPanel.renderResults(listing);
+    const sheetImg = previewPanel.results.querySelector("img.mmx-sheet-preview");
+    assert.ok(sheetImg, "the Results tab shows the sheet itself");
+    assert.equal(sheetImg.style.maxHeight, `${core.PANEL_PREVIEW_HEIGHTS.medium}px`,
+        "at the chosen height, so a 12MB sheet cannot own the node");
+    assert.ok(previewPanel.results.querySelector("video.mmx-clip-preview"),
+        "and the newest cell clip plays in place instead of only linking out");
+
+    previewPanel.setState(core.readState(JSON.stringify({
+        ui: { panelPreview: "full" } })));
+    previewPanel.renderResults(listing);
+    const wide = previewPanel.results.querySelector("img.mmx-sheet-preview");
+    assert.equal(wide.style.width, "100%", "full width means the panel's width, not the node's");
+    assert.equal(wide.style.maxHeight, "");
+
+    previewPanel.setState(core.readState(JSON.stringify({ ui: { panelPreview: "off" } })));
+    previewPanel.renderResults(listing);
+    assert.equal(previewPanel.results.querySelector("img.mmx-sheet-preview"), null,
+        "off leaves the file name and the per-cell strips");
+    ok.push("node previews: panel-only mode removes ComfyUI's previews and the panel shows the sheet");
+}
+
+// --- the tick lists a sheet is built from -----------------------------------------
+// The backend owns the prompt text; these are only the labels the Cells tab draws, so the
+// check is that the new framings/poses/expressions are reachable at all.
+{
+    const keys = (list) => list.map(([key]) => key);
+    for (const key of ["three-quarter", "three-quarter-back", "high-angle", "low-angle",
+        "over-shoulder", "face-profile", "head-back", "hands", "eyes", "legs"]) {
+        assert.ok(keys(core.VIEWS).includes(key), `the panel offers ${key}`);
+    }
+    for (const key of ["sitting", "kneeling", "crouching", "lying", "walking",
+        "contrapposto", "hands-on-hips", "arms-crossed", "reach-camera", "hair-touch"]) {
+        assert.ok(keys(core.POSES).includes(key), `the panel offers the ${key} pose`);
+    }
+    for (const key of ["closed-eyes", "lips-parted", "laugh", "pout", "wink", "disgust",
+        "determined", "pain", "aroused", "pleasure", "orgasm"]) {
+        assert.ok(keys(core.EXPRESSIONS).includes(key), `the panel offers the ${key} expression`);
+    }
+    ok.push("cells: the new framings, poses and expressions are all offered by the panel");
 }
 
 // --- the one button that creates the render is visibly different -----------------

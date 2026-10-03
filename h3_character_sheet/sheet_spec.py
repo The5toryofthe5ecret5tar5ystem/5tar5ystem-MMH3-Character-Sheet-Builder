@@ -146,6 +146,89 @@ VIEWS: tuple[SheetOption, ...] = (
         "standing. " + _FULL_BODY_SHOT + " Face turned away from the camera: no eye "
         "contact, the subject is not looking at the viewer.",
     ),
+    # --- the angles a turnaround is missing without ------------------------------
+    # Front / profile / back is a 90-degree walk; the 45s are what teach a model that the
+    # head is a solid. A three-quarter view is where an identity either holds up or
+    # collapses, so it earns a cell in any sheet used to lock a face down.
+    SheetOption(
+        "three-quarter",
+        "Three-quarter (45 degrees)",
+        "Full body turned 45 degrees away from the camera, three-quarter view: the near "
+        "shoulder is closer to the lens, the far shoulder sits behind it, and both eyes "
+        "are still visible. " + _FULL_BODY_SHOT + " Both feet are on the ground and "
+        "visible.",
+    ),
+    SheetOption(
+        "three-quarter-back",
+        "Three-quarter back (135 degrees)",
+        "Full body seen from 135 degrees behind and to one side: the back and the far "
+        "shoulder fill the frame, and the head is turned away so only the cheek, jaw and "
+        "ear are visible - no eye contact. " + _FULL_BODY_SHOT + " Both feet are on the "
+        "ground and visible.",
+    ),
+    # --- head detail: the parts a whole-body cell renders too small to teach --------
+    SheetOption(
+        "face-profile",
+        "Head profile (90 degrees)",
+        "Tight close-up of the head in profile at exactly 90 degrees: forehead, nose, "
+        "lips, chin, jaw line, ear and the hairline are all inside the frame, gaze level "
+        "and away from the camera - head and neck only, not a full body.",
+    ),
+    SheetOption(
+        "head-back",
+        "Back of the head and hair",
+        "Close-up of the back of the head from directly behind: the whole hairline, the "
+        "nape, both ears in silhouette and the length and ends of the hair are inside the "
+        "frame. No face and no eyes are visible - the subject is turned away.",
+    ),
+    # --- camera angles: the same person, read from above and below -----------------
+    # Worth their own cells because they are what stops a LoRA learning "shot from
+    # chest height, always": the model needs to see the head from above and the legs
+    # from below to keep a person three-dimensional under its own camera choices.
+    SheetOption(
+        "high-angle",
+        "Full body (from above, high angle)",
+        "Full body from a high angle: the camera looks down at about 30 degrees, so the "
+        "head is nearest the lens and the feet are furthest away. " + _FULL_BODY_SHOT
+        + " Both feet are on the ground and visible.",
+    ),
+    SheetOption(
+        "low-angle",
+        "Full body (from below, low angle)",
+        "Full body from a low angle: the camera sits low and looks up at about 30 "
+        "degrees, so the legs and hips are nearest the lens and the head is furthest "
+        "away - an upward view of the whole figure, not a close-up. " + _FULL_BODY_SHOT
+        + " Both feet are on the ground and visible.",
+    ),
+    SheetOption(
+        "over-shoulder",
+        "Over the shoulder (looking back)",
+        "Seen from behind and slightly to one side, over the near shoulder: that "
+        "shoulder fills the near edge of the frame while the head is turned back over it "
+        "to look straight into the lens, eye contact with the viewer. " + _FULL_BODY_SHOT,
+    ),
+    # --- detail crops: the things a sheet is used for and a full body hides --------
+    SheetOption(
+        "hands",
+        "Hands (close up)",
+        "Close-up of both hands raised beside the chest, palms toward the camera with "
+        "the fingers spread: knuckles, nails, thumbs and the backs of the hands are all "
+        "inside the frame. Only the hands and wrists are in shot - no face.",
+    ),
+    SheetOption(
+        "eyes",
+        "Eyes (close up)",
+        "Extreme close-up of the eyes only: both eyes, lashes, brows and the bridge of "
+        "the nose inside the frame, iris colour and shape clear, looking straight into "
+        "the lens. No mouth, no chin and no body in shot.",
+    ),
+    SheetOption(
+        "legs",
+        "Legs and footwear",
+        "Framed from the waist down: hips, both legs, legwear if any, and the footwear "
+        "all inside the frame, standing straight with the feet together and pointing "
+        "toward the camera. No head and no face in shot.",
+    ),
 )
 
 #: How far the camera is from the subject for each view, in three steps. Latent
@@ -154,14 +237,64 @@ VIEWS: tuple[SheetOption, ...] = (
 #: model rather than helped: a chest-up cell continuing a face close-up stays a face
 #: close-up, and a full-body cell continuing a chest-up cell lands mid-zoom ("the
 #: feet are cut off"). Continuation therefore only chains cells that share a
-#: distance (front -> profile -> back: same scale, different angle, which is exactly
-#: where it shines), unless the user forces it with ``continuity="on"``.
+#: distance (front -> three-quarter -> profile -> back: same scale, different angle,
+#: which is exactly where it shines), unless the user forces it with
+#: ``continuity="on"``. A crop is deliberately NOT the distance of the framing it was
+#: cut from: a legs cell continuing a full body would hold the crop.
 FRAMING_DISTANCES: dict[str, str] = {
     "face": "close",
+    "face-profile": "close",
+    "head-back": "close",
+    "eyes": "close",
+    "hands": "close",
+    "legs": "close",
     "portrait": "medium",
     "front": "full",
+    "three-quarter": "full",
+    "three-quarter-back": "full",
     "profile": "full",
     "back": "full",
+    "high-angle": "full",
+    "low-angle": "full",
+    "over-shoulder": "full",
+}
+
+#: Framings that show the whole figure: a pose option belongs in the prompt.
+POSE_FRAMINGS: tuple[str, ...] = (
+    "front", "three-quarter", "profile", "three-quarter-back", "back",
+    "high-angle", "low-angle", "over-shoulder",
+)
+
+#: Framings where the face is the subject: the expression is always stated.
+FACE_FRAMINGS: tuple[str, ...] = ("face", "portrait", "face-profile", "eyes")
+
+#: Framings seen from the side, where an expression only reads in profile.
+PROFILE_FRAMINGS: tuple[str, ...] = ("profile", "face-profile")
+
+#: Framings nobody can see a face in - an expression there would be a lie.
+NO_FACE_FRAMINGS: tuple[str, ...] = ("back", "three-quarter-back", "head-back", "hands", "legs")
+
+#: Which axis "Build cells" expands a view along: ``pose`` for whole-body framings (one
+#: cell per ticked pose), ``expression`` where the face is the subject (one cell per
+#: ticked expression), ``single`` for the detail crops - a crop of the hands does not
+#: change with a standing pose or a smile, so it gets exactly one neutral cell instead
+#: of multiplying the sheet by ticks that cannot show.
+VIEW_VARIANTS: dict[str, str] = {
+    "front": "pose",
+    "three-quarter": "pose",
+    "profile": "pose",
+    "three-quarter-back": "pose",
+    "back": "pose",
+    "high-angle": "pose",
+    "low-angle": "pose",
+    "over-shoulder": "pose",
+    "face": "expression",
+    "portrait": "expression",
+    "face-profile": "expression",
+    "eyes": "expression",
+    "head-back": "single",
+    "hands": "single",
+    "legs": "single",
 }
 
 
@@ -169,6 +302,68 @@ POSES: tuple[SheetOption, ...] = (
     SheetOption("neutral", "Neutral", "Neutral relaxed pose, arms at the sides."),
     SheetOption("a-pose", "A-pose", "A-pose, arms held out from the body at about 45 degrees."),
     SheetOption("t-pose", "T-pose", "T-pose, arms held straight out horizontally, legs together."),
+    # Every pose below is written to need no furniture: the backdrop is flat and has no
+    # props (see _NO_SET), so "sitting on a chair" would make the model invent a chair
+    # and put it in the frame.
+    SheetOption(
+        "sitting",
+        "Sitting (on the floor)",
+        "Seated on the floor, legs folded to one side, one hand resting on a thigh, "
+        "back straight and shoulders open.",
+    ),
+    SheetOption(
+        "kneeling",
+        "Kneeling",
+        "Kneeling upright: both knees on the floor with the shins flat, thighs "
+        "vertical, back straight, arms relaxed at the sides.",
+    ),
+    SheetOption(
+        "crouching",
+        "Crouching",
+        "Crouching low on the balls of the feet, knees together, elbows resting on the "
+        "knees, head level.",
+    ),
+    SheetOption(
+        "lying",
+        "Lying on the back",
+        "Lying on her back flat on the floor, body in one straight line, arms at the "
+        "sides and toes pointed, head turned to face the camera.",
+    ),
+    SheetOption(
+        "walking",
+        "Walking",
+        "Mid-stride, walking toward the camera: one foot forward with the heel landing "
+        "and one back off the ground, arms swinging naturally.",
+    ),
+    SheetOption(
+        "contrapposto",
+        "Contrapposto",
+        "Weight on one leg with that hip pushed out and the other knee relaxed, "
+        "shoulders tilted the other way, chin level - a relaxed fashion pose.",
+    ),
+    SheetOption(
+        "hands-on-hips",
+        "Hands on hips",
+        "Standing with both hands on the hips, elbows out and back straight.",
+    ),
+    SheetOption(
+        "arms-crossed",
+        "Arms crossed",
+        "Standing with the arms folded across the chest, shoulders square, chin level.",
+    ),
+    SheetOption(
+        "reach-camera",
+        "Reach to camera (POV)",
+        "One arm reaching straight toward the camera with the hand open and closest to "
+        "the lens in the near foreground, slightly out of focus, the rest of the body "
+        "further back - forced perspective, as if offering a hand to the viewer.",
+    ),
+    SheetOption(
+        "hair-touch",
+        "Hand through hair",
+        "One hand lifted, fingers through the hair, sweeping it back from the face and "
+        "over the ear, elbow raised and shoulder lifted.",
+    ),
 )
 
 EXPRESSIONS: tuple[SheetOption, ...] = (
@@ -181,6 +376,49 @@ EXPRESSIONS: tuple[SheetOption, ...] = (
     SheetOption("surprised", "Surprised", "Surprised expression, eyebrows raised, mouth open."),
     SheetOption("embarrassed", "Embarrassed", "Embarrassed expression, flushed cheeks, averted eyes."),
     SheetOption("crying", "Crying", "Crying, wet eyes, distressed expression."),
+    # --- the in-betweens every blink and every breath needs ------------------------
+    # A sheet with only big emotions teaches big emotions: closed eyes, a parted mouth
+    # and a laugh are the states a video spends most of its frames in.
+    SheetOption(
+        "closed-eyes",
+        "Eyes closed",
+        "Eyes closed and relaxed with a soft closed-mouth smile, brows smooth, calm.",
+    ),
+    SheetOption(
+        "lips-parted",
+        "Lips parted",
+        "Lips slightly parted, relaxed gaze, soft brows and a calm face - the natural "
+        "breath between expressions, not a smile and not a frown.",
+    ),
+    SheetOption("laugh", "Laugh", "Laughing openly: mouth wide, eyes crinkled shut, head tipped back a little."),
+    SheetOption("pout", "Pout", "Pouting: lips pushed out, brows slightly drawn, a playfully displeased look."),
+    SheetOption("wink", "Wink", "One eye closed in a wink, the other open and engaged, small one-sided smile."),
+    SheetOption("disgust", "Disgust", "Disgust: nose wrinkled, upper lip raised, brows drawn down and together."),
+    SheetOption("determined", "Determined", "Determined: eyes narrowed and steady, brows level and drawn in, jaw set."),
+    SheetOption("pain", "Pain", "Pain: eyes squeezed shut, brows drawn up and together, mouth open in a grimace."),
+    # --- arousal: written as face states, which is what a sheet cell can hold ------
+    # These are deliberately clinical: the pack's job is to give the model a repeatable
+    # expression, and "aroused" in a prompt without a described face just produces a
+    # blank stare. Flush, lid height and mouth shape are the levers that read.
+    SheetOption(
+        "aroused",
+        "Aroused",
+        "Aroused: heavy-lidded eyes looking into the lens, pupils wide, lips parted, "
+        "cheeks flushed, breathing deep, brows slightly raised.",
+    ),
+    SheetOption(
+        "pleasure",
+        "Pleasure",
+        "Deep pleasure: eyes half closed and rolled slightly back, head tipped back, "
+        "mouth open, brows lifted, cheeks and chest flushed, blissful.",
+    ),
+    SheetOption(
+        "orgasm",
+        "Orgasm (peak)",
+        "At the peak: eyes squeezed shut or rolled back, brows drawn up and together, "
+        "mouth open wide in a gasp, jaw tense, whole face flushed and strained, neck "
+        "cords visible.",
+    ),
 )
 
 #: What the model is told to put behind the figure. A flat, uniform backdrop is
@@ -1292,13 +1530,30 @@ ATTRIBUTE_LABELS: dict[str, str] = {
     "voice": "the voice",
 }
 
+#: What a tight head shot can show: nothing below the neck, and no body under the collar.
+_HEAD_ONLY: tuple[str, ...] = (
+    "clothing", "body", "breasts", "intimate", "legwear", "shoes",
+)
+
 #: Attributes a framing cannot show: a from-behind cell must not be asked to match
 #: eyes or glasses nobody can see, a close-up must not be told about an outfit, shoes or
 #: a body it cannot fit in frame, and a chest-up portrait stops above the groin.
 ATTRIBUTES_HIDDEN_BY_VIEW: dict[str, tuple[str, ...]] = {
     "back": ("face", "eyes", "glasses"),
-    "face": ("clothing", "body", "breasts", "intimate", "legwear", "shoes"),
+    # 135 degrees: the face is nearly gone but the jaw, ear and hair are not.
+    "three-quarter-back": ("eyes", "glasses"),
+    # Seen from behind: the hair and the back are the whole shot.
+    "head-back": ("face", "eyes", "glasses") + _HEAD_ONLY,
+    "face": _HEAD_ONLY,
+    # The same head, from the side: same ceiling on what the cell can contain.
+    "face-profile": _HEAD_ONLY,
+    "eyes": _HEAD_ONLY,
     "portrait": ("intimate", "legwear", "shoes"),
+    # A crop of the hands shows no body, but the sleeves are in frame - so clothing stays.
+    "hands": ("body", "breasts", "intimate"),
+    # Waist down: no face in the shot, and the guard in cell_references keeps the
+    # identity reference wired even when its only claim is the face.
+    "legs": ("face", "eyes", "glasses"),
 }
 
 #: Attributes that decide *who* the person is. A reference that claims none of them
@@ -1880,14 +2135,15 @@ def build_cell_prompt(spec: SheetSpec, cell: SheetCell, *, refs: list[SheetRef] 
     # A pose line always belongs on a full-body framing; on a face/portrait cell
     # it is still honoured when the user picked something other than neutral, so
     # unusual combinations (an angry full body, an A-pose close-up) survive.
-    if cell.view in ("front", "profile", "back") or cell.pose != "neutral":
+    if cell.view in POSE_FRAMINGS or cell.pose != "neutral":
         body.append(cell.pose_option.prompt)
-    if cell.view in ("face", "portrait"):
+    if cell.view in FACE_FRAMINGS:
         body.append(cell.expression_option.prompt)
-    elif cell.view != "back" and cell.expression != "neutral":
-        # front / profile: the expression still steers the shot. The from-behind view
-        # needs nothing here - its framing text already says the face is turned away.
-        scope = " Visible in profile only." if cell.view == "profile" else ""
+    elif cell.view not in NO_FACE_FRAMINGS and cell.expression != "neutral":
+        # A whole-body framing still takes an expression - it steers the face - and a
+        # profile only reads one from the side. A framing with no face in it gets
+        # nothing: "smiling" in a hands crop just invents a face at the edge of frame.
+        scope = " Visible in profile only." if cell.view in PROFILE_FRAMINGS else ""
         body.append(f"{cell.expression_option.prompt}{scope}")
 
     ref_keep = [
@@ -1926,9 +2182,12 @@ def cell_matrix(
 ) -> list[dict[str, Any]]:
     """Build the cell list for "generate the matrix" (panel convenience + tests).
 
-    A view that needs a pose only gets pose variants, a view that shows the face
-    only gets expression variants, and a view that needs neither (``portrait``
-    already includes a pose) gets a single neutral cell.
+    Which axis a view expands along comes from :data:`VIEW_VARIANTS`: a whole-body framing
+    gets one cell per ticked pose, a framing where the face is the subject gets one per
+    ticked expression, and a pure detail crop (the hands, the legs, the back of the head)
+    gets a single neutral cell - it looks the same whatever the standing pose or the mouth
+    is doing, so multiplying it would only spend renders. The eyes close-up is the
+    exception: an expression is exactly what an eye shot is about.
     """
     cells: list[dict[str, Any]] = []
     for view in views:
@@ -1936,10 +2195,11 @@ def cell_matrix(
         if view_key not in VIEW_KEYS:
             continue
         variants: list[tuple[str, str]] = []
-        if view_key in ("front", "profile", "back"):
+        axis = VIEW_VARIANTS.get(view_key, "single")
+        if axis == "pose":
             pose_keys = [str(p).strip().lower() for p in poses] or ["neutral"]
             variants = [(p, "neutral") for p in pose_keys if p in POSE_KEYS]
-        elif view_key in ("face", "portrait"):
+        elif axis == "expression":
             expression_keys = [str(e).strip().lower() for e in expressions] or ["neutral"]
             variants = [("neutral", e) for e in expression_keys if e in EXPRESSION_KEYS]
         if not variants:
@@ -1963,6 +2223,11 @@ __all__ = [
     "ATTRIBUTE_LABELS",
     "ATTRIBUTES_HIDDEN_BY_VIEW",
     "attributes_hidden_by",
+    "POSE_FRAMINGS",
+    "FACE_FRAMINGS",
+    "PROFILE_FRAMINGS",
+    "NO_FACE_FRAMINGS",
+    "VIEW_VARIANTS",
     "BLUR_KINDS",
     "BLUR_MODES",
     "BLUR_SCOPES",
