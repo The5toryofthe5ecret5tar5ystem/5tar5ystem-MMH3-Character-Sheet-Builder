@@ -40,22 +40,42 @@ class _Sender:
 
 
 class _StubSource:
-    """A decoder that costs nothing: the real tiny VAE hands frames to a worker thread, which
+    """A decoder that costs nothing: the real tiny VAE hands clips to a worker thread, which
     would make these tests a race. Its name is deliberately not "taeh3" so the wrapper decodes
-    inline - the worker itself is covered by the real-decoder test."""
+    inline - the worker itself is covered by the real-decoder tests below."""
 
     name = "stub"
 
-    def frame(self, latent):
+    def __init__(self, frames: int = 3) -> None:
+        self.count = frames
+
+    def clip(self, latent, *, tokens, max_frames, budget):
         from PIL import Image
 
-        return Image.new("RGB", (latent.shape[-1], latent.shape[-2]))
+        if getattr(latent, "ndim", 0) == 5:
+            size = (latent.shape[-1], latent.shape[-2])
+        else:
+            size = (8, 8)
+        made = [Image.new("RGB", size) for _ in range(min(self.count, max(1, tokens)))]
+        return ps.strided(made, max_frames), max(1, tokens), 0.0
 
 
 def _wrapper(**kwargs):
     sender = kwargs.pop("sender", None) or _Sender()
     kwargs.setdefault("source", _StubSource())
     return ps._SheetPreviewWrapper(sender=sender, **kwargs), sender
+
+
+def executor_that_streams(steps: int = 1):
+    """A sampler stand-in that calls the callback `steps` times."""
+
+    def executor(noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar,
+                 seed, latent_shapes=None):
+        for step in range(steps):
+            callback(step, _nested_latent(), None, steps)
+        return "sampled"
+
+    return executor
 
 
 # --------------------------------------------------------------------------- #
@@ -139,13 +159,50 @@ def test_the_wrapper_streams_frames_and_forwards_the_callback():
     assert result == "sampled"
     assert seen[-1] == [(1, 24, 3, 8, 8)], "latent_shapes must be forwarded to the sampler"
     assert ("callback", 0) in seen, "the sampler's own callback must still run"
-    assert len(sender.payloads) == 3, "one frame per step when the interval allows"
+    assert len(sender.payloads) == 3, "one clip per step when the interval allows"
     first = sender.payloads[0]
     assert first["name"] == "sheet" and first["node_id"] == 7
     assert first["cell"] == 1 and first["cells"] == 2
     assert (first["step"], first["steps"]) == (1, 3)
     assert first["image"].startswith("data:image/jpeg;base64,"), "a frame the panel can show"
     assert first["width"] > 0 and first["height"] > 0
+
+
+def test_a_clip_carries_its_frames_and_the_rate_to_play_them():
+    """A still says nothing about a video render: the payload is a loop, and the panel is told
+    how fast to play it."""
+    wrapper, sender = _wrapper(interval=0.0, max_frames=8, fps=10)
+    wrapper(executor_that_streams(), None, None, None, None, None, None, False, 1)
+    clip = sender.payloads[0]
+    assert clip["frame_count"] == 3
+    assert len(clip["frames"]) == 3, "the panel loops `frames`"
+    assert clip["frames"][0] == clip["image"], "`image` is the first frame, for a plain img"
+    assert clip["fps"] == 10
+    assert all(url.startswith("data:image/jpeg;base64,") for url in clip["frames"])
+
+
+def test_the_cell_that_is_on_screen_is_named_in_every_clip():
+    """The panel's re-roll button acts on the cell it is looking at, so it must be told which
+    one that is - an index would have to be mapped back to the sheet by guesswork."""
+    wrapper, sender = _wrapper(interval=0.0, cell_ids=["face-neutral-neutral", "front-a-pose"])
+
+    def executor(noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar,
+                 seed, latent_shapes=None):
+        for cell in range(2):
+            for step in range(2):
+                callback(step, _nested_latent(), None, 2)
+        return None
+
+    wrapper(executor, None, None, None, None, None, None, False, 1)
+    assert [clip["cell_id"] for clip in sender.payloads] == [
+        "face-neutral-neutral", "face-neutral-neutral", "front-a-pose", "front-a-pose",
+    ]
+
+
+def test_no_cell_ids_means_no_id_rather_than_a_wrong_one():
+    wrapper, sender = _wrapper(interval=0.0)
+    wrapper(executor_that_streams(), None, None, None, None, None, None, False, 1)
+    assert sender.payloads[0]["cell_id"] == ""
 
 
 def test_the_cell_counter_moves_on_every_new_sampler_call():
@@ -303,12 +360,16 @@ def test_the_latent2rgb_fallback_needs_no_model_and_decodes_in_milliseconds():
     assert source is not None and source.name == "latent2rgb"
     import torch
 
-    image = source.frame(torch.zeros(1, 24, 1, 16, 24))
-    assert image is not None and image.size == (24, 16)
+    latent = torch.zeros(1, 24, 4, 16, 24)
+    frames, used, per_token = source.clip(latent, tokens=4, max_frames=8, budget=1.5)
+    assert len(frames) == 4, "the cheap decoder loops the whole prefix it is asked for"
+    assert frames[0] is not None and used == 4 and per_token == 0.0
+    assert len(source.clip(latent, tokens=4, max_frames=2, budget=1.5)[0]) == 2, "and honours the cap"
 
 
 def test_a_tiny_vae_is_preferred_when_it_is_installed():
-    """On a box with vae_approx/taeh3* the preview is a real frame, not a colour blob."""
+    """On a box with vae_approx/taeh3* the preview is real frames, and how many of them is
+    measured rather than guessed: the first clip is one token, the next spends the budget."""
     from comfy.latent_formats import MiniMaxH3AV
 
     source = ps.build_frame_source(MiniMaxH3AV())
@@ -318,8 +379,16 @@ def test_a_tiny_vae_is_preferred_when_it_is_installed():
         pytest.skip("no taeh3 tiny VAE installed")
     import torch
 
-    image = source.frame(torch.zeros(1, 24, 1, 8, 12))
-    assert image is not None and image.width > 0 and image.height > 0
+    latent = torch.zeros(1, 24, 4, 16, 24)
+    frames, used, per_token = source.clip(latent, tokens=1, max_frames=8, budget=1.5)
+    assert frames and used == 1 and per_token > 0, "the first clip also measures the rate"
+    # The chooser: as many as the budget affords, at least three so the panel gets a loop,
+    # and a still only when even three would be too expensive.
+    assert source.tokens_for(143.0, 10) == 10, "a cheap cell decodes the whole clip"
+    assert source.tokens_for(1500.0, 10) == 3, "a slow one still loops the first three"
+    assert source.tokens_for(4000.0, 10) == 1, "and an unaffordable one falls back to a still"
+    assert source.tokens_for(0.0, 10) == 1, "an unmeasured rate stays at one token"
+    assert source.tokens_for(100.0, 2) == 2, "never more than the cell has"
 
 
 # --------------------------------------------------------------------------- #
@@ -385,3 +454,10 @@ def test_the_sheet_graph_attaches_the_preview_before_every_cell():
     assert re.search(r"live_preview=bool\(spec\.render\.live_preview\)", text), (
         "execute must pass the payload switch through"
     )
+
+def test_strided_keeps_both_ends_of_a_clip():
+    frames = list(range(10))
+    assert ps.strided(frames, 20) == frames, "a short clip is left alone"
+    assert ps.strided(frames, 1) == [0], "one frame means the first one"
+    picked = ps.strided(frames, 4)
+    assert len(picked) == 4 and picked[0] == 0 and picked[-1] == 9, "and both ends survive"

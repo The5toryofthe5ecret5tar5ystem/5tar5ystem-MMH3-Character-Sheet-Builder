@@ -2358,5 +2358,80 @@ ok.push("reorder / slot helpers behave");
     ok.push("the render's live frames show above the tabs and clear when the run ends");
 }
 
+// --- a clip, not a still: the frames loop, and the cell can be re-rolled ------
+{
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const retried = [];
+    const clip = core.buildSheetInterface({
+        state: core.readState(""),
+        hooks: {
+            status: () => {}, listResults: async () => null,
+            retryCell: async (request) => { retried.push(request); return { queued: true }; },
+        },
+    });
+    const frame = clip.liveFrame;
+    const frames = ["data:image/jpeg;base64,AAA", "data:image/jpeg;base64,BBB",
+                    "data:image/jpeg;base64,CCC"];
+    clip.setRunning(true);
+    clip.setLivePreview({ frames, fps: 30, cell: 2, cells: 5, step: 4, steps: 8,
+                          cell_id: "front-a-pose" });
+    assert.equal(frame.getAttribute("src"), frames[0], "the clip starts on its first frame");
+    assert.match(clip.liveMeta.textContent, /3-frame loop/, "and says it is a loop");
+    assert.match(clip.liveMeta.textContent, /cell 2\/5/, "with the cell it belongs to");
+    assert.ok(clip.livePlaying, "a multi-frame clip is played by the panel");
+    await sleep(140);                      // 30fps: ~4 frames' worth of the 33ms interval
+    assert.notEqual(clip.liveIndex, 0, "the loop advances");
+    assert.notEqual(frame.getAttribute("src"), frames[0], "and the shown frame changes");
+
+    // "This one is no good": the button re-rolls the cell that is on screen.
+    assert.ok(clip.liveRetry, "the strip offers a re-roll");
+    assert.equal(clip.liveRetry.disabled, false);
+    clip.liveRetry.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+    assert.deepEqual(retried, [{ cellId: "front-a-pose", cell: 2 }],
+        "the button asks the wiring to re-render that exact cell");
+
+    // A single frame is not a loop, and a panel with no wiring says so instead of failing.
+    clip.setLivePreview({ frames: [frames[0]], fps: 30, cell: 1, cells: 1, step: 1, steps: 4 });
+    assert.ok(!clip.livePlaying, "one frame is a still");
+    assert.match(clip.liveMeta.textContent, /1 frame/);
+    const said = [];
+    const lonely = core.buildSheetInterface({
+        state: core.readState(""),
+        hooks: { status: (text) => said.push(String(text)), listResults: async () => null },
+    });
+    await lonely.retryCell("front-a-pose");
+    assert.ok(said.some((line) => /needs the node wiring/.test(line)),
+        "re-rolling without a node is explained, not thrown");
+    clip.dispose();
+    lonely.dispose();
+    ok.push("clips loop at their own fps, and one cell can be re-rolled from the strip");
+}
+
+// --- the Results list offers the same re-roll --------------------------------
+{
+    const asked = [];
+    const panel = core.buildSheetInterface({
+        state: core.readState(""),
+        hooks: {
+            status: () => {}, assetUrl: (url) => url,
+            retryCell: async (request) => { asked.push(request); return { queued: true }; },
+            listResults: async () => ({
+                counts: { rendered: 2, cells: 2, frames: 44 },
+                cells: [{ id: "hero", frames: [] }, { id: "a-pose", frames: [] }],
+            }),
+        },
+    });
+    await panel.refreshResults();
+    const buttons = [...panel.results.querySelectorAll("[data-cell-retry]")];
+    assert.equal(buttons.length, 2, "every rendered cell can be re-rolled");
+    assert.equal(buttons[1].dataset.cellRetry, "a-pose");
+    buttons[1].dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+    assert.deepEqual(asked, [{ cellId: "a-pose" }], "and it names the row it belongs to");
+    panel.dispose();
+    ok.push("Results: each cell has its own new-seed button");
+}
+
 console.log("h3sheet_core: PASS");
 for (const line of ok) console.log(" -", line);

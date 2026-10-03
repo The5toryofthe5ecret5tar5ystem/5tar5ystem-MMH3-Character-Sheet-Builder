@@ -26,7 +26,7 @@ import {
     REF_GROUPS,
     PANEL_FIT,
     panelFitHeight,
-} from "./h3sheet_core.mjs?boot=h3sheet_v50";
+} from "./h3sheet_core.mjs?boot=h3sheet_v52";
 
 const CLASS = "MiniMaxH3CharacterSheet";
 const DOM_WIDGET = "h3_character_sheet_ui";
@@ -156,6 +156,86 @@ async function presetStore(node, action, body = {}) {
         body: JSON.stringify({ ...body, action, node_id: node.id, name: sheetName(node) }),
     });
     return response.json().catch(() => ({ ok: false, reason: `HTTP ${response.status}` }));
+}
+
+//: Seeds are written as H3's own kind of integer (a uint32 fits every sampler path).
+const CELL_SEED_MAX = 0xFFFFFFFF;
+
+/** Write a payload onto the node's `sheet_data` and keep the panel in step with it. */
+function writePayload(node, payload) {
+    const dataWidget = widgetOf(node, DATA_WIDGET);
+    if (dataWidget) dataWidget.value = JSON.stringify(payload);
+    const part = node._mmxSheet;
+    if (part) {
+        // The panel reads its cells (and their seeds) from its own state, so adopting the payload
+        // is what keeps a later hand-edit or a preset application from undoing the new seed.
+        part.state = readState(JSON.stringify(payload));
+        part.panel?.setState?.(part.state);
+    }
+    node.setDirtyCanvas?.(true, true);
+    node.graph?.setDirtyCanvas?.(true, true);
+    return payload;
+}
+
+/** Queue the graph the node belongs to (the panel's own Queue button, in effect). */
+async function queueRun(node) {
+    if (typeof app.queuePrompt === "function") return app.queuePrompt(0, 1);
+    // Older/newer frontends differ on where queueing lives; the graph->prompt pair is the
+    // documented fallback and is exactly what the Queue button does.
+    if (typeof app.graphToPrompt !== "function") throw new Error("this frontend cannot queue a prompt");
+    const { workflow, output } = await app.graphToPrompt();
+    return api.queuePrompt(0, { workflow, output });
+}
+
+/** Wait for ComfyUI's queue to drain, so a re-roll is not appended behind the run it cancelled. */
+async function waitForIdleQueue(attempts = 40, delayMs = 150) {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const empty = await api.fetchApi("/queue", { cache: "no-store" })
+            .then((response) => response.json())
+            .then((queue) => !(queue?.queue_running?.length || queue?.queue_pending?.length))
+            .catch(() => true);
+        if (empty) return true;
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    return false;
+}
+
+/**
+ * Re-render ONE cell with a new seed - the panel's "new seed" button.
+ *
+ * The flow, in order, and each step is why the next one is safe:
+ *
+ * 1. cancel the running prompt (only if this node's render is the one running), and wait for the
+ *    queue to drain - otherwise the re-roll would queue behind the run it just interrupted;
+ * 2. write a random seed onto that cell and scope the run to it (`render.onlyCells`), which the
+ *    node narrows the sheet to, leaving every other cell's frames on disk untouched;
+ * 3. queue, and remember what was re-rolled;
+ * 4. when the run succeeds, drop the scope and recompose the sheet from the folder — the other
+ *    cells come back from the frames they already had.
+ */
+async function retryCellRender(node, cellId) {
+    const part = node._mmxSheet;
+    if (!part) return { queued: false };
+    if (part.running) {
+        try {
+            await api.interrupt?.(part.promptId || undefined);
+        } catch (error) {
+            /* an interrupt that fails is not fatal: the queue wait below still applies */
+        }
+        await waitForIdleQueue();
+    }
+    const payload = currentPayload(node, part.state);
+    const cells = Array.isArray(payload.cells) ? payload.cells : [];
+    const index = cells.findIndex((cell) => String(cell?.id || "") === String(cellId));
+    if (index < 0) throw new Error(`${cellId} is not a cell of this sheet`);
+    const seed = Math.floor(Math.random() * CELL_SEED_MAX);
+    cells[index] = { ...cells[index], seed };
+    payload.cells = cells;
+    payload.render = { ...(payload.render || {}), onlyCells: [String(cellId)] };
+    writePayload(node, payload);
+    part.retry = { cellId: String(cellId), seed };
+    await queueRun(node);
+    return { queued: true, seed };
 }
 
 async function uploadReference(file, groupKey) {
@@ -306,6 +386,8 @@ function mountPanel(node) {
             spec: currentPayload(node, state),
         }),
         compose: () => sheetAction(node, { action: "compose", spec: currentPayload(node, state) }),
+        // "This cell is no good": cancel the run and render that one cell again with a new seed.
+        retryCell: ({ cellId }) => retryCellRender(node, cellId),
         clearSheet: () => sheetAction(node, { action: "clear" }),
         layoutChanged: () => scheduleFit(node),
         // The recommended whole-node settings come from the pack's backend
@@ -412,15 +494,58 @@ function mountPanel(node) {
     // seconds) so the Results tab fills in cell by cell - the per-cell saver writes
     // each cell to disk the moment it finishes.
     if (!node._mmxSheetEvents) {
-        const onStart = () => panel.setRunning(true);
+        const onStart = (event) => {
+            const part = node._mmxSheet;
+            if (part) {
+                part.running = true;
+                part.promptId = event?.detail?.prompt_id || "";
+            }
+            panel.setRunning(true);
+        };
         const onStop = () => {
+            const part = node._mmxSheet;
+            if (part) {
+                part.running = false;
+                part.promptId = "";
+            }
             panel.setRunning(false);
             // The previews are created/updated by the frontend as the images arrive, so the
             // node's preview size is re-applied once the run is over (and once more as the
             // DOM settles).
             schedulePreviewMode(node);
         };
-        // The render streams a frame per step for this panel (`preview_stream.py`). Every node
+        // A re-roll finishes by putting the sheet back together: this run rendered one cell, the
+        // others were never touched, and the composite has to be rebuilt from the folder.
+        const onSuccess = async () => {
+            const part = node._mmxSheet;
+            const retry = part?.retry;
+            if (!part || !retry) return;
+            part.retry = null;
+            try {
+                const payload = currentPayload(node, part.state);
+                if (payload.render && "onlyCells" in payload.render) {
+                    delete payload.render.onlyCells;
+                    writePayload(node, payload);
+                }
+                const result = await sheetAction(node, {
+                    action: "compose", spec: currentPayload(node, part.state),
+                });
+                await part.panel?.refreshResults?.();
+                // Cells that never finished - the run this replaced was cancelled mid-cell, and a
+                // cell only reaches the folder once it is done - are named rather than left as an
+                // unexplained gap in the sheet.
+                const missing = Array.isArray(result?.missing) ? result.missing : [];
+                part.hooks?.status?.(
+                    `${retry.cellId} re-rendered with seed ${retry.seed} · sheet recomposed`
+                    + (missing.length
+                        ? ` (${missing.join(", ")} not rendered yet - Run again to fill ${missing.length === 1 ? "it" : "them"} in)`
+                        : "")
+                );
+            } catch (error) {
+                part.panel?.status?.(`${retry.cellId} re-rendered, but the sheet could not be recomposed: ${error.message}`);
+            }
+        };
+        // The render streams a clip per step for this panel (`preview_stream.py`). Every node
         // listens; the sheet name is what tells two nodes' streams apart, and a payload without
         // one (an older node, or a hand-written graph) is shown by whoever is listening.
         const onLive = (event) => {
@@ -430,11 +555,12 @@ function mountPanel(node) {
             if (data.node_id != null && node.id != null && String(data.node_id) !== String(node.id)) return;
             panel.setLivePreview?.(data);
         };
-        node._mmxSheetEvents = { onStart, onStop, onLive };
+        node._mmxSheetEvents = { onStart, onStop, onLive, onSuccess };
         api.addEventListener("execution_start", onStart);
         api.addEventListener("executing", (event) => { if (!event?.detail) onStop(); });
         api.addEventListener("execution_error", onStop);
         api.addEventListener("execution_interrupted", onStop);
+        api.addEventListener("execution_success", onSuccess);
         api.addEventListener(LIVE_PREVIEW_EVENT, onLive);
     }
 
@@ -594,6 +720,7 @@ function wrapNode(nodeType) {
             api.removeEventListener?.("execution_start", events.onStart);
             api.removeEventListener?.("execution_error", events.onStop);
             api.removeEventListener?.("execution_interrupted", events.onStop);
+            api.removeEventListener?.("execution_success", events.onSuccess);
             api.removeEventListener?.(LIVE_PREVIEW_EVENT, events.onLive);
             this._mmxSheetEvents = null;
         }

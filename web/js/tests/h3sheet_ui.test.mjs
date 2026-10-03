@@ -16,6 +16,7 @@ const wiring = read("web/js/h3sheet_ui.js");
 const core = read("web/js/h3sheet_core.mjs");
 const routes = read("h3_character_sheet/sheet_routes.py");
 const sheet = read("h3_character_sheet/nodes/sheet.py");
+const spec = read("h3_character_sheet/sheet_spec.py");
 const grid = read("h3_character_sheet/nodes/grid.py");
 const init = read("h3_character_sheet/__init__.py");
 
@@ -56,6 +57,26 @@ assert.ok(sheet.includes("attach_sheet_preview(") && sheet.includes("live_previe
     "the graph builder attaches the stream wrapper with the payload switch");
 assert.ok(sheet.includes('from ..preview_stream import EVENT as PREVIEW_EVENT'),
     "the report names the event the panel listens for");
+
+// --- re-rolling one cell with a new seed -------------------------------------
+// The strip's button, and every Results row, call `hooks.retryCell`. The wiring has to do four
+// things for that to mean "this cell, new seed, nothing else touched".
+assert.ok(wiring.includes("retryCell: ({ cellId }) => retryCellRender(node, cellId)"),
+    "the panel's request must reach the wiring");
+assert.ok(/await api\.interrupt\?\.\(part\.promptId/.test(wiring),
+    "a re-roll cancels the run it is replacing (targeted at that prompt)");
+assert.ok(wiring.includes("waitForIdleQueue") && wiring.includes('api.fetchApi("/queue"'),
+    "and waits for the queue to drain, or the re-roll queues behind the run it cancelled");
+assert.ok(/onlyCells: \[String\(cellId\)\]/.test(wiring),
+    "the run is scoped to that one cell (render.onlyCells)");
+assert.ok(spec.includes("only_cells") && spec.includes("_apply_only_cells"),
+    "and the node honours it (a payload the backend ignores would render the whole sheet)");
+assert.ok(/Math\.floor\(Math\.random\(\) \* CELL_SEED_MAX\)/.test(wiring),
+    "the seed is new");
+assert.ok(wiring.includes('action: "compose"') && /execution_success/.test(wiring),
+    "and the sheet is recomposed from disk when the one-cell run finishes");
+assert.ok(/delete payload\.render\.onlyCells/.test(wiring),
+    "the scope is dropped again, so the next normal Run renders the whole sheet");
 
 // --- mounted inside the node, interface first, no popup ------------------------
 assert.ok(wiring.includes("addDOMWidget("), "the panel must mount as a DOM widget");

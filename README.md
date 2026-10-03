@@ -291,14 +291,37 @@ plus the newest cell clip, both served from the output folder, both openable ful
 Two independent knobs on purpose: the node can keep a small ComfyUI preview while the panel shows a
 big one, or the other way round. `Off` also switches off the live strip below.
 
-**The live strip: a frame per sampling step.** From *queued* to the finished sheet there is a wait,
-and a sheet render is legible while it runs: the node streams one small frame per step to its own
-panel, drawn above the tabs as a `LIVE` strip with `cell 2/5 · step 4/8 · 3 frames` beside it. The
-strip opens the moment a run starts (holding the frame's space, so the node settles its height once
-rather than when the first frame lands) and closes when the run ends - the finished sheet takes over
-in Results.
+**The live strip: a looping clip per sampling step.** From *queued* to the finished sheet there is a
+wait, and a sheet render is legible while it runs: the node streams a small **clip** of the cell being
+denoised to its own panel, drawn above the tabs as a `LIVE` strip with
+`cell 2/5 · step 4/8 · 22-frame loop` beside it. The frames loop in place, so you watch the pose settle
+instead of guessing from one blurry frame. Measured on a 288x512 cell: the first clip is one latent
+frame (78 ms) and every clip after it is the whole 22-frame cell (~780 ms).
 
-How it works, because it is a chain of three facts worth knowing when it misbehaves:
+The strip opens the moment a run starts (holding the frame's space, so the node settles its height once
+rather than when the first frame lands) and closes when the run ends - the finished sheet takes over in
+Results. `Off` in the *panel preview* setting switches it off with the rest of the panel's previews.
+
+Next to it sits **`↻ new seed`**, the "this one is no good" button:
+
+* it cancels the running prompt (only when this node's render is the one running), waits for the queue
+  to drain, writes a random seed onto **that one cell** (`cells[i].seed`, which H3's own
+  `planner.cell_seed` already honours) and re-queues with `render.onlyCells: [thatCell]`;
+* the node narrows that run to the one cell - the others keep the frames they already have on disk - and
+  when it finishes the panel drops the scope and recomposes the sheet from the folder;
+* the same button is on every row of the **Results** tab, so a cell can be re-rolled after the sheet is
+  already on screen.
+
+Two things worth knowing about it, both honest limits of a one-cell re-render:
+
+* **A cell that never finished is not in the folder.** Nothing is lost that was rendered: cells already
+  on disk are reused, and the ones the cancelled run had not reached yet are named in the status line
+  (`hero, side not rendered yet - Run again to fill them in`), so the smaller sheet is explained rather
+  than mysterious.
+* **It queues through the node's own graph**, i.e. it presses the same Queue button you do. A panel
+  running outside ComfyUI (the standalone tests) says so instead of pretending.
+
+How the clip is built, because it is a chain of three facts worth knowing when it misbehaves:
 
 * The sampler's callback is the only place a render is legible mid-flight, and an `OUTER_SAMPLE`
   wrapper (`h3_character_sheet/preview_stream.py`) is the only place to stand in front of it. The
@@ -309,9 +332,17 @@ How it works, because it is a chain of three facts worth knowing when it misbeha
   **on the CPU in float32, on a worker thread**. The GPU is the sampler's: a preview that competes
   for VRAM or for the sampling thread is a preview that costs a render. Float32 on the CPU is not
   fussiness either - fp16 is ~350x slower there (50s for a frame that takes 143ms).
-* A frame is ~110-150ms, so previews are throttled to one per 0.35s and the worker keeps a
-  two-frame queue, dropping anything older: a late preview of a step that already passed is worth
-  nothing. The last step always gets through, so the strip ends on the finished cell.
+* It decodes a **prefix** of the cell (TAEHV chains its temporal blocks forward, so a later frame
+  cannot be decoded without the ones before it - which is also the useful end of a cell, since that
+  is what continuity hands to the next one) and how long a prefix is *measured*, not guessed: the
+  first clip decodes one latent frame, and every clip after that spends a CPU budget
+  (`FRAME_BUDGET_SECONDS`, 1.5s) at the rate that frame established. At least three latent frames
+  are always attempted, so you get a loop rather than a still; when even three would cost more than
+  5s (a very large cell), a still is the honest answer. Anything the worker cannot keep up with is
+  dropped - a late preview of a step that already passed is worth nothing.
+* The frames travel as a list of JPEG data URLs and the panel cycles them at the clip's own rate. An
+  animated image would be one payload instead of N, but Pillow here reports `webp: True,
+  webp_anim: False` - it cannot write one - and a GIF would cost 256 colours for no size win.
 
 Nothing about it can fail a render: a patcher that refuses to clone, a frame that will not decode,
 a dead websocket - each logs and stops the stream instead. When the tiny VAE is missing it falls

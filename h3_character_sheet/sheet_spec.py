@@ -753,6 +753,16 @@ class SheetRenderSpec:
     #: step, decoded from the latent and sent over the websocket (see ``preview_stream``). On by
     #: default - it is the only thing on screen between "queued" and the finished sheet.
     live_preview: bool = True
+    #: How many frames one live preview may carry, and how fast the panel plays them. The frames
+    #: are a looping clip of the cell being denoised (see ``preview_stream``); the decoder spends
+    #: its own CPU budget deciding how much of the cell it can afford to decode.
+    preview_frames: int = 24
+    preview_fps: float = 12.0
+    #: Render only these cells (by id), leaving every other cell - and, crucially, the frames it
+    #: already has on disk - untouched. This is what the panel's "new seed" button writes: the
+    #: cell you are looking at is re-rolled on its own, and the sheet is then recomposed from disk
+    #: (see the compose route). Empty means the whole sheet, which is what a normal render is.
+    only_cells: list[str] = field(default_factory=list)
     #: Which recommended preset these settings came from (see ``presets.py``). A record, not
     #: a lock: applied presets write their values, and editing a knob afterwards leaves the
     #: id in place so a sheet can still say how it started.
@@ -863,6 +873,9 @@ class SheetSpec:
                 # Round-trips so a run's own preview choice comes back with its settings.
                 "comfyPreview": bool(self.render.comfy_preview),
                 "livePreview": bool(self.render.live_preview),
+                "previewFrames": int(self.render.preview_frames),
+                "previewFps": float(self.render.preview_fps),
+                "onlyCells": list(self.render.only_cells),
                 "preset": self.render.preset,
             },
             "cells": [
@@ -1272,6 +1285,57 @@ def _parse_cells(raw: Any, render: SheetRenderSpec, warnings: list[str]) -> list
     return cells
 
 
+def _parse_only_cells(render_raw: dict[str, Any]) -> list[str]:
+    """The render scope: ``render.onlyCells`` - the cells this run renders, by id.
+
+    The panel writes this when one cell is re-rolled with a new seed. Everything that reads
+    ``spec.enabled_cells`` (the render, the per-cell saver, the grid) then agrees that this run
+    is about those cells; the cells it leaves out keep the frames they already have on disk,
+    which is what the compose route rebuilds the sheet from afterwards.
+    """
+    raw = render_raw.get("onlyCells", render_raw.get("only_cells"))
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple)):
+        return []
+    out: list[str] = []
+    for item in raw:
+        value = str(item or "").strip()
+        if value and value not in out:
+            out.append(value)
+    return out
+
+
+def _apply_only_cells(spec: SheetSpec) -> None:
+    """Narrow a spec to ``render.onlyCells``, in place, saying so in the warnings.
+
+    Disabling a cell here (rather than filtering the list) keeps every position in the sheet
+    meaningful: the layout, the manifest and the report still describe the whole sheet, with one
+    cell marked as the only one this run renders.
+    """
+    wanted = [cell_id for cell_id in spec.render.only_cells]
+    if not wanted:
+        return
+    known = {cell.id for cell in spec.cells}
+    missing = [cell_id for cell_id in wanted if cell_id not in known]
+    for cell in spec.cells:
+        cell.enabled = cell.id in wanted
+    chosen = [cell.id for cell in spec.cells if cell.enabled]
+    if not chosen:
+        # Nothing matched: rather than render an empty sheet, fall back to the whole thing.
+        for cell in spec.cells:
+            cell.enabled = True
+        spec.warnings.append(
+            f"render.onlyCells named {', '.join(wanted)} - no such cell; rendering the whole sheet."
+        )
+        return
+    spec.warnings.append(
+        f"Re-render scope: only {', '.join(chosen)} - the other cell(s) keep the frames "
+        "already on disk."
+        + (f" ({', '.join(missing)} not found.)" if missing else "")
+    )
+
+
 def parse_sheet_spec(raw: Any) -> SheetSpec:
     """Parse the panel payload (dict or JSON string) into a validated spec."""
     warnings: list[str] = []
@@ -1320,6 +1384,13 @@ def parse_sheet_spec(raw: Any) -> SheetSpec:
         live_preview=_as_bool(
             render_raw.get("livePreview", render_raw.get("live_preview")), True
         ),
+        preview_frames=_clamp(
+            _as_int(render_raw.get("previewFrames", render_raw.get("preview_frames")), 24), 1, 48
+        ),
+        preview_fps=min(30.0, max(1.0, _as_float(
+            render_raw.get("previewFps", render_raw.get("preview_fps")), 12.0
+        ))),
+        only_cells=_parse_only_cells(render_raw),
         preset=str(render_raw.get("preset") or "").strip(),
     )
     sheet_raw = data.get("sheet") if isinstance(data.get("sheet"), dict) else {}
@@ -1379,6 +1450,9 @@ def parse_sheet_spec(raw: Any) -> SheetSpec:
         render=render,
         warnings=inherited[:20] + warnings,
     )
+    # The render scope decides which cells this run touches; it has to be applied before anyone
+    # asks for `enabled_cells` (the work items, the saver, the grid), so it happens here.
+    _apply_only_cells(spec)
     return spec
 
 

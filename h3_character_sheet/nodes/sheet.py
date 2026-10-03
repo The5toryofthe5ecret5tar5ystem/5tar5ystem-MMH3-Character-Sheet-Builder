@@ -91,6 +91,8 @@ def build_sheet_graph(
     clip_fps: float = CLIP_FPS,
     comfy_preview: bool = False,
     live_preview: bool = True,
+    preview_frames: int = 24,
+    preview_fps: float = 12.0,
     node_id: Any = None,
 ) -> tuple[Any, Any, Any]:
     """Build the expansion; returns the (sheet, cells, report) output links.
@@ -110,6 +112,9 @@ def build_sheet_graph(
             name=str(name or ""),
             cells_total=len(work_items),
             node_id=node_id,
+            max_frames=int(preview_frames),
+            fps=float(preview_fps),
+            cell_ids=[str(item.get("id") or "") for item in work_items],
         )
 
     shifted_model = graph.node(
@@ -610,6 +615,8 @@ class MiniMaxH3CharacterSheet(io.ComfyNode):
             export_video=bool(spec.render.export_video),
             comfy_preview=bool(spec.render.comfy_preview),
             live_preview=bool(spec.render.live_preview),
+            preview_frames=int(spec.render.preview_frames),
+            preview_fps=float(spec.render.preview_fps),
         )
         for line in work_summary(spec, work_items):
             log.info("Character sheet: %s", line)
@@ -622,7 +629,9 @@ class MiniMaxH3CharacterSheet(io.ComfyNode):
         preview_lines = []
         if spec.render.live_preview:
             preview_lines.append(
-                f"Live preview: on - one frame per step to the panel ('{PREVIEW_EVENT}' events)."
+                f"Live preview: on - clips of up to {int(spec.render.preview_frames)} frame(s) "
+                f"at {float(spec.render.preview_fps):g}fps to the panel ('{PREVIEW_EVENT}' events), "
+                "as much of each cell as the decoder's CPU budget affords."
             )
         else:
             preview_lines.append("Live preview: off (render.livePreview).")

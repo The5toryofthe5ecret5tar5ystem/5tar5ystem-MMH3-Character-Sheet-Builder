@@ -28,8 +28,23 @@ constraints decide how it is run:
   over; the worker decodes and drops previews it cannot keep up with, because a late preview of
   an old step is worth nothing.
 
+It sends a **clip, not a still**, because a still of a video render says almost nothing: the
+frames loop in the panel (the browser is told the fps), so the strip plays the cell that is being
+denosed. How many frames that is depends on what the box can afford, and it is *measured*: the
+first preview decodes a single latent token, and every one after that spends a CPU budget
+(:data:`FRAME_BUDGET_SECONDS`) at the rate that token established - 6 latent tokens for a 288x512
+cell is the whole 22-frame clip (780ms), while a 1536px cell gets one token and a still. TAEHV
+chains its temporal blocks forward, so a clip is always a prefix of the render - which is the right
+end of a cell to preview anyway (its start is what continuity hands to the next cell).
+
 When the tiny VAE is not installed (or will not build), the preview falls back to ComfyUI's own
-latent2rgb factors: 3ms, no model, no thread - blurrier, but never absent and never expensive.
+latent2rgb factors: 3ms a frame, no model, no thread - blurrier, but never absent and never
+expensive, and it loops too.
+
+Note on the wire format: the frames go as a list of JPEG data URLs and the panel cycles them. An
+animated image would be one payload instead of N, but Pillow here reports ``webp: True,
+webp_anim: False`` - it cannot write one - and a GIF would cost 256 colours and often more bytes
+than the JPEGs. Cycling N small JPEGs is the version that works everywhere.
 
 Nothing here may fail a render: every step is wrapped, a failure disables streaming for the run
 and logs once.
@@ -64,14 +79,28 @@ EVENT = "h3_sheet_preview"
 #: At most one preview per this many seconds. A preview is a look at the run, not a video
 #: stream: on a 22-frame cell a step takes ~130ms, so this is roughly every third step.
 MIN_INTERVAL = 0.35
-#: JPEG quality for the streamed frame.
+#: JPEG quality for the streamed frames.
 JPEG_QUALITY = 78
-#: Widest the frame is sent at (a 1536px cell decodes to 1536px wide, which is 300 KB per frame
+#: Widest the frames are sent at (a 1536px cell decodes to 1536px wide, which is 300 KB a frame
 #: and pointless in a 620px node).
 MAX_WIDTH = 512
+#: Most frames one clip may carry, however cheap the decode turns out to be: the payload is a
+#: list of JPEGs, and the panel is 620px wide.
+MAX_CLIP_FRAMES = 24
+#: How much CPU time one preview may spend decoding (see the module docstring). 1.5s measured on
+#: a 288x512 cell buys the whole 22-frame clip (780ms); a bigger cell buys fewer frames.
+FRAME_BUDGET_SECONDS = 1.5
+#: A clip should show motion even when one latent token turns out to be expensive, so this many are
+#: attempted regardless - and if three of them would cost more than MAX_CLIP_MS, a still is the
+#: honest answer instead of a slow loop.
+MIN_CLIP_TOKENS = 3
+MAX_CLIP_MS = 5000.0
 #: Frames the worker may have waiting. Two: one being decoded, one ahead. Older ones are
 #: dropped - a preview of a step that already passed helps nobody.
 QUEUE_SIZE = 2
+#: Default playback rate for a loop, in frames per second. The cell is 24fps, but a preview
+#: loop of a few frames reads better a little slower.
+DEFAULT_FPS = 12.0
 #: The vae_approx file this preview wants, by prefix (``taeh3`` matches ``taeh3.safetensors``
 #: and ``taeh3_decoder.safetensors``).
 TINY_VAE_PREFIX = "taeh3"
@@ -135,8 +164,20 @@ def video_latent_from_pack(x0: Any, latent_shapes: Any) -> Any:
 # --------------------------------------------------------------------------- #
 # decoding
 # --------------------------------------------------------------------------- #
+def strided(frames: list[Any], limit: int) -> list[Any]:
+    """At most ``limit`` frames, evenly spread over the clip (both ends kept)."""
+    if limit <= 0 or len(frames) <= limit:
+        return frames
+    if limit == 1:
+        return [frames[0]]
+    return [frames[round(i * (len(frames) - 1) / (limit - 1))] for i in range(limit)]
+
+
 class _Latent2RgbSource:
-    """ComfyUI's own cheap preview math: the latent projected onto RGB factors."""
+    """ComfyUI's own cheap preview math: the latent projected onto RGB factors.
+
+    3ms a frame, so the budget is irrelevant here: this decodes the whole prefix it is asked for.
+    """
 
     name = "latent2rgb"
 
@@ -147,12 +188,22 @@ class _Latent2RgbSource:
             getattr(latent_format, "latent_rgb_factors_reshape", None),
         )
 
-    def frame(self, latent: Any) -> Any:
-        return self.previewer.decode_latent_to_preview(latent)
+    def clip(self, latent: Any, *, tokens: int, max_frames: int, budget: float) -> tuple[list[Any], int, float]:
+        frames = []
+        for index in range(max(1, tokens)):
+            image = self.previewer.decode_latent_to_preview(latent[:, :, index:index + 1])
+            if image is not None:
+                frames.append(image)
+        return strided(frames, max_frames), max(1, tokens), 0.0
 
 
 class _TinyVaeSource:
-    """The ``taeh3`` tiny VAE, on the CPU in float32 (see the module docstring)."""
+    """The ``taeh3`` tiny VAE, on the CPU in float32 (see the module docstring).
+
+    One ``clip`` call decodes a **prefix** of the latent's tokens: TAEHV's temporal blocks chain
+    forward, so a later token cannot be decoded without the ones before it (KJNodes' decoder
+    documents the same). The prefix is also the useful end of a cell to look at.
+    """
 
     name = "taeh3"
 
@@ -160,15 +211,36 @@ class _TinyVaeSource:
         self.model = model
         self.label = label
 
-    def frame(self, latent: Any) -> Any:
+    def clip(self, latent: Any, *, tokens: int, max_frames: int, budget: float) -> tuple[list[Any], int, float]:
+        import time
+
         import torch
 
+        total = int(latent.shape[2])
+        used = max(1, min(total, int(tokens)))
+        started = time.perf_counter()
         with torch.no_grad():
-            frames = self.model.decode(latent.to(dtype=torch.float32))
-        # (B, 3, T, H, W) -> the first frame, as the float [0,1] image preview_to_image wants.
-        while frames.ndim > 4:
-            frames = frames[:, :, 0]
-        return latent_preview.preview_to_image(frames[0].movedim(0, -1), do_scale=False)
+            decoded = self.model.decode(latent[:, :, :used].to(dtype=torch.float32))
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        frames = [latent_preview.preview_to_image(decoded[0, :, i].movedim(0, -1), do_scale=False)
+                  for i in range(int(decoded.shape[2]))]
+        # Measured, not guessed: how long one latent token takes on this box, for this cell size.
+        return strided(frames, max_frames), used, elapsed_ms / used
+
+    def tokens_for(self, rate_ms: float, total: int, *, budget_ms: float = FRAME_BUDGET_SECONDS * 1000,
+                   min_tokens: int = MIN_CLIP_TOKENS, cap_ms: float = MAX_CLIP_MS) -> int:
+        """How long a clip to decode at the measured rate.
+
+        Three answers, in order of preference: everything the budget affords; at least
+        ``min_tokens`` so the panel gets a loop rather than a still; or one token when even that
+        would be too expensive on this cell.
+        """
+        if rate_ms <= 0:
+            return 1
+        tokens = max(int(min_tokens), int(budget_ms / rate_ms))
+        if tokens * rate_ms > cap_ms:
+            return 1
+        return max(1, min(int(total), tokens))
 
 
 def _tiny_vae_candidates() -> list[tuple[str, str]]:
@@ -259,30 +331,63 @@ def default_sender(payload: dict[str, Any]) -> None:
     instance.send_sync(EVENT, payload, None)
 
 
-def encode_payload(image: Any, info: dict[str, Any]) -> dict[str, Any]:
-    """JPEG-encode a frame and wrap it as the websocket payload."""
+def encode_frame(image: Any) -> tuple[str, int, int]:
+    """One frame as a JPEG data URL the panel can put straight on an ``<img>``."""
     frame = image.convert("RGB")
     if frame.width > MAX_WIDTH:
         frame = frame.resize((MAX_WIDTH, max(1, round(frame.height * MAX_WIDTH / frame.width))))
     buffer = io.BytesIO()
     frame.save(buffer, format="JPEG", quality=JPEG_QUALITY)
+    return ("data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii"),
+            frame.width, frame.height)
+
+
+def encode_payload(frames: Any, info: dict[str, Any], *, fps: float = DEFAULT_FPS,
+                   tokens: int = 0, decode_ms: float = 0.0) -> dict[str, Any]:
+    """Encode a clip and wrap it as the websocket payload.
+
+    ``frames`` is a list (or a single image, for callers that have one). The panel cycles the
+    list at ``fps``; a list of one is simply a still.
+    """
+    if not isinstance(frames, (list, tuple)):
+        frames = [frames]
+    encoded: list[str] = []
+    width = height = 0
+    for image in frames:
+        if image is None:
+            continue
+        data_url, width, height = encode_frame(image)
+        encoded.append(data_url)
+    if not encoded:
+        raise ValueError("nothing to send")
     return {
         **info,
-        "image": "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii"),
-        "width": frame.width,
-        "height": frame.height,
+        "image": encoded[0],          # the first frame: what a panel that ignores `frames` shows
+        "frames": encoded,
+        "frame_count": len(encoded),
+        "fps": float(fps),
+        "tokens": int(tokens),
+        "decode_ms": round(float(decode_ms), 1),
+        "width": width,
+        "height": height,
     }
 
 
 class _Worker(threading.Thread):
     """Decodes queued latents off the sampler's thread, dropping what it cannot keep up with."""
 
-    def __init__(self, source: Any, sender: Callable[[dict[str, Any]], None]) -> None:
+    def __init__(self, source: Any, sender: Callable[[dict[str, Any]], None],
+                 plan: Callable[[], tuple[int, int, float]]) -> None:
         super().__init__(name="h3-sheet-preview", daemon=True)
         self.source = source
         self.sender = sender
+        #: Asks the wrapper how many latent tokens to decode right now, and how many frames may
+        #: be sent, and at what fps - it owns the measured rate and the payload switches.
+        self.plan = plan
         self.queue: queue.Queue = queue.Queue(QUEUE_SIZE)
         self.failures = 0
+        self.learned_ms = 0.0
+        self.reported = False
 
     def submit(self, latent: Any, info: dict[str, Any]) -> None:
         try:
@@ -297,9 +402,29 @@ class _Worker(threading.Thread):
                 return
             latent, info = item
             try:
-                image = self.source.frame(latent)
-                if image is not None:
-                    self.sender(encode_payload(image, info))
+                tokens, max_frames, fps = self.plan()
+                if self.learned_ms > 0 and hasattr(self.source, "tokens_for"):
+                    tokens = self.source.tokens_for(self.learned_ms, int(latent.shape[2]))
+                frames, used, per_token_ms = self.source.clip(
+                    latent, tokens=tokens, max_frames=max_frames, budget=FRAME_BUDGET_SECONDS,
+                )
+                if per_token_ms:
+                    # Keep the FASTEST rate seen, not an average: a sample that ran while the CPU
+                    # was busy with the render must not make the next preview smaller, and the
+                    # queue drops anything the worker cannot keep up with anyway.
+                    self.learned_ms = (per_token_ms if self.learned_ms <= 0
+                                       else min(self.learned_ms, per_token_ms))
+                if frames:
+                    if not self.reported:
+                        # One line per render, and the answer to "why is the loop so short?".
+                        self.reported = True
+                        log.info(
+                            "Character sheet preview: %s ms per latent frame -> %s frames "
+                            "from %s of %s latent frame(s) (%s fps)",
+                            round(per_token_ms or 0), len(frames), used, int(latent.shape[2]), fps,
+                        )
+                    self.sender(encode_payload(frames, info, fps=fps, tokens=used,
+                                               decode_ms=per_token_ms * max(1, used)))
             except Exception as exc:  # noqa: BLE001 - a preview never fails a render
                 self.failures += 1
                 if self.failures == 1:
@@ -331,6 +456,10 @@ class _SheetPreviewWrapper:
         latent_format: Any = None,
         interval: float = MIN_INTERVAL,
         source: Any = None,
+        max_frames: int = MAX_CLIP_FRAMES,
+        fps: float = DEFAULT_FPS,
+        budget: float = FRAME_BUDGET_SECONDS,
+        cell_ids: list[str] | None = None,
     ) -> None:
         self.name = name
         self.node_id = node_id
@@ -340,6 +469,14 @@ class _SheetPreviewWrapper:
         self.interval = float(interval)
         self.sender = sender or default_sender
         self.latent_format = latent_format
+        #: A clip is at most this many frames, played at ``fps``; the decode budget buys as many
+        #: as this box can pay for (see the module docstring).
+        self.max_frames = max(1, int(max_frames))
+        self.fps = float(fps) or DEFAULT_FPS
+        self.budget = float(budget)
+        #: The sheet's cells in render order, so every clip can say WHICH cell it is - the
+        #: panel's retry button needs the id, not a guess from an index.
+        self.cell_ids = [str(value) for value in (cell_ids or [])]
         self._source = source
         self._worker: _Worker | None = None
         self._broken = False
@@ -348,6 +485,7 @@ class _SheetPreviewWrapper:
         self._latent_shapes: Any = None
         self._cell = 0
         self._sent = 0
+        self._frames_sent = 0
         self._last = 0.0
 
     # -- preview state (read by the run report and by tests) ------------------ #
@@ -359,6 +497,15 @@ class _SheetPreviewWrapper:
     @property
     def sent(self) -> int:
         return self._sent
+
+    @property
+    def frames_sent(self) -> int:
+        return self._frames_sent
+
+    @property
+    def decode_ms(self) -> float:
+        """The measured cost of one latent token on this box, for this cell size (0 = unmeasured)."""
+        return self._worker.learned_ms if self._worker else 0.0
 
     # -- the OUTER_SAMPLE contract ------------------------------------------- #
     def __call__(
@@ -441,13 +588,15 @@ class _SheetPreviewWrapper:
                 log.info("Character sheet preview: no frame in %s; streaming off", describe_latent(x0))
                 self._broken = True
             return
-        # One frame, on the host, detached: the worker must not touch a live sampler tensor.
-        frame = latent[:, :, :1].detach().to("cpu", copy=True)
+        # The whole latent prefix goes to the worker (a few hundred KB): how much of it becomes
+        # frames is decided there, from the budget and the rate this box measured.
+        clip = latent.detach().to("cpu", copy=True)
         info = {
             "node_id": self.node_id,
             "name": self.name,
             "cell": self._cell,
             "cells": self.cells_total,
+            "cell_id": self.cell_id_of(self._cell),
             "step": step_index + 1,
             "steps": total,
         }
@@ -459,19 +608,32 @@ class _SheetPreviewWrapper:
                 log.info("Character sheet preview: no decoder available; streaming off")
                 return
             log.info("Character sheet preview: decoding with %s", source.name)
-        if getattr(source, "name", "") == "taeh3":
-            # The tiny VAE is ~130ms a frame: decode it off this thread.
+        if source.name == "taeh3":
+            # ~130ms per latent token at 288x512: decode it off this thread.
             if self._worker is None:
-                self._worker = _Worker(source, self._send)
+                self._worker = _Worker(source, self._send, self._plan)
                 self._worker.start()
-            self._worker.submit(frame, info)
+            self._worker.submit(clip, info)
             return
-        image = source.frame(frame)
-        if image is not None:
-            self._send(encode_payload(image, info))
+        frames, used, _ = source.clip(clip, tokens=int(clip.shape[2]),
+                                      max_frames=self.max_frames, budget=self.budget)
+        if frames:
+            self._send(encode_payload(frames, info, fps=self.fps, tokens=used))
+
+    def _plan(self) -> tuple[int, int, float]:
+        """What the worker should aim for right now: tokens, frames, fps."""
+        return 1, self.max_frames, self.fps
+
+    def cell_id_of(self, cell: int) -> str:
+        """The id of cell ``cell`` (1-based), when the render told us the order."""
+        index = int(cell) - 1
+        if 0 <= index < len(self.cell_ids):
+            return self.cell_ids[index]
+        return ""
 
     def _send(self, payload: dict[str, Any]) -> None:
         self._sent += 1
+        self._frames_sent += int(payload.get("frame_count") or 1)
         try:
             self.sender(payload)
         except Exception as exc:  # noqa: BLE001 - a dead websocket is not a render failure
@@ -497,6 +659,10 @@ def attach_sheet_preview(
     node_id: Any = None,
     sender: Callable[[dict[str, Any]], None] | None = None,
     source: Any = None,
+    max_frames: int = MAX_CLIP_FRAMES,
+    fps: float = DEFAULT_FPS,
+    budget: float = FRAME_BUDGET_SECONDS,
+    cell_ids: list[str] | None = None,
 ) -> Any:
     """Return the model with the sheet-preview wrapper attached (or the model unchanged).
 
@@ -510,7 +676,8 @@ def attach_sheet_preview(
     latent_format = getattr(getattr(model, "model", None), "latent_format", None)
     wrapper = _SheetPreviewWrapper(
         name=name, node_id=node_id, cells_total=cells_total, mute=mute, stream=stream,
-        sender=sender, latent_format=latent_format, source=source,
+        sender=sender, latent_format=latent_format, source=source, max_frames=max_frames,
+        fps=fps, budget=budget, cell_ids=cell_ids,
     )
     try:
         wrapped = model.clone()
@@ -532,6 +699,9 @@ __all__ = [
     "STREAM_KEY",
     "attach_sheet_preview",
     "build_frame_source",
+    "encode_frame",
     "encode_payload",
+    "strided",
     "video_latent",
+    "video_latent_from_pack",
 ]

@@ -287,7 +287,7 @@ export const KNOB_COLUMNS = 3;
  * build makes that a glance instead of an investigation; a test keeps it in step with the
  * import, so bumping one without the other fails the suite rather than confusing a user.
  */
-export const PANEL_BUILD = "h3sheet_v50";
+export const PANEL_BUILD = "h3sheet_v52";
 
 /** The frontend's own widget/host names, straight from the shipped frontend bundle. */
 export const PREVIEW_HOST_CLASS = "comfy-img-preview";
@@ -366,13 +366,16 @@ export const DEFAULT_PANEL_PREVIEW = "medium";
 /**
  * The websocket event the node's render streams frames on (see `preview_stream.py`).
  *
- * One event for the whole pack, carrying `cell`/`cells`/`step`/`steps` and a JPEG data URL: the
- * panel filters by node id and sheet name, so two sheets rendering at once each show their own.
+ * One event for the whole pack, carrying `cell`/`cells`/`step`/`steps` plus `frames` - a list of
+ * JPEG data URLs making a looping clip of the cell being denoised - and the `fps` to play them at.
+ * The panel filters by node id and sheet name, so two sheets rendering at once each show their own.
  */
 export const LIVE_PREVIEW_EVENT = "h3_sheet_preview";
-//: The streamed frame never grows past this on screen, however big the node is: it is a look at
+//: The streamed clip never grows past this on screen, however big the node is: it is a look at
 //: the run, not the deliverable (the finished sheet is shown at the panel-preview size).
 export const LIVE_PREVIEW_MAX_HEIGHT = 220;
+//: Playback rate bounds for a streamed clip, in case a payload carries a silly one.
+export const LIVE_FPS_RANGE = [1, 30];
 
 /** The panel's own preview size, defaulting to a medium sheet. */
 export function panelPreview(state) {
@@ -1256,13 +1259,22 @@ export const PANEL_CSS = `
 /* The live stream: the one thing on screen between "queued" and the finished sheet. It sits
    above the tabs so it is visible whichever tab is open, and it is only as tall as one frame. */
 .mmx-live { display: flex; flex-direction: column; gap: 3px; margin: 2px 0 6px; }
-.mmx-live[hidden] { display: none; }
-.mmx-live__head { display: flex; align-items: center; gap: 6px; }
+.mmx-live[hidden] { display: none; }.mmx-live__head { display: flex; align-items: center; gap: 6px; }
 .mmx-live__tag {
   font-size: 9px; font-weight: 700; letter-spacing: .08em; color: #101014;
   background: var(--mmx-tick); border-radius: 3px; padding: 1px 5px;
 }
 .mmx-live__meta { font-size: 10px; color: var(--mmx-muted); }
+.mmx-live__retry { margin-left: auto; }
+.mmx-live__head { display: flex; align-items: center; gap: 6px; }
+/* A quiet button: the re-roll is offered next to things you read, not instead of them. */
+.mmx-btn--quiet {
+  background: transparent; color: var(--mmx-muted); border: 1px solid var(--mmx-line);
+  padding: 1px 5px; font-size: 9px; border-radius: 3px; line-height: 1.5;
+}
+.mmx-btn--quiet:hover:not(:disabled) { color: var(--mmx-tick); border-color: var(--mmx-tick); }
+.mmx-btn--quiet:disabled { opacity: .5; }
+.mmx-cell__retry { margin-left: 6px; }
 .mmx-live__frame {
   width: 100%; max-height: 220px; object-fit: contain; border-radius: 4px;
   background: rgba(0,0,0,.25);
@@ -2478,10 +2490,17 @@ export function buildSheetInterface({ state, hooks = {} }) {
     const liveMeta = element("span", { className: "mmx-live__meta", textContent: "" });
     const liveFrame = element("img", { className: "mmx-live__frame", alt: "", src: "" });
     const liveWait = element("div", { className: "mmx-live__wait", title: "waiting for the render's first frame" });
+    // "I don't like this one": stop the run and render this cell again with a new seed. Only the
+    // cell on screen is re-rolled - the rest of the sheet keeps the frames already on disk, and
+    // the panel recomposes the sheet from them afterwards.
+    const liveRetry = button("↻ new seed", () => retryLiveCell());
+    liveRetry.classList.add("mmx-btn--quiet", "mmx-live__retry");
+    liveRetry.title = "Stop the run and render this cell again with a new seed";
     liveStrip.append(
         element("div", { className: "mmx-live__head" }, {}, [
             element("span", { className: "mmx-live__tag", textContent: "LIVE" }),
             liveMeta,
+            liveRetry,
         ]),
         liveFrame,
         liveWait,
@@ -4062,6 +4081,13 @@ export function buildSheetInterface({ state, hooks = {} }) {
                 link.title = `${cell.clipFile || "clip"} - the video this cell rendered, with its own audio`;
                 caption.append(link);
             }
+            // "This one is no good": render just this cell again with a new seed. The other
+            // cells keep the frames already on disk, and the sheet is recomposed from them.
+            const reroll = button("\u21bb new seed", () => retryCell(cell.id, reroll));
+            reroll.classList.add("mmx-btn--quiet", "mmx-cell__retry");
+            reroll.dataset.cellRetry = cell.id;
+            reroll.title = `Render ${cell.id} again with a new seed (only this cell)`;
+            caption.append(reroll);
             row.append(caption);
             const strip = element("div", {}, { display: "flex", gap: "2px", flexWrap: "wrap" });
             (cell.frames || []).forEach((frame, index) => {
@@ -4175,11 +4201,15 @@ export function buildSheetInterface({ state, hooks = {} }) {
         else setLivePreview(null);
     }
 
-    /** Open the strip for a run that is starting: space held, no frame yet. */
+    /** Open the strip for a run that is starting: space held, no clip yet. */
     function openLiveStrip() {
         if (panelPreview(state) === "off") return;
+        stopLiveLoop();
         liveCount = 0;
         liveLast = null;
+        liveFrames = [];
+        liveIndex = 0;
+        liveRetry.disabled = false;
         liveFrame.removeAttribute("src");
         liveStrip.classList.add("is-waiting");
         liveMeta.textContent = "waiting for the first frame…";
@@ -4189,28 +4219,102 @@ export function buildSheetInterface({ state, hooks = {} }) {
         }
     }
 
-    // ------------------------------------------------------------ live stream
-    // One frame per sampling step, straight from the render (`preview_stream.py`), so the panel
-    // shows what is being sampled rather than waiting for the first cell to land on disk. Every
-    // frame is a JPEG data URL, so nothing here fetches anything.
-    let liveCount = 0;
-    let liveLast = null;
+    /**
+     * Re-roll the cell the strip is showing, through the node wiring.
+     *
+     * The cell comes from the stream itself (`cell_id`), so this always acts on the cell that is
+     * actually on screen - not on whatever the payload thinks runs next.
+     */
+    async function retryLiveCell() {
+        const cellId = String(liveLast?.cell_id || "");
+        if (!cellId || typeof hooks.retryCell !== "function") return;
+        liveRetry.disabled = true;
+        const label = liveMeta.textContent;
+        liveMeta.textContent = `re-rolling ${cellId} with a new seed…`;
+        let result = null;
+        try {
+            result = await hooks.retryCell({ cellId, cell: Number(liveLast?.cell) || 0 });
+        } catch (error) {
+            notify(`could not re-roll ${cellId}: ${error.message}`);
+        }
+        liveRetry.disabled = false;
+        // The run that follows takes the strip over (and says what it is doing); on a refusal the
+        // old label goes back so the button does not lie about what is on screen.
+        if (!result?.queued) liveMeta.textContent = label;
+    }
 
     /**
-     * Show one streamed frame, or clear the strip with `null`.
+     * Re-roll any cell from the Results list, whether or not a render is running.
      *
-     * `data` is the payload of the node's `h3_sheet_preview` event. The panel-preview setting
-     * decides whether there is a strip at all: with the panel's own preview switched Off, the
-     * user asked for a smaller node, and a streaming image is the opposite of that.
+     * `cellId` is the cell whose frames should be replaced; each row offers it, so a bad cell can
+     * be retried after the sheet is already on screen.
+     */
+    async function retryCell(cellId, trigger = null) {
+        if (typeof hooks.retryCell !== "function") {
+            notify("re-rolling needs the node wiring (the panel is running standalone).");
+            return;
+        }
+        const id = String(cellId || "");
+        if (!id) return;
+        if (trigger) trigger.disabled = true;
+        notify(`re-rendering ${id} with a new seed…`);
+        try {
+            await hooks.retryCell({ cellId: id });
+        } catch (error) {
+            notify(`could not re-roll ${id}: ${error.message}`);
+        }
+        if (trigger) trigger.disabled = false;
+    }
+
+    // ------------------------------------------------------------ live stream
+    // A looping clip per sampling step, straight from the render (`preview_stream.py`), so the
+    // panel shows what is being denoised instead of waiting for the first cell to land on disk.
+    // Every frame is a JPEG data URL: nothing here fetches anything, and the loop is a timer.
+    let liveCount = 0;
+    let liveLast = null;
+    let liveFrames = [];
+    let liveIndex = 0;
+    let liveLoopTimer = null;
+
+    function stopLiveLoop() {
+        if (liveLoopTimer) clearInterval(liveLoopTimer);
+        liveLoopTimer = null;
+    }
+
+    /** Play the clip we were last sent, at its own rate, looping in place. */
+    function startLiveLoop() {
+        stopLiveLoop();
+        if (liveFrames.length < 2) return;
+        const [low, high] = LIVE_FPS_RANGE;
+        const fps = Math.min(high, Math.max(low, Number(liveLast?.fps) || 12));
+        liveLoopTimer = setInterval(() => {
+            if (!liveFrames.length) return;
+            liveIndex = (liveIndex + 1) % liveFrames.length;
+            liveFrame.src = liveFrames[liveIndex];
+        }, Math.round(1000 / fps));
+    }
+
+    /**
+     * Show one streamed clip, or clear the strip with `null`.
+     *
+     * `data` is the payload of the node's `h3_sheet_preview` event: `frames` (a list of JPEG data
+     * URLs) and the `fps` to play them at. A single frame is simply a still. The panel-preview
+     * setting decides whether there is a strip at all: with the panel's own preview switched Off,
+     * the user asked for a smaller node, and a streaming clip is the opposite of that.
      */
     function setLivePreview(data) {
-        const frame = data && typeof data.image === "string" ? data : null;
-        if (!frame || panelPreview(state) === "off") {
+        const frames = Array.isArray(data?.frames)
+            ? data.frames.filter((url) => typeof url === "string" && url)
+            : (typeof data?.image === "string" && data.image ? [data.image] : []);
+        if (!frames.length || panelPreview(state) === "off") {
+            stopLiveLoop();
             liveStrip.classList.remove("is-waiting");
             liveStrip.style.display = "none";
-            if (!frame) {
+            if (!frames.length) {
                 liveCount = 0;
                 liveLast = null;
+                liveFrames = [];
+                liveIndex = 0;
                 liveFrame.removeAttribute("src");
                 liveMeta.textContent = "";
             }
@@ -4218,8 +4322,11 @@ export function buildSheetInterface({ state, hooks = {} }) {
         }
         liveCount += 1;
         liveLast = data;
+        liveFrames = frames;
+        liveIndex = 0;
         liveStrip.classList.remove("is-waiting");
-        if (liveFrame.getAttribute("src") !== data.image) liveFrame.src = data.image;
+        if (liveFrame.getAttribute("src") !== frames[0]) liveFrame.src = frames[0];
+        startLiveLoop();
         const parts = [];
         const cell = Number(data.cell) || 0;
         const cells = Number(data.cells) || 0;
@@ -4227,7 +4334,8 @@ export function buildSheetInterface({ state, hooks = {} }) {
         const step = Number(data.step) || 0;
         const steps = Number(data.steps) || 0;
         if (step && steps) parts.push(`step ${step}/${steps}`);
-        parts.push(`${liveCount} frame${liveCount === 1 ? "" : "s"}`);
+        parts.push(frames.length === 1 ? "1 frame" : `${frames.length}-frame loop`);
+        parts.push(`${liveCount} clip${liveCount === 1 ? "" : "s"}`);
         liveMeta.textContent = parts.join(" · ");
         if (liveStrip.style.display === "none") {
             liveStrip.style.display = "flex";
@@ -4344,8 +4452,13 @@ export function buildSheetInterface({ state, hooks = {} }) {
         get liveFrame() { return liveFrame; },
         get liveWait() { return liveWait; },
         get liveMeta() { return liveMeta; },
+        get liveRetry() { return liveRetry; },
+        retryCell,
         get liveFrames() { return liveCount; },
         get lastLiveFrame() { return liveLast; },
+        get liveClip() { return liveFrames.slice(); },
+        get liveIndex() { return liveIndex; },
+        get livePlaying() { return Boolean(liveLoopTimer); },
         get promptBox() { return container.querySelector(".mmx-sheet-prompt"); },
         get negativeBox() { return container.querySelector(".mmx-sheet-negative"); },
         get knobFields() { return new Map(knobFields); },

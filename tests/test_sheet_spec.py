@@ -945,3 +945,41 @@ def test_comfy_preview_survives_the_round_trip():
     assert spec.to_dict()["render"]["comfyPreview"] is True
     again = ss.parse_sheet_spec(spec.to_dict())
     assert again.render.comfy_preview is True
+
+# --------------------------------------------------------------------------- #
+# one cell at a time (the panel's "new seed" button)
+# --------------------------------------------------------------------------- #
+def test_only_cells_narrows_the_run_and_leaves_the_rest_of_the_sheet_alone():
+    spec = ss.parse_sheet_spec({
+        "cells": [{"id": "a", "view": "front"}, {"id": "b", "view": "profile"},
+                  {"id": "c", "view": "back"}],
+        "render": {"onlyCells": ["b"]},
+    })
+    assert [cell.id for cell in spec.enabled_cells] == ["b"]
+    assert [cell.enabled for cell in spec.cells] == [False, True, False]
+    assert spec.render.only_cells == ["b"]
+    assert any("only b" in warning for warning in spec.warnings), "the run says what it is doing"
+
+
+def test_only_cells_accepts_one_name_and_a_missing_cell_falls_back_to_the_sheet():
+    single = ss.parse_sheet_spec({"cells": [{"id": "a"}, {"id": "b"}], "render": {"onlyCells": "b"}})
+    assert [cell.id for cell in single.enabled_cells] == ["b"]
+
+    # A stale id (the cell was renamed or removed) must render the sheet, not an empty one.
+    stale = ss.parse_sheet_spec({"cells": [{"id": "a"}, {"id": "b"}], "render": {"onlyCells": ["gone"]}})
+    assert [cell.id for cell in stale.enabled_cells] == ["a", "b"]
+    assert any("no such cell" in warning for warning in stale.warnings)
+
+
+def test_only_cells_round_trips():
+    spec = ss.parse_sheet_spec({"cells": [{"id": "a"}], "render": {"onlyCells": ["a"]}})
+    assert spec.to_dict()["render"]["onlyCells"] == ["a"]
+    assert ss.parse_sheet_spec(spec.to_dict()).render.only_cells == ["a"]
+    assert ss.parse_sheet_spec({"cells": [{"id": "a"}]}).render.only_cells == [], "default: whole sheet"
+
+
+def test_a_cell_seed_is_honoured_and_survives_the_round_trip():
+    """The re-roll writes a seed onto one cell; that is the whole point of the button."""
+    spec = ss.parse_sheet_spec({"cells": [{"id": "a", "seed": 987654}, {"id": "b"}]})
+    assert spec.cells[0].seed == 987654
+    assert ss.parse_sheet_spec(spec.to_dict()).cells[0].seed == 987654
