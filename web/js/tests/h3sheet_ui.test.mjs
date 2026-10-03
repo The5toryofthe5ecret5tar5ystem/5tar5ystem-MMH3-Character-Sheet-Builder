@@ -83,8 +83,17 @@ assert.ok(wiring.includes("`/media?${params.toString()}`"), "the hook must call 
 assert.ok(wiring.includes('api.fetchApi("/upload/image"'), "drops must upload through core /upload/image");
 assert.ok(wiring.includes('body.append("subfolder", "h3_character_sheet")'),
     "uploads go to a dedicated input subfolder");
-assert.ok(wiring.includes("boot=h3sheet_v43"),
-    "core module imports must carry a fresh boot tag (bump it on every JS change, or browsers keep the cached panel)");
+// The boot tag is the module's cache key: bump it on every JS change or browsers keep the
+// cached panel. `PANEL_BUILD` (printed in the panel's header) is the same string, so a stale
+// tab is visible in a screenshot instead of being guessed at - and this keeps them in step.
+{
+    const build = /export const PANEL_BUILD = "([^"]+)"/.exec(core);
+    assert.ok(build, "the panel declares its build tag");
+    assert.ok(wiring.includes(`?boot=${build[1]}`),
+        `the import must carry the declared build (${build?.[1]}), not an older one`);
+    assert.ok(core.includes("className: \"mmx-muted mmx-build\""),
+        "and the header shows it, so a stale tab is visible");
+}
 assert.ok(wiring.includes("panelFitHeight") && wiring.includes("resizing_node === node"),
     "the wiring must re-measure the node from its panel and never fight a drag");
 assert.ok(wiring.includes("element.scrollHeight"),
@@ -131,6 +140,26 @@ assert.ok(wiring.includes("isPreviewWidget(item, widget)"),
     "the node fit must count a capped preview at its capped height, not at the frontend's");
 assert.ok(wiring.includes("schedulePreviewMode(node)"),
     "the frontend rebuilds the previews after a run, so the size is re-applied then too");
+// ...and kept applied: the frontend adds the canvas image-preview widget when the image finishes
+// loading, which can be seconds after the run, so a one-shot pass is not enough.
+assert.ok(wiring.includes("startPreviewKeeper(node)"),
+    "a light keeper re-applies the caps after the frontend creates or re-creates a preview");
+assert.ok(wiring.includes("const result = enforcePreviewCaps(node, part.previewMode || nodePreviews(part.state), { skip: [DOM_WIDGET, DATA_WIDGET] })"),
+    "the keeper enforces the cap on the pack's own widget exclusions, like every other pass");
+// The draw pass is where the frontend creates those widgets, and a background tab throttles
+// timers - so the draw hook is the primary place the caps are re-asserted.
+assert.ok(wiring.includes("nodeType.prototype.onDrawBackground = function () {"),
+    "the node's draw pass re-asserts the preview caps");
+assert.ok(wiring.includes("const caps = enforcePreviewCaps(this, part.previewMode"),
+    "calling the same cap keeper the interval uses");
+assert.ok(!wiring.includes("PREVIEW_CHECK_MS"),
+    "and NOT throttled: a late preview must not be drawn full size for even a frame or two");
+assert.ok(wiring.includes("onDrawBackground?.apply(this, arguments)"),
+    "and it chains the frontend's own draw handler instead of replacing it");
+assert.ok(wiring.includes("stopPreviewKeeper(this)"),
+    "and the timer goes with the node (onRemoved), or it keeps a detached node alive");
+assert.ok(wiring.includes("document.hidden"),
+    "a hidden tab does not run the keeper");
 // Panes fill the node now, so the fit needs a ceiling and the panel watches its own size.
 assert.ok(wiring.includes("ceiling: fitCeiling()"),
     "the node fit is capped by the viewport, or a long Results list asks for a 3000px node");

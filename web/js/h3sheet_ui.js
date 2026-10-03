@@ -16,6 +16,7 @@ import { api } from "../../scripts/api.js";
 import {
     buildSheetInterface,
     applyPreviewMode,
+    enforcePreviewCaps,
     nodePreviews,
     previewHeight,
     previewParts,
@@ -24,7 +25,7 @@ import {
     REF_GROUPS,
     PANEL_FIT,
     panelFitHeight,
-} from "./h3sheet_core.mjs?boot=h3sheet_v43";
+} from "./h3sheet_core.mjs?boot=h3sheet_v44";
 
 const CLASS = "MiniMaxH3CharacterSheet";
 const DOM_WIDGET = "h3_character_sheet_ui";
@@ -35,7 +36,10 @@ const POLL_MS = 4000;
 const FIT_TOLERANCE = 24;
 //: Re-measure after the browser has settled: fonts and thumbnails land late.
 const FIT_DELAYS = [120, 400, 1200];
-
+//: How often the preview caps are re-checked while a node is on the canvas (see
+//: startPreviewKeeper). It writes only when something is actually wrong, so in practice this is
+//: a check that does nothing.
+const PREVIEW_KEEPER_MS = 400;
 function apiUrl(path = "") {
     const url = `${BASE}${path}`;
     return typeof api?.apiURL === "function" ? api.apiURL(url) : url;
@@ -430,8 +434,10 @@ function mountPanel(node) {
     panel.refreshResults();
     scheduleFit(node);
     // ComfyUI's own previews are already on the node when a saved workflow is opened (and
-    // arrive after each render), so the node's preview size is applied from the start.
+    // arrive after each render), so the node's preview size is applied from the start - and
+    // kept that way as the frontend creates and re-creates them (see startPreviewKeeper).
     applyNodePreviews(node, nodePreviews(state));
+    startPreviewKeeper(node);
     return panel;
 }
 
@@ -481,6 +487,34 @@ function schedulePreviewMode(node) {
     }
 }
 
+/**
+ * Keep the preview caps on, whatever the frontend does afterwards.
+ *
+ * The frontend adds the canvas image-preview widget when the image finishes loading - seconds
+ * after a run on a big sheet PNG - and re-arranges the node's widgets whenever it wants, so a
+ * one-shot cap at mount / on stop / on selector change can be applied to a node that has no
+ * preview yet, and then never again. An uncapped preview is both huge and unstable: its minimum
+ * joins the node's layout minimums while its unbounded maximum swallows the free height, so the
+ * frontend's layout grows the node and this pack's fit shrinks it back, every frame (the preview
+ * "jittering up and down"). This is a light timer that puts the caps back and, when it had to
+ * change something, re-fits the node once so it can settle.
+ */
+function startPreviewKeeper(node) {
+    if (node._mmxPreviewKeeper) return;
+    node._mmxPreviewKeeper = setInterval(() => {
+        const part = node._mmxSheet;
+        if (!part || document.hidden || !node.graph) return;
+        const result = enforcePreviewCaps(node, part.previewMode || nodePreviews(part.state), { skip: [DOM_WIDGET, DATA_WIDGET] });
+        // Something was late or got inflated: settle the node around the corrected previews.
+        if (result.changed) scheduleFit(node);
+    }, PREVIEW_KEEPER_MS);
+}
+
+function stopPreviewKeeper(node) {
+    clearInterval(node._mmxPreviewKeeper);
+    node._mmxPreviewKeeper = null;
+}
+
 function wrapNode(nodeType) {
     const onNodeCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function () {
@@ -488,6 +522,30 @@ function wrapNode(nodeType) {
         if (this._mmxSheet) return result;
         this.size = [Math.max(this.size?.[0] ?? 0, 620), Math.max(this.size?.[1] ?? 0, 780)];
         mountPanel(this);
+        return result;
+    };
+
+    // The draw pass is where this frontend CREATES and re-arranges its output preview widgets
+    // (`unsafeUpdatePreviews` runs from `onDrawBackground`), so it is also where a cap has to be
+    // re-asserted: a widget that appears in this pass is a widget nothing has seen yet, and a
+    // background tab throttles (or suspends) timers, so the draw hook is the reliable one - the
+    // interval in startPreviewKeeper is the fallback for a node that is on screen but not drawn.
+    //
+    // No throttle on purpose: the check is a loop over the node's widgets plus one
+    // `computeLayoutSize()` call each, and it only WRITES when a bound or a height is actually
+    // wrong (see enforcePreviewCaps), so a frame costs nothing once the caps are in - while a
+    // throttle would leave a window in which a late preview is drawn full size.
+    const onDrawBackground = nodeType.prototype.onDrawBackground;
+    nodeType.prototype.onDrawBackground = function () {
+        const result = onDrawBackground?.apply(this, arguments);
+        const part = this._mmxSheet;
+        if (part) {
+            const caps = enforcePreviewCaps(this, part.previewMode || nodePreviews(part.state), {
+                skip: [DOM_WIDGET, DATA_WIDGET],
+            });
+            // A late or inflated preview changes the node's layout: settle it once.
+            if (caps.changed) scheduleFit(this);
+        }
         return result;
     };
 
@@ -514,6 +572,7 @@ function wrapNode(nodeType) {
     nodeType.prototype.onRemoved = function () {
         clearInterval(this._mmxSheetPoll);
         this._mmxSheetPoll = null;
+        stopPreviewKeeper(this);
         for (const timer of this._mmxSheetFitTimers || []) clearTimeout(timer);
         this._mmxSheetFitTimers = null;
         // The panel watches its own size to re-lay-out a resized node: that observer has to go

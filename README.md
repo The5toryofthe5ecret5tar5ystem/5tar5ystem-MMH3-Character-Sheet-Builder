@@ -245,6 +245,17 @@ the DOM kinds left the still image a ~900px-tall node. The pack bounds that func
 (remembering the original, so *Full size* puts it back) and additionally caps the media inside the DOM
 kinds with one stylesheet rule.
 
+The bound is re-asserted **on every draw pass** of the node, not just when the run ends: the frontend
+creates those widgets when the image finishes loading (seconds after a run on a big sheet), which is
+after any one-shot pass the pack could do. It is the same place the frontend creates them, the scan is
+a loop over the node's widgets, and it only writes when a bound or a height is actually wrong - so a
+settled node costs nothing. (A timer alone is not enough: a background tab throttles or suspends them,
+and the widget appears while the node is being drawn.)
+
+The header of the panel prints its **build tag** (`h3sheet_vNN`). A browser tab keeps the module it
+loaded first, so if the panel looks like it is ignoring an update, the tag says whether that tab is
+running the pack on disk or an older one - reload with `Ctrl+Shift+R` if it is behind.
+
 ### Where uploads go
 
 Dropped / chosen files are uploaded through core `POST /upload/image` with

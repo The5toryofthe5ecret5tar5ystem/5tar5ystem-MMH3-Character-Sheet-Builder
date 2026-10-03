@@ -795,6 +795,40 @@ ok.push("an empty node renders (and can materialise) exactly what the ticks ask 
     ok.push("node previews: the canvas still image is capped too, not only the DOM widgets");
 }
 
+// --- a preview that arrives LATE is still capped (this is the jitter fix) ------
+{
+    // The frontend creates the canvas image widget when the image finishes loading - on a big
+    // sheet PNG that is seconds after the run ended, i.e. after every mount/stop/selector-change
+    // pass the pack used to rely on. An uncapped preview is not just big: its minHeight joins the
+    // node's layout minimums while its unbounded maxHeight swallows the free height, so the
+    // frontend's layout grows the node and the pack's fit shrinks it back, every frame - the
+    // preview "jittering up and down".
+    const node = { widgets: [], setDirtyCanvas: () => {}, graph: { setDirtyCanvas: () => {} } };
+    node.widgets.push({ name: "h3_character_sheet_ui", element: dom.window.document.createElement("div"), options: {} });
+    assert.equal(core.enforcePreviewCaps(node, "compact", { skip: ["h3_character_sheet_ui"] }).changed, 0,
+        "nothing to do before the preview exists");
+
+    const late = { name: "$$canvas-image-preview", computeLayoutSize: () => ({ minHeight: 220, minWidth: 1 }) };
+    node.widgets.push(late);
+    const capped = core.enforcePreviewCaps(node, "compact", { skip: ["h3_character_sheet_ui"] });
+    assert.equal(capped.changed, 1, "the late widget is capped on the next pass");
+    assert.equal(late.computeLayoutSize().maxHeight, core.PREVIEW_COMPACT_HEIGHT);
+    assert.equal(core.enforcePreviewCaps(node, "compact", { skip: ["h3_character_sheet_ui"] }).changed, 0,
+        "and it is quiet afterwards - a widget that is already right is not written again");
+
+    late.computedHeight = 900;   // the layout handed the height back (re-arrange, zoom, reload)
+    const pulled = core.enforcePreviewCaps(node, "compact", { skip: ["h3_character_sheet_ui"] });
+    assert.equal(late.computedHeight, core.PREVIEW_COMPACT_HEIGHT, "an inflated preview is pulled back");
+    assert.equal(pulled.changed, 1, "and the caller is told, so the node can be re-fitted once");
+
+    const hiddenPass = core.enforcePreviewCaps(node, "off", { skip: ["h3_character_sheet_ui"] });
+    assert.ok(hiddenPass.changed > 0, "hidden mode reports the change it made");
+    assert.equal(late.hidden, true, "hidden mode hides a late arrival too");
+    assert.equal(late.computeLayoutSize().maxHeight, 0, "with no height left to take");
+    assert.equal(core.enforcePreviewCaps(node, "full", { skip: ["h3_character_sheet_ui"] }).changed, 0);
+    ok.push("previews: a late widget is capped, an inflated one is pulled back, full mode is left alone");
+}
+
 // --- the ticks are part of the payload -----------------------------------------
 // An empty cell list used to mean "render the built-in 8-view matrix", which is
 // how a sheet the user never asked for got rendered. The ticks now travel with the

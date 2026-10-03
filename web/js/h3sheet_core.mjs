@@ -243,6 +243,18 @@ export const KNOB_COLUMNS = 3;
 // a tie, so the rule is written to out-specify it rather than rely on document order. `full`
 // restores the widget's original function and removes the class.
 
+/**
+ * The panel's build tag, shown in the header and used as the module's cache-busting suffix by
+ * ``h3sheet_ui.js`` (``import ... ?boot=h3sheet_vNN``).
+ *
+ * A browsing tab keeps the module it loaded first, so after a pack update the panel can be
+ * running yesterday's code while the file on disk says otherwise - and a symptom like "the
+ * setting does nothing" is impossible to tell apart from a bug from the outside. Printing the
+ * build makes that a glance instead of an investigation; a test keeps it in step with the
+ * import, so bumping one without the other fails the suite rather than confusing a user.
+ */
+export const PANEL_BUILD = "h3sheet_v44";
+
 /** The frontend's own widget/host names, straight from the shipped frontend bundle. */
 export const PREVIEW_HOST_CLASS = "comfy-img-preview";
 //: A still image is NOT a DOM element in this frontend: an `ImagePreviewWidget` named
@@ -439,6 +451,56 @@ export function applyPreviewMode(node, mode, { skip = [] } = {}) {
     node?.setDirtyCanvas?.(true, true);
     node?.graph?.setDirtyCanvas?.(true, true);
     return { mode: wanted, widgets: widgets.length, hosts: hosts.length };
+}
+
+/**
+ * Re-apply the preview caps, and pull back any preview widget the layout has inflated.
+ *
+ * `applyPreviewMode` runs on mount, on a workflow load, after a run and when the selector
+ * changes - but a preview widget can appear AFTER any of those: the frontend adds the canvas
+ * image widget when the image finally finishes loading, which on a multi-megabyte sheet PNG is
+ * seconds after the run ended. A widget that arrives late is a widget nothing has capped, and an
+ * uncapped preview is not just big: its `minHeight` joins the node's layout minimums while its
+ * unbounded `maxHeight` also absorbs the free height, so the frontend's `_arrangeWidgets` grows
+ * the node and this pack's node fit shrinks it back - every frame, which is the preview that
+ * jitters up and down. Enforcing the cap on a light timer closes both: anything new gets the
+ * bound, and a height the layout handed back out is written down again.
+ *
+ * Deliberately cheap and quiet: it only touches a widget whose bound or height is actually
+ * wrong, and reports how many it touched so the caller can re-fit the node once.
+ */
+export function enforcePreviewCaps(node, mode, { skip = [] } = {}) {
+    const wanted = nodePreviews({ nodePreviews: mode });
+    const { widgets } = previewParts(node, { skip });
+    if (wanted === "full") return { mode: wanted, changed: 0 };
+    const cap = wanted === "off" ? 0 : PREVIEW_COMPACT_HEIGHT;
+    let changed = 0;
+    for (const widget of widgets) {
+        const before = typeof widget.computeLayoutSize === "function" ? widget.computeLayoutSize() : null;
+        capPreviewWidget(widget, wanted);
+        const after = typeof widget.computeLayoutSize === "function" ? widget.computeLayoutSize() : null;
+        if (!before || !after || before.minHeight !== after.minHeight || before.maxHeight !== after.maxHeight) {
+            changed += 1;
+        }
+        if (wanted === "off") {
+            if (widget.hidden !== true) {
+                widget.hidden = true;
+                if (widget.options) widget.options.hidden = true;
+                changed += 1;
+            }
+            continue;
+        }
+        // A height above the cap means something re-arranged after the cap went in.
+        if (Number(widget.computedHeight) > cap + 4) {
+            widget.computedHeight = cap;
+            changed += 1;
+        }
+    }
+    if (changed) {
+        node?.setDirtyCanvas?.(true, true);
+        node?.graph?.setDirtyCanvas?.(true, true);
+    }
+    return { mode: wanted, changed };
 }
 
 /**
@@ -1386,6 +1448,12 @@ export function buildSheetInterface({ state, hooks = {} }) {
     addButton.title = "Add files from disk; each file lands in the first free slot of its kind";
     header.append(
         element("span", { textContent: "Character Sheet", className: "mmx-title" }),
+        element("span", {
+            textContent: PANEL_BUILD,
+            className: "mmx-muted mmx-build",
+            title: "The panel build this browser loaded. If it is older than the pack on disk,"
+                + " reload the page (Ctrl+Shift+R) - a tab keeps the module it loaded first.",
+        }),
         element("span", { className: "mmx-spacer" }),
         browseButton,
         addButton,
