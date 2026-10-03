@@ -383,9 +383,13 @@ SECTIONS: tuple[HelpSection, ...] = (
             "\"corrupted test versions\" - beta5 is the first functional one, and old betas are "
             "still sitting in model folders (and in old workflows). The Files section above "
             "lists every matching checkpoint it can see, not just the first.",
-            "**Prompt side**: name each reference's job in its role box. The cell prompt is "
-            "built from those roles, and the Prompt tab shows the exact text before you "
-            "queue.",
+            "**Prompt side**: name each reference's job in its role box. The words are "
+            "read one by one - *face*, *hair*, *eyes*, *glasses*, *clothing* (and its "
+            "swimwear/underwear words), *body*, *breasts*, *intimate*, *legwear*, *shoes*, "
+            "*accessories*, *voice* - and the picture that is the only claimant of one is "
+            "called its **sole source**. Anything else you type rides along as your own "
+            "words. The cell prompt is built from those roles, and the Prompt tab shows "
+            "the exact text before you queue.",
             "**Text in frames**: watermarks and logos in the source pictures get learned. "
             "Put them in *Suppress* (\"text, watermark, logo\"), and blur or crop them if "
             "they are burned in.",

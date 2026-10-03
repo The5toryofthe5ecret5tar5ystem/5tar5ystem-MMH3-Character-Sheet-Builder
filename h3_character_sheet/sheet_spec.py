@@ -1129,7 +1129,18 @@ def parse_sheet_spec(raw: Any) -> SheetSpec:
 # --------------------------------------------------------------------------- #
 # prompt assembly
 # --------------------------------------------------------------------------- #
-def reference_legend(spec: SheetSpec, *, enabled_only: bool = True, refs: list[SheetRef] | None = None) -> str:
+def attributes_hidden_by(view: Any) -> tuple[str, ...]:
+    """The attributes a framing cannot show (see ``ATTRIBUTES_HIDDEN_BY_VIEW``)."""
+    return ATTRIBUTES_HIDDEN_BY_VIEW.get(str(view or "").strip().lower(), ())
+
+
+def reference_legend(
+    spec: SheetSpec,
+    *,
+    enabled_only: bool = True,
+    refs: list[SheetRef] | None = None,
+    hidden: Iterable[str] = (),
+) -> str:
     """The "which reference carries what" block shared by every cell prompt.
 
     H3 reads the official ``<Picture N>`` / ``<Video K>`` / ``<Audio J>`` tags, so
@@ -1143,12 +1154,21 @@ def reference_legend(spec: SheetSpec, *, enabled_only: bool = True, refs: list[S
     the hair."). It is a claim about this run, so it needs the whole picture/video
     set to compute: a tag that shares an attribute is never called sole.
 
+    ``hidden`` is the framing's own out-of-frame list (:func:`attributes_hidden_by`).
+    A chest-up portrait must not be told that a reference owns the groin - naming an
+    attribute the shot cannot contain is an invitation to include it - so a partly
+    hidden role falls back to the user's own words plus the claim it CAN show
+    ("``<Picture 2>`` is the breasts, butt, vagina reference and the only source of
+    the breasts."). The exclusivity count still uses every claimant: hiding an
+    attribute must not promote a shared one to "sole".
+
     A slot the user left without a role gets a neutral sentence for its kind rather
     than the word "reference" twice: the panel shows the role as a placeholder, so
     an empty box must not invent a claim about the reference's content.
     """
     source = refs if refs is not None else spec.refs
     selected = [ref for ref in source if not enabled_only or ref.enabled]
+    hidden_set = frozenset(hidden)
 
     supplied: dict[str, list[SheetRef]] = {}
     for ref in selected:
@@ -1164,10 +1184,11 @@ def reference_legend(spec: SheetSpec, *, enabled_only: bool = True, refs: list[S
         claimed = (
             reference_attributes(ref.role) if ref.kind in ("picture", "video") else set()
         )
+        visible = claimed - hidden_set
         sole = [
             attribute
             for attribute in ATTRIBUTE_LABELS
-            if attribute in claimed and len(supplied.get(attribute) or ()) == 1
+            if attribute in visible and len(supplied.get(attribute) or ()) == 1
         ]
         sole_labels = [ATTRIBUTE_LABELS[attribute] for attribute in sole]
         if sole_labels and len(sole) == len(claimed):
@@ -1210,6 +1231,13 @@ def describe_background(spec: SheetSpec) -> str:
 #: Attribute vocabulary, most specific first. Reading the role the user typed
 #: ("face, hair, glasses" vs "body and clothes") is what lets the prompt say which
 #: picture may supply what - and, just as important, which pictures may NOT.
+#:
+#: Clothes and bodies are split finer than the rest because that is where an adult
+#: sheet's references are usually divided: "body and bikini" against "breasts, butt,
+#: vagina". ``body`` is the silhouette every framing sees (proportions, waist, hips,
+#: skin), ``breasts`` is the chest - visible in a portrait - and ``intimate`` is what
+#: only a full-body cell shows. Keeping them apart is what lets the framing filter drop
+#: a chest-up reference's groin claim without dropping its chest claim too.
 ATTRIBUTE_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("hair", ("hair", "bangs", "ponytail", "locks", "fringe")),
     ("glasses", ("glass", "spectacles", "eyewear")),
@@ -1220,13 +1248,27 @@ ATTRIBUTE_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "cloth", "outfit", "dress", "skirt", "shirt", "top", "uniform", "apron",
             "cosplay", "costume", "wardrobe", "lingerie", "trousers", "pants", "jacket",
+            "bikini", "swimsuit", "swimwear", "underwear", "bra", "panties", "thong",
+            "leotard", "bodysuit", "corset", "camisole", "garter", "nightgown", "robe",
         ),
     ),
     ("legwear", ("sock", "stocking", "tights", "legwear")),
     ("shoes", ("shoe", "boot", "heel", "sandal", "slipper")),
     (
         "body",
-        ("body", "figure", "proportion", "shape", "build", "skin", "tattoo", "height"),
+        (
+            "body", "figure", "proportion", "shape", "build", "skin", "tattoo", "height",
+            "chest", "waist", "hip", "thigh", "torso", "silhouette", "navel", "abdomen",
+            "midriff", "muscle", "curve",
+        ),
+    ),
+    ("breasts", ("breast", "boob", "tit", "bust", "nipple", "areola")),
+    (
+        "intimate",
+        (
+            "butt", "ass", "glute", "crotch", "pubic", "vulva", "vagina", "labia",
+            "mons", "pussy", "penis", "cock", "dick", "scrotum", "testicle", "anus",
+        ),
     ),
     (
         "accessories",
@@ -1242,6 +1284,8 @@ ATTRIBUTE_LABELS: dict[str, str] = {
     "hair": "the hair",
     "clothing": "the clothing",
     "body": "the body proportions",
+    "breasts": "the breasts",
+    "intimate": "the intimate anatomy",
     "legwear": "the legwear",
     "shoes": "the shoes",
     "accessories": "the accessories",
@@ -1249,12 +1293,12 @@ ATTRIBUTE_LABELS: dict[str, str] = {
 }
 
 #: Attributes a framing cannot show: a from-behind cell must not be asked to match
-#: eyes or glasses nobody can see, and a close-up must not be told about an outfit
-#: or shoes that are out of frame.
+#: eyes or glasses nobody can see, a close-up must not be told about an outfit, shoes or
+#: a body it cannot fit in frame, and a chest-up portrait stops above the groin.
 ATTRIBUTES_HIDDEN_BY_VIEW: dict[str, tuple[str, ...]] = {
     "back": ("face", "eyes", "glasses"),
-    "face": ("clothing", "body", "legwear", "shoes"),
-    "portrait": ("legwear", "shoes"),
+    "face": ("clothing", "body", "breasts", "intimate", "legwear", "shoes"),
+    "portrait": ("intimate", "legwear", "shoes"),
 }
 
 #: Attributes that decide *who* the person is. A reference that claims none of them
@@ -1395,7 +1439,7 @@ def attribution_lines(spec: SheetSpec, cell: SheetCell, *, refs: list[SheetRef] 
         for attribute in reference_attributes(ref.role):
             supplied.setdefault(attribute, []).append(ref)
 
-    hidden = set(ATTRIBUTES_HIDDEN_BY_VIEW.get(cell.view, ()))
+    hidden = set(attributes_hidden_by(cell.view))
 
     # Group by owner: one picture per attribute reads as an instruction, a list of
     # "X from P1, Y from P1, Z from P1" reads as noise.
@@ -1532,7 +1576,7 @@ def cell_references(
     enabled = [ref for ref in spec.refs if ref.enabled]
     if str(scope or "").strip().lower() == "every cell":
         return enabled
-    hidden = set(ATTRIBUTES_HIDDEN_BY_VIEW.get(cell.view, ()))
+    hidden = set(attributes_hidden_by(cell.view))
     kept: list[SheetRef] = []
     for ref in enabled:
         claimed = reference_attributes(ref.role)
@@ -1827,7 +1871,7 @@ def build_cell_prompt(spec: SheetSpec, cell: SheetCell, *, refs: list[SheetRef] 
     if spec.global_prompt.strip():
         lines.append(spec.global_prompt.strip())
 
-    legend = reference_legend(spec, refs=refs)
+    legend = reference_legend(spec, refs=refs, hidden=attributes_hidden_by(cell.view))
     if legend:
         lines.append(legend)
 
@@ -1918,6 +1962,7 @@ __all__ = [
     "BACKGROUND_KEYS",
     "ATTRIBUTE_LABELS",
     "ATTRIBUTES_HIDDEN_BY_VIEW",
+    "attributes_hidden_by",
     "BLUR_KINDS",
     "BLUR_MODES",
     "BLUR_SCOPES",

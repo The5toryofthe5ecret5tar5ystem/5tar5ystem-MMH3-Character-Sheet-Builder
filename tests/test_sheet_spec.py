@@ -541,11 +541,99 @@ def _two_ref_spec(**cell):
     )
 
 
+def _anatomy_pair(**cell):
+    """A face picture plus a nude body picture - the split this vocabulary is for."""
+    return ss.parse_sheet_spec(
+        {
+            "refs": {
+                "pictures": [
+                    {"imageFile": "face.jpg", "role": "face and hair"},
+                    {"imageFile": "nude.jpg", "role": "breasts, butt, vagina"},
+                ]
+            },
+            "cells": [{"id": "c", **cell}],
+        }
+    )
+
+
 def test_roles_are_read_into_attributes():
     assert ss.reference_attributes("face, hair, glasses") == {"face", "hair", "glasses"}
     assert ss.reference_attributes("body and clothes") == {"body", "clothing"}
     assert ss.reference_attributes("voice") == {"voice"}
     assert ss.reference_attributes("") == set()
+
+
+def test_the_vocabulary_reads_clothes_and_the_body_words():
+    """The words an adult sheet is split over: swimwear, silhouette and anatomy.
+
+    Reported gap: a role box saying "breasts, butt, vagina" read as NOTHING, so that
+    reference owned no attribute at all - it could not be called a sole source, no other
+    picture was forbidden from supplying it, and the framing filter had nothing to test
+    when deciding whether the cell can show it. "bikini" was unread for the same reason,
+    which left it only in the brackets as a word the vocabulary did not know.
+    """
+    assert ss.reference_attributes("clothes") == {"clothing"}
+    assert ss.reference_attributes("shoes") == {"shoes"}
+    assert ss.reference_attributes("breasts") == {"breasts"}
+    assert ss.reference_attributes("butt") == {"intimate"}
+    assert ss.reference_attributes("vagina") == {"intimate"}
+    assert ss.reference_attributes("bikini, swimsuit") == {"clothing"}
+    assert ss.reference_attributes("waist, hips, chest") == {"body"}, "silhouette words"
+    assert ss.reference_attributes("body and bikini") == {"body", "clothing"}
+    assert ss.unmatched_role_words("body and bikini") == [], "nothing left to bracket"
+    # The new short keywords must not eat half a word: a match is the whole word plus
+    # only a plural/gerund suffix (see _matches_keyword).
+    for word in ("topic", "titles", "assets", "cockpit", "bustle", "rear view", "hipster"):
+        assert ss.reference_attributes(word) == set(), f"{word!r} is not an attribute"
+
+
+def test_an_anatomy_reference_owns_the_body_and_must_not_supply_the_face():
+    """The pair this was asked for: a face picture plus a nude body picture."""
+    spec = _anatomy_pair(view="front")
+    legend = ss.reference_legend(spec)
+    assert "<Picture 2> is the sole source of the breasts and the intimate anatomy." in legend
+    prompt = ss.build_cell_prompt(spec, spec.cells[0])
+    assert "Take the breasts and the intimate anatomy only from <Picture 2>." in prompt
+    assert "<Picture 1> must not change the breasts and the intimate anatomy." in prompt
+    assert "<Picture 2> must not change the face and the hair" in prompt
+    assert "the person visible in it is not the identity, do not copy their face" in prompt
+    # The nude picture is a whole second person, so auto blur takes its face out.
+    assert ss.blur_face_decisions(spec)[("picture", 1)] == "blur"
+
+
+def test_the_framing_filter_drops_an_anatomy_reference_it_cannot_show():
+    """A close-up cannot show the anatomy, so that reference is left out of the wiring.
+
+    It used to be *kept*: an unread role claimed nothing, and a reference that claims
+    nothing is never dropped (its purpose is unknown). Reading the words is what lets a
+    face cell stop being conditioned on a nude photograph.
+    """
+    spec = ss.parse_sheet_spec(
+        {
+            "refs": {
+                "pictures": [
+                    {"imageFile": "face.jpg", "role": "face and hair"},
+                    {"imageFile": "nude.jpg", "role": "breasts, butt, vagina"},
+                ]
+            },
+            "cells": [
+                {"id": "face", "view": "face"},
+                {"id": "portrait", "view": "portrait"},
+                {"id": "front", "view": "front"},
+            ],
+        }
+    )
+    by_id = {cell.id: cell for cell in spec.enabled_cells}
+    assert [ref.file for ref in ss.cell_references(spec, by_id["face"])] == ["face.jpg"]
+    for view in ("portrait", "front"):
+        assert [ref.file for ref in ss.cell_references(spec, by_id[view])] == [
+            "face.jpg",
+            "nude.jpg",
+        ]
+    # A chest-up portrait shows the chest and not the groin: it names one, not the other.
+    portrait = ss.build_cell_prompt(spec, by_id["portrait"])
+    assert "Take the breasts only from <Picture 2>." in portrait
+    assert "intimate anatomy" not in portrait
 
 
 def test_a_cell_only_gets_the_references_its_framing_can_show():

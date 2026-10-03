@@ -265,6 +265,43 @@ Dropped / chosen files are uploaded through core `POST /upload/image` with
 Very large media needs a bigger `--max-upload-size` (this box runs with 5000).
 
 
+## Reference roles (what the role box does)
+
+Every tile has a role box, and its text is read **word by word** against a fixed vocabulary -
+never by position. Picture 1 is the face only because you said so; swap the two role boxes and
+the prompt swaps with them.
+
+| Bucket | Words it reads |
+| --- | --- |
+| face / eyes / glasses / hair | face, facial features, makeup, lipstick, eyes, iris, glasses, spectacles, hair, bangs, ponytail, fringe |
+| clothing | cloth(es), outfit, dress, skirt, shirt, top, uniform, apron, cosplay, costume, wardrobe, lingerie, trousers, pants, jacket, bikini, swimsuit, swimwear, underwear, bra, panties, thong, leotard, bodysuit, corset, camisole, garter, nightgown, robe |
+| body | body, figure, proportions, shape, build, skin, tattoo, height, chest, waist, hip, thigh, torso, silhouette, navel, abdomen, midriff, muscle, curves |
+| breasts | breast(s), boob(s), tit(s), bust, nipple(s), areola |
+| intimate | butt, ass, glutes, crotch, pubic, vulva, vagina, labia, mons, pussy, penis, cock, dick, scrotum, testicles, anus |
+| legwear / shoes | socks, stockings, tights, shoes, boots, heels, sandals, slippers |
+| accessories | accessory, bow, jewel(ry), necklace, earrings, hat, gloves, choker, belt |
+| voice | voice, speech, accent |
+
+Plurals count (`tops`, `clothes`), and a keyword only matches the **whole** word plus a plural
+or gerund ending: `topic` is not `top` and `titles` is not `tit`.
+
+* A reference that is the **only** enabled claimant of an attribute is called its *sole source*
+  (`<Picture 1> (head, face, hair) is the sole source of the face and the hair.`), and every
+  other reference is then told it `must not change` that attribute. Two references claiming the
+  same thing drops the word *sole* - which is the point: it names the blend instead of allowing
+  it.
+* A reference demoted to a non-likeness job (clothes, body) is also told outright that
+  `the person visible in it is not the identity, do not copy their face`, because a
+  full-length reference photo is a whole second person.
+* Words the vocabulary does not read (`head`, `elf ears`) are kept in brackets next to the tag,
+  so your own description still reaches the model; a role it understands completely is not
+  repeated.
+* An empty role box makes **no claim at all** - it never guesses, and a cell with no face claim
+  gets no "the identity comes from ..." line rather than a wrong one.
+* The same reading drives the rest of the pack: the framing filter leaves a reference out of a
+  cell whose framing cannot show its whole role (an outfit for a face close-up, a nude body for
+  a close-up), and *Blur auto* blurs a picture whose role does not claim the face.
+
 ## Face blur on reference pictures
 
 H3 conditions on every reference it is given at once and has **no per-reference
