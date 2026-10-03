@@ -4,6 +4,7 @@
 **License**: GPL-3.0 · **ComfyUI node**: `MiniMaxH3CharacterSheet` · **Installs as**: a
 custom-node folder (any name), typically `ComfyUI-H3-Character-Sheet`
 **Version**: 1.0.0 (initial release) · [`CHANGELOG.md`](CHANGELOG.md) ·
+[releases](https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker/releases) ·
 [`docs/civitai-post.md`](docs/civitai-post.md) is the short public writeup (features, model
 links, install steps)
 

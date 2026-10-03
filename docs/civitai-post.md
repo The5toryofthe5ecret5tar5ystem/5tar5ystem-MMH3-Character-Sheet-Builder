@@ -17,7 +17,9 @@ Built for ComfyUI's MiniMax H3. Renders on **ComfyUI core H3 nodes** - this pack
 nothing else.
 
 **Node pack (GitHub):** https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker
-**Ready-made workflow:** https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker/blob/main/example_workflows/5tar5ystem%20MMH3%20Character%20Sheet%20Maker.json
+**Release page (v1.0.0):** https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker/releases/tag/v1.0.0
+**Ready-made workflow** (drag it onto the canvas): https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker/blob/main/example_workflows/5tar5ystem%20MMH3%20Character%20Sheet%20Maker.json
+**Workflow, direct download** (no GitHub account needed): https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker/releases/download/v1.0.0/5tar5ystem.MMH3.Character.Sheet.Maker.json
 **Full manual:** the README in the repo (every knob, every option) - in-node too: the node's **Help** tab carries the same guide and checks your model files for you (✓/✗ with the exact folder to drop each one in).
 
 ## What it does
