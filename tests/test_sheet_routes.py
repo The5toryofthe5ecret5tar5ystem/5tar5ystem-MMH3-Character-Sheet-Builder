@@ -108,7 +108,54 @@ def test_an_unknown_action_names_the_ones_that_exist():
     assert "presets" in answer["error"], "the error has to name the real actions"
 
 
+def test_the_save_preset_action_stores_what_the_panel_sends(tmp_path, monkeypatch):
+    """Saving is one request, and the answer carries the WHOLE list back.
+
+    That matters: the panel refills its dropdown from this answer rather than guessing what
+    the store now holds, so a save and a delete are the same code path on the panel side.
+    """
+    monkeypatch.setattr(sheet_routes.user_presets, "store_path",
+                        lambda: tmp_path / "h3_character_sheet" / "presets.json")
+    assert "save-preset" in sheet_routes._ACTIONS
+    answer = _call({
+        "action": "save-preset",
+        "name": "Route preset",
+        "render": {"background": "tan"},
+        "widgets": {"cell_size": 1024},
+        "build": {"views": ["face"]},
+    })
+    assert answer["ok"] is True, answer
+    assert answer["action"] == "save-preset"
+    assert answer["preset"]["custom"] is True
+    assert [entry["id"] for entry in answer["presets"]][-1] == answer["preset"]["id"]
+    assert answer["store"].endswith("presets.json"), "the panel shows the user where it went"
+    json.dumps(answer)
+
+    # A request with no name is a refusal with a reason, not a 500.
+    refused = _call({"action": "save-preset", "widgets": {"cell_size": 1024}})
+    assert refused["ok"] is False
+    assert "name" in refused["reason"]
+
+
+def test_the_delete_preset_action_refuses_built_ins(tmp_path, monkeypatch):
+    monkeypatch.setattr(sheet_routes.user_presets, "store_path",
+                        lambda: tmp_path / "h3_character_sheet" / "presets.json")
+    assert "delete-preset" in sheet_routes._ACTIONS
+    saved = _call({"action": "save-preset", "name": "Route preset", "widgets": {"steps": 8}})
+    preset_id = saved["preset"]["id"]
+
+    answer = _call({"action": "delete-preset", "id": preset_id})
+    assert answer["ok"] is True
+    assert answer["removed"] == preset_id
+    assert preset_id not in [entry["id"] for entry in answer["presets"]]
+
+    built_in = _call({"action": "delete-preset", "id": "balanced"})
+    assert built_in["ok"] is False
+    assert "built-in" in built_in["reason"]
+
+
 def test_the_actions_the_panel_uses_are_all_registered():
     """The panel calls these by name; each one has to exist."""
-    for action in ("list", "plan", "presets", "compose", "pick", "delete", "clear", "names"):
+    for action in ("list", "plan", "presets", "save-preset", "delete-preset",
+                   "compose", "pick", "delete", "clear", "names"):
         assert action in sheet_routes._ACTIONS, action

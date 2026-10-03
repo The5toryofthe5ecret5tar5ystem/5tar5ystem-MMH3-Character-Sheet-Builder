@@ -84,11 +84,36 @@ it gives the most motion. A non-turbo checkpoint (or a guidance/cfg workflow) st
 you pick one again.
 
 A preset writes the node's own widgets (cell size, frames, steps, reference sizing,
-continuation, clip export, layout, shape) plus the settings the panel owns, and it may
-**recommend ticks** (which cells it is for) - it never rewrites an existing cell list or your
-references. Editing a knob afterwards is expected; the applied preset id is recorded in the
-payload (`render.preset`) so a saved workflow can say how its numbers started, and picking
-*Custom (no preset)* only clears that record.
+continuation, clip export, layout, shape) plus the settings the panel owns, and it also
+**builds its cells**: a preset that says which cells it is for (both *Full Character Sheet*
+tiers, *Turnaround*, *Expression sheet*) creates them on the spot instead of only ticking the
+boxes, so picking one and pressing Queue is the whole job. A preset with no ticks in it (the
+settings-only ones) leaves an existing cell list alone, and *Clear cells* still empties it.
+Editing a knob afterwards is expected; the applied preset id is recorded in the payload
+(`render.preset`) so a saved workflow can say how its numbers started, and picking *Custom (no
+preset)* only clears that record.
+
+### Saving your own presets ("Save..." next to the selector)
+
+After ten minutes of dialling in a sheet, the combination that worked should be one click
+next time. **Save...** takes the settings the node has *right now* - every knob from the
+Settings tab (cell size, steps, frames, sampler, reference sizing, layout, shape...), the
+continuation switch, clip export, the backdrop (including which reference supplies it), the
+face-blur area and the view/pose/expression ticks - names it, and puts it at the bottom of
+the preset list marked **(custom)**. Choosing it later applies exactly that, cells included.
+
+* Saved presets live in **ComfyUI's user directory**:
+  `user/default/h3_character_sheet/presets.json`. That is configuration, not output, so
+  clearing a render folder or updating ComfyUI does not take them with it. The **Save...**
+  panel prints the path it wrote to.
+* **Delete** removes the selected saved preset - and is only enabled for presets you saved
+  yourself: the shipped recommendations are the pack's, not yours to lose. It asks twice
+  (*"Really delete?"*) because a preset can represent real work.
+* The store validates what it is given (numbers and strings only, ticks filtered against the
+  sheet's vocabulary) and computes the **Changes:** line itself from the node's own defaults,
+  so a saved preset says what it moves off a fresh node just like a built-in one.
+* Up to 40 saved presets, and a name up to 40 characters; two presets may share a name (each
+  gets its own id).
 
 ### Backdrops (Cells tab)
 
@@ -441,9 +466,12 @@ a closer cell - set that cell (or the sheet) to `auto`.
   Only ComfyUI's own input / output folders are served, and a request that tries to
   leave them is refused.
 * `POST /h3-character-sheet/action` - `list` | `plan` | `compose` | `pick` |
-  `delete` | `clear` | `names` | `blur` | `presets` | `knobs` (`blur` = face blur one
-  reference and answer with the copy's URL, `presets` = the recommended whole-node
-  settings, `knobs` = the node's own widgets described for the Settings tab).
+  `delete` | `clear` | `names` | `blur` | `presets` | `save-preset` | `delete-preset` |
+  `knobs` (`blur` = face blur one reference and answer with the copy's URL, `presets` = the
+  recommended whole-node settings **plus the user's saved ones** (each entry carries
+  `custom`), `save-preset` = store the settings the panel sent as one of those (answering
+  with the whole list), `delete-preset` = remove one by id (a built-in is refused with a
+  reason), `knobs` = the node's own widgets described for the Settings tab).
 
 ## Install
 

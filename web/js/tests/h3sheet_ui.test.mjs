@@ -83,7 +83,7 @@ assert.ok(wiring.includes("`/media?${params.toString()}`"), "the hook must call 
 assert.ok(wiring.includes('api.fetchApi("/upload/image"'), "drops must upload through core /upload/image");
 assert.ok(wiring.includes('body.append("subfolder", "h3_character_sheet")'),
     "uploads go to a dedicated input subfolder");
-assert.ok(wiring.includes("boot=h3sheet_v40"),
+assert.ok(wiring.includes("boot=h3sheet_v41"),
     "core module imports must carry a fresh boot tag (bump it on every JS change, or browsers keep the cached panel)");
 assert.ok(wiring.includes("panelFitHeight") && wiring.includes("resizing_node === node"),
     "the wiring must re-measure the node from its panel and never fight a drag");
@@ -94,6 +94,19 @@ assert.ok(wiring.includes("layoutChanged: () => scheduleFit(node)"),
     "a pane change (which changes the panel's height) has to re-fit the node");
 assert.ok(wiring.includes("action: \"presets\""),
     "the panel must ask the backend for the preset list, not carry its own copy");
+// Saving and deleting the user's own presets: the route names have to match, both ways.
+assert.ok(wiring.includes("savePreset: (body) => presetStore(node, \"save-preset\", body)"),
+    "the panel saves through the preset store route");
+assert.ok(wiring.includes("deletePreset: (id) => presetStore(node, \"delete-preset\", { id })"),
+    "and deletes through it");
+{
+    const routes = read("h3_character_sheet/sheet_routes.py");
+    for (const action of ["save-preset", "delete-preset"]) {
+        assert.ok(routes.includes(`"${action}"`),
+            `the ${action} action must be registered, or the panel gets a 400 for asking`);
+        assert.ok(wiring.includes(`"${action}"`), `and the wiring must call it by that name`);
+    }
+}
 // Compact knobs: the node's own rows come off, the values stay.
 assert.ok(wiring.includes("action: \"knobs\""),
     "the knob list must come from the backend (labels, groups and bounds from the node schema)");

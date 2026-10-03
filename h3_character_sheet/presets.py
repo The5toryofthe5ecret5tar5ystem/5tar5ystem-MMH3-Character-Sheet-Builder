@@ -55,6 +55,9 @@ class SheetPreset:
     #: up with settings they never chose, and a test compares this set against the schema, so
     #: an undeclared deviation fails the suite instead of shipping.
     deviates: tuple[str, ...] = ()
+    #: True for a preset the USER saved (see ``user_presets.py``): the pack cannot vouch for
+    #: the settings, only for the shape, and the panel offers to delete those and only those.
+    custom: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -66,6 +69,7 @@ class SheetPreset:
             "widgets": dict(self.widgets),
             "build": {key: list(value) for key, value in self.build.items()},
             "deviates": list(self.deviates),
+            "custom": bool(self.custom),
         }
 
 
@@ -260,13 +264,37 @@ _PRESET_BY_ID = {preset.id: preset for preset in PRESETS}
 
 
 def preset_by_id(preset_id: Any) -> SheetPreset | None:
-    """Look a preset up by id (``None`` when it is unknown - never a guess)."""
-    return _PRESET_BY_ID.get(str(preset_id or "").strip().lower())
+    """Look a preset up by id (``None`` when it is unknown - never a guess).
+
+    Built-ins first, then the user's own saved presets. A saved preset cannot shadow a
+    built-in: the store hands out ``custom-...`` ids only.
+    """
+    key = str(preset_id or "").strip().lower()
+    found = _PRESET_BY_ID.get(key)
+    if found is not None:
+        return found
+    return next((preset for preset in user_presets() if preset.id == key), None)
+
+
+def user_presets() -> tuple[SheetPreset, ...]:
+    """The presets the user saved, as ``SheetPreset`` objects (never raises).
+
+    Imported lazily: ``user_presets`` builds the same ``SheetPreset`` type this module
+    defines, so a module-level import would be a cycle.
+    """
+    from . import user_presets as store  # noqa: PLC0415 - deliberate, see the docstring
+
+    return tuple(store.saved_presets())
+
+
+def all_presets() -> tuple[SheetPreset, ...]:
+    """Built-ins, then the user's own - the order the panel offers them in."""
+    return PRESETS + user_presets()
 
 
 def preset_list() -> list[dict[str, Any]]:
     """The presets as plain data, for the panel."""
-    return [preset.to_dict() for preset in PRESETS]
+    return [preset.to_dict() for preset in all_presets()]
 
 
 def apply_to_payload(payload: dict[str, Any], preset_id: Any) -> dict[str, Any]:
@@ -301,7 +329,9 @@ __all__ = [
     "DEFAULT_PRESET_ID",
     "PRESETS",
     "SheetPreset",
+    "all_presets",
     "apply_to_payload",
     "preset_by_id",
     "preset_list",
+    "user_presets",
 ]

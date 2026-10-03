@@ -37,6 +37,19 @@ SCHEMA_WIDGETS = {
 } - {"model", "video_vae", "audio_vae", "clip"}
 
 
+@pytest.fixture(autouse=True)
+def _no_saved_presets(tmp_path, monkeypatch):
+    """These tests are about the BUILT-IN presets.
+
+    ``preset_list()`` also serves the presets a user saved (``user_presets.py``), which live
+    in the running ComfyUI's user directory - so without this the suite would read whatever
+    that user happens to have kept, and fail on their machine instead of here.
+    """
+    from h3cs import user_presets as store
+
+    monkeypatch.setattr(store, "store_path", lambda: tmp_path / "presets.json")
+
+
 def _payload(**overrides):
     payload = {
         "version": 1,
@@ -305,8 +318,11 @@ def test_the_route_payload_is_json_safe_and_complete():
     json.dumps(listed)  # a preset that cannot be serialised would break the panel
     for entry in listed:
         assert set(entry) == {
-            "id", "label", "hint", "render", "sheet", "widgets", "build", "deviates",
+            "id", "label", "hint", "render", "sheet", "widgets", "build", "deviates", "custom",
         }
+        # `custom` is how the panel knows which entries it may offer to delete (see
+        # user_presets.py); a built-in must never look deletable.
+        assert entry["custom"] is False, entry["id"]
 
 
 def test_the_summary_mentions_the_preset_only_when_the_none_is_absent():

@@ -1290,12 +1290,16 @@ export function buildSheetInterface({ state, hooks = {} }) {
     // Whole-node recommended settings. The list comes from the pack's backend
     // (h3_character_sheet/presets.py) so it is one definition, not two: the panel can only
     // offer what the node actually implements. Applying one writes the node's own widgets
-    // through hooks.applyWidgets and the panel-owned settings into its state.
+    // through hooks.applyWidgets, the panel-owned settings into its state, and - when the
+    // preset says which cells it is FOR - builds those cells. The user's own saved presets
+    // ride in the same list (marked `custom`, stored by the backend in ComfyUI's user
+    // directory) and are the only ones that can be deleted.
     const presetsRow = element("div", { className: "mmx-row mmx-presets" });
     const presetSelect = element("select", { className: "mmx-select" });
     presetSelect.dataset.action = "preset";
     const presetHint = element("span", { className: "mmx-muted" }, { flex: "1 1 220px" });
     let presetList = [];
+    let presetsStore = "";
 
     function fillPresets(list, currentId = "") {
         presetList = Array.isArray(list) ? list : [];
@@ -1303,10 +1307,14 @@ export function buildSheetInterface({ state, hooks = {} }) {
         const custom = element("option", { value: "", textContent: "Custom (no preset)" });
         presetSelect.append(custom);
         for (const entry of presetList) {
-            presetSelect.append(element("option", { value: entry.id, textContent: entry.label }));
+            presetSelect.append(element("option", {
+                value: entry.id,
+                textContent: entry.custom ? `${entry.label} (custom)` : entry.label,
+            }));
         }
         const known = presetList.some((entry) => entry.id === currentId);
         presetSelect.value = known ? currentId : "";
+        updateDeleteButton();
         showHint();
     }
 
@@ -1325,13 +1333,59 @@ export function buildSheetInterface({ state, hooks = {} }) {
         const note = changed.length
             ? ` Changes: ${changed.map((name) => labelOf(name)).join(", ")}.`
             : " Matches the node's own defaults.";
-        presetHint.textContent = entry.hint + note;
+        const cells = entry.build && Object.keys(entry.build).length
+            ? " Builds its cells."
+            : "";
+        presetHint.textContent = entry.hint + cells + note;
     }
 
     /** Widget name -> what a person calls it, for the "changes:" line. */
     function labelOf(name) {
         const words = String(name || "").replace(/^sheet_/, "sheet ").replace(/_/g, " ");
         return words.charAt(0).toUpperCase() + words.slice(1);
+    }
+
+    /**
+     * The settings on this node right now, as a preset body.
+     *
+     * What "save" means is "what I have", so the widget values come from the node itself
+     * (hooks.readWidgets filled state.knobValues) rather than from a second copy the panel
+     * keeps - a preset saved here has to reproduce the render, not the panel's idea of it.
+     */
+    function currentPresetBody(name) {
+        const widgets = {};
+        for (const [key, value] of Object.entries(state.knobValues || {})) {
+            if (value === undefined || value === null || typeof value === "object") continue;
+            widgets[key] = value;
+        }
+        const render = {
+            continuity: continuity(state),
+            exportVideo: exportVideo(state),
+            background: String(state.background || "neutral"),
+            blurScope: blurScope(state),
+        };
+        // The backdrop can BE a reference: remember which one, not just that it was one.
+        if (String(state.background || "") === "reference") {
+            render.backgroundRef = String(state.backgroundRef || "");
+        }
+        if (widgets.frames_per_cell !== undefined) render.framesPerCell = widgets.frames_per_cell;
+        const ticks = state.build || {};
+        return {
+            name,
+            render,
+            widgets,
+            sheet: {
+                layout: widgets.sheet_layout,
+                columns: widgets.sheet_columns,
+                aspect: widgets.sheet_aspect,
+                shortEdge: widgets.sheet_short_edge,
+            },
+            build: {
+                views: [...(ticks.views || [])],
+                poses: [...(ticks.poses || [])],
+                expressions: [...(ticks.expressions || [])],
+            },
+        };
     }
 
     async function applyPreset(entry) {
@@ -1342,11 +1396,21 @@ export function buildSheetInterface({ state, hooks = {} }) {
             else if (key === "background") state.background = String(value || "neutral");
             else if (key === "backgroundRef") state.backgroundRef = String(value || "");
         }
+        let built = 0;
         if (entry.build && Object.keys(entry.build).length) {
-            // Ticks only: the preset says which cells it is FOR, and building them stays the
-            // user's call - an existing cell list is never rewritten by a preset.
+            // The preset says which cells it is FOR, so applying it also BUILDS them: picking
+            // "Full Character Sheet - Balanced" and then having to tick five boxes by hand was
+            // the whole friction. A preset with no ticks (the settings-only ones) leaves an
+            // existing cell list exactly as it is, and "Clear cells" still empties it.
             for (const [key, values] of Object.entries(entry.build)) {
                 if (Array.isArray(values) && values.length) state.build[key] = [...values];
+            }
+            const cells = buildCells(
+                state.build.views || [], state.build.poses || [], state.build.expressions || [],
+            );
+            if (cells.length) {
+                state.cells = cells;
+                built = cells.length;
             }
         }
         state.presetId = entry.id;
@@ -1369,31 +1433,159 @@ export function buildSheetInterface({ state, hooks = {} }) {
         persist();
         refresh();
         await refreshPlan();
-        notify(`preset applied: ${entry.label}`);
+        notify(built
+            ? `preset applied: ${entry.label} - ${built} cell(s) built`
+            : `preset applied: ${entry.label}`);
     }
 
     presetSelect.addEventListener("change", async () => {
         const entry = presetList.find((item) => item.id === presetSelect.value);
         if (!entry) {
             state.presetId = "";
+            updateDeleteButton();
             showHint();
             persist();
             notify("preset cleared - the settings stay as they are");
             return;
         }
         await applyPreset(entry);
+        updateDeleteButton();
         showHint();
     });
+
+    // ------------------------------------------------- saving your own presets
+    const presetSaveButton = button("Save...", () => showSaveRow(presetSaveRow.style.display === "none"));
+    presetSaveButton.dataset.action = "preset-save-open";
+    presetSaveButton.title = "Keep the settings on this node as a preset of your own";
+    const presetDelete = button("Delete", () => removePreset());
+    presetDelete.dataset.action = "preset-delete";
+    let deleteArmed = false;
+    let deleteTimer = 0;
+
+    const presetName = element("input", {
+        type: "text",
+        className: "mmx-input mmx-preset-name",
+        placeholder: "name this preset, e.g. My house style",
+    }, { flex: "1 1 200px", minWidth: "150px" });
+    const presetStoreNote = element("span", { className: "mmx-muted" }, { fontSize: "10px" });
+    const presetSaveRow = element("div", { className: "mmx-row" }, { marginTop: "4px", display: "none" });
+    presetSaveRow.append(
+        presetName,
+        button("Save preset", () => saveCurrentPreset()),
+        button("Cancel", () => showSaveRow(false)),
+        presetStoreNote,
+    );
+
+    function showSaveRow(open) {
+        presetSaveRow.style.display = open ? "" : "none";
+        if (!open) return;
+        presetStoreNote.textContent = presetsStore
+            ? `saved to ${presetsStore}`
+            : "saved in ComfyUI's user directory";
+        presetName.focus?.();
+    }
+
+    /** Reset the delete button to its un-armed state (and its two-step timer). */
+    function disarmDelete() {
+        deleteArmed = false;
+        if (deleteTimer) {
+            clearTimeout(deleteTimer);
+            deleteTimer = 0;
+        }
+        presetDelete.textContent = "Delete";
+    }
+
+    function updateDeleteButton() {
+        disarmDelete();
+        const entry = presetList.find((item) => item.id === presetSelect.value);
+        const custom = Boolean(entry && entry.custom);
+        presetDelete.disabled = !custom;
+        presetDelete.title = custom
+            ? "Remove this saved preset from the list"
+            : "Only presets you saved yourself can be deleted";
+    }
+
+    async function saveCurrentPreset() {
+        const name = String(presetName.value || "").trim();
+        if (!name) {
+            notify("give the preset a name first");
+            presetName.focus?.();
+            return;
+        }
+        if (typeof hooks.savePreset !== "function") {
+            notify("saving presets needs the node's own backend");
+            return;
+        }
+        try {
+            const answer = await hooks.savePreset(currentPresetBody(name));
+            if (!answer || answer.ok === false) {
+                notify(String(answer?.reason || "could not save the preset"));
+                return;
+            }
+            const saved = answer.preset || {};
+            presetsStore = String(answer.store || presetsStore || "");
+            fillPresets(answer.presets, String(saved.id || ""));
+            if (saved.id) {
+                // Saving IS choosing it: the workflow now records where these numbers came from.
+                state.presetId = String(saved.id);
+                persist();
+            }
+            presetName.value = "";
+            showSaveRow(false);
+            notify(`preset saved: ${saved.label || name}`);
+        } catch (error) {
+            notify(`could not save the preset: ${error.message}`);
+        }
+    }
+
+    async function removePreset() {
+        const entry = presetList.find((item) => item.id === presetSelect.value);
+        if (!entry || !entry.custom) return;
+        if (!deleteArmed) {
+            // Two steps, no browser dialog: a preset the user spent time on should not go away
+            // on one stray click, and an un-armed button says what it will do.
+            deleteArmed = true;
+            presetDelete.textContent = "Really delete?";
+            deleteTimer = setTimeout(() => disarmDelete(), 5000);
+            notify(`press again to delete "${entry.label}"`);
+            return;
+        }
+        disarmDelete();
+        if (typeof hooks.deletePreset !== "function") {
+            notify("deleting presets needs the node's own backend");
+            return;
+        }
+        try {
+            const answer = await hooks.deletePreset(entry.id);
+            if (!answer || answer.ok === false) {
+                notify(String(answer?.reason || "could not delete the preset"));
+                return;
+            }
+            if (String(state.presetId || "") === entry.id) {
+                state.presetId = "";
+                persist();
+            }
+            fillPresets(answer.presets, "");
+            notify(`preset deleted: ${entry.label}`);
+        } catch (error) {
+            notify(`could not delete the preset: ${error.message}`);
+        }
+    }
 
     presetsRow.append(
         element("span", { textContent: "Preset", className: "mmx-muted" }, { flex: "0 0 96px" }),
         presetSelect,
+        presetSaveButton,
+        presetDelete,
         presetHint,
     );
-    container.append(presetsRow);
+    container.append(presetsRow, presetSaveRow);
     if (typeof hooks.listPresets === "function") {
         Promise.resolve(hooks.listPresets())
-            .then((data) => fillPresets(data?.presets, String(state.presetId || "")))
+            .then((data) => {
+                presetsStore = String(data?.store || "");
+                fillPresets(data?.presets, String(state.presetId || ""));
+            })
             .catch(() => fillPresets([], ""));
     } else {
         fillPresets([], "");

@@ -1216,11 +1216,16 @@ ok.push("reorder / slot helpers behave");
     assert.equal(presetState.background, "tan", "and the backdrop the preset is built around");
     assert.equal(presetState.presetId, "balanced", "and the workflow records which preset it came from");
     assert.deepEqual(presetState.build.expressions, ["neutral", "smile"], "its ticks are offered");
+    // ...and BUILT: picking a preset that says which cells it is FOR should not then ask the
+    // user to tick five boxes by hand. face x neutral x (neutral, smile) = 2 cells.
+    assert.deepEqual(presetState.cells.map((c) => c.id), ["face-neutral-neutral", "face-neutral-smile"],
+        "applying a preset with ticks builds its cells");
     assert.equal(applied.length, 1, "the node's widgets are written");
     assert.equal(applied[0].cell_size, 1024, "cell size goes to the node");
     assert.equal(applied[0].sheet_columns, 2, "and the layout group is mapped onto its widgets");
     assert.equal(applied[0].sheet_short_edge, 1536);
     assert.ok(bar.textContent.includes("Changes: Continuity"), "the bar says what it changed");
+    assert.ok(bar.textContent.includes("Builds its cells"), "and that it will build them");
     const payload = presetSaved.at(-1);
     assert.equal(payload.render.continuity, "auto", "the payload carries the applied settings");
     assert.equal(payload.render.background, "tan", "including the backdrop");
@@ -1231,7 +1236,8 @@ ok.push("reorder / slot helpers behave");
     select.value = "fast";
     select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
     await settled();
-    assert.deepEqual(presetState.cells.map((c) => c.id), ["keep-me"], "cells survive a preset");
+    assert.deepEqual(presetState.cells.map((c) => c.id), ["keep-me"],
+        "a settings-only preset (no ticks) leaves the cell list alone");
     assert.equal(presetState.continuity, "off", "the new preset replaced the old settings");
     assert.equal(presetState.background, "tan",
         "a preset that says nothing about the backdrop leaves the user's choice alone");
@@ -1250,7 +1256,105 @@ ok.push("reorder / slot helpers behave");
     await tick();
     assert.equal(restored.container.querySelector('[data-action="preset"]').value, "fast",
         "a saved workflow comes back with its preset selected");
-    ok.push("presets: served by the backend, applied to state + node widgets, content untouched");
+    ok.push("presets: served by the backend, applied to state + node widgets, cells built from its ticks");
+}
+
+// --- the user's own presets: save what I have, delete what I saved -------------
+{
+    // Saving has to be about the NODE's values, not the panel's copy: the preset will be
+    // re-applied to a node that has never seen this panel. And a saved preset is the only
+    // kind that can be deleted - a built-in recommendation is the pack's, not the user's.
+    const SAVED = {
+        id: "custom-my-house-style", label: "My house style", custom: true,
+        hint: "Saved from this node: 1024px cells.",
+        render: { background: "tan" }, sheet: {}, widgets: { cell_size: 1024 },
+        build: { views: ["front"], poses: ["neutral"], expressions: ["neutral"] },
+        deviates: [],
+    };
+    const listed = [
+        { id: "balanced", label: "Balanced (recommended)", custom: false, hint: "h",
+          render: {}, sheet: {}, widgets: {}, build: {}, deviates: [] },
+    ];
+    const savedCalls = [];
+    const deletedCalls = [];
+    // A save awaits the backend and then persists, so the test waits the same chain.
+    const settled = async () => { await tick(); await tick(); await tick(); };
+    const storeState = core.readState("");
+    storeState.background = "tan";
+    storeState.continuity = "auto";
+    // What the node currently holds (the panel read it through the readWidgets hook).
+    storeState.knobValues = { cell_size: 1024, steps: 8, frames_per_cell: 22, sheet_layout: "hero-left",
+                              sheet_columns: 2, sheet_aspect: "3:2", sheet_short_edge: 1536 };
+    storeState.build = { views: ["face"], poses: ["neutral"], expressions: ["neutral"] };
+    let storeSaved = null;
+    const storePanel = core.buildSheetInterface({
+        state: storeState,
+        hooks: {
+            status: () => {},
+            stateChanged: (payload) => { storeSaved = payload; },
+            listPresets: async () => ({ presets: listed, store: "/comfy/user/default/h3_character_sheet/presets.json" }),
+            savePreset: async (body) => {
+                savedCalls.push(body);
+                return { ok: true, store: "/comfy/user/default/h3_character_sheet/presets.json",
+                         preset: SAVED, presets: [...listed, SAVED] };
+            },
+            deletePreset: async (id) => {
+                deletedCalls.push(id);
+                return { ok: true, removed: id, presets: listed };
+            },
+        },
+    });
+    await tick();
+    const menu = storePanel.container.querySelector(".mmx-presets");
+    const storeSelect = menu.querySelector('[data-action="preset"]');
+    const deleteButton = menu.querySelector('[data-action="preset-delete"]');
+    const saveOpen = menu.querySelector('[data-action="preset-save-open"]');
+    const nameBox = storePanel.container.querySelector(".mmx-preset-name");
+    assert.ok(saveOpen && deleteButton && nameBox, "the bar offers save and delete");
+    assert.equal(nameBox.parentElement.style.display, "none", "the name box stays out of the way");
+    assert.equal(deleteButton.disabled, true, "a built-in preset cannot be deleted");
+    assert.ok(deleteButton.title.includes("saved yourself"), "and the button says why");
+
+    saveOpen.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+    assert.equal(nameBox.parentElement.style.display, "", "pressing Save reveals the name box");
+    assert.ok(nameBox.parentElement.textContent.includes("presets.json"),
+        "and says where presets are kept");
+
+    // A save with no name is refused by the panel, before it bothers the backend.
+    click([...nameBox.parentElement.querySelectorAll("button")].find((b) => b.textContent === "Save preset"));
+    await tick();
+    assert.equal(savedCalls.length, 0, "an unnamed preset is not sent");
+
+    nameBox.value = "My house style";
+    click([...nameBox.parentElement.querySelectorAll("button")].find((b) => b.textContent === "Save preset"));
+    await settled();
+    assert.equal(savedCalls.length, 1, "the panel asks the backend to store it");
+    const body = savedCalls[0];
+    assert.equal(body.name, "My house style");
+    assert.equal(body.widgets.cell_size, 1024, "what the node has, not what the panel remembers");
+    assert.equal(body.widgets.sheet_short_edge, 1536, "including the layout widgets");
+    assert.deepEqual(body.sheet, { layout: "hero-left", columns: 2, aspect: "3:2", shortEdge: 1536 });
+    assert.equal(body.render.background, "tan");
+    assert.equal(body.render.continuity, "auto");
+    assert.equal(body.render.framesPerCell, 22, "the frame count comes from the node too");
+    assert.deepEqual(body.build.views, ["face"], "and the ticks are part of the preset");
+    assert.equal(storeSelect.value, SAVED.id, "the new preset is selected");
+    assert.equal(storeState.presetId, SAVED.id, "and recorded in the payload");
+    assert.equal(storeSaved.render.preset, SAVED.id);
+    assert.equal(deleteButton.disabled, false, "the user's own preset can be deleted");
+    assert.equal(nameBox.parentElement.style.display, "none", "the save row closes again");
+
+    // Deleting is two steps: a preset someone spent time on must not go on one stray click.
+    deleteButton.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+    await tick();
+    assert.deepEqual(deletedCalls, [], "the first click only arms the button");
+    assert.equal(deleteButton.textContent, "Really delete?");
+    deleteButton.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+    await settled();
+    assert.deepEqual(deletedCalls, [SAVED.id], "the second click deletes it");
+    assert.equal(storeSelect.value, "", "and the list is refilled from the answer");
+    assert.equal(deleteButton.disabled, true, "with nothing custom selected any more");
+    ok.push("presets: save the node's current settings, delete only your own (two-step)");
 }
 
 // --- compact settings: the node's 23 knobs, in columns -------------------------

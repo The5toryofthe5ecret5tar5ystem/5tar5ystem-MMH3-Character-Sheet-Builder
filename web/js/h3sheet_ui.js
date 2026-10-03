@@ -24,7 +24,7 @@ import {
     REF_GROUPS,
     PANEL_FIT,
     panelFitHeight,
-} from "./h3sheet_core.mjs?boot=h3sheet_v40";
+} from "./h3sheet_core.mjs?boot=h3sheet_v41";
 
 const CLASS = "MiniMaxH3CharacterSheet";
 const DOM_WIDGET = "h3_character_sheet_ui";
@@ -135,6 +135,22 @@ async function listSheet(node) {
     const response = await api.fetchApi(url, { cache: "no-store" });
     const data = await response.json().catch(() => ({}));
     return data?.sheet || null;
+}
+
+/**
+ * A preset-store action (save / delete one of the user's own presets).
+ *
+ * Posted directly instead of through ``sheetAction`` because a refusal here is an ANSWER:
+ * "give the preset a name" or "delete one first" has to reach the panel as a sentence, and
+ * ``sheetAction`` turns a 400 into a thrown error that would surface as "HTTP 400".
+ */
+async function presetStore(node, action, body = {}) {
+    const response = await api.fetchApi(apiUrl("/action"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, action, node_id: node.id, name: sheetName(node) }),
+    });
+    return response.json().catch(() => ({ ok: false, reason: `HTTP ${response.status}` }));
 }
 
 async function uploadReference(file, groupKey) {
@@ -291,6 +307,10 @@ function mountPanel(node) {
         // (h3_character_sheet/presets.py): one definition, and the panel can only offer
         // what the node implements.
         listPresets: () => sheetAction(node, { action: "presets" }),
+        /** Keep the settings on this node as a preset of the user's own (user_presets.py). */
+        savePreset: (body) => presetStore(node, "save-preset", body),
+        /** Remove one of those; the backend refuses a built-in with a reason. */
+        deletePreset: (id) => presetStore(node, "delete-preset", { id }),
         // The node's knobs, described by the pack's backend from the node schema: the
         // panel draws them in columns and hides the native rows (see knobs.py).
         listKnobs: () => sheetAction(node, { action: "knobs" }),

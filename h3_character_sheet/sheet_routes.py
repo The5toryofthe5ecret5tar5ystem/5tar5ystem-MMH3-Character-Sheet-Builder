@@ -21,7 +21,9 @@ Actions (all take ``name``)::
     names    - every sheet folder on disk
     plan     - the final prompt + references per cell (no GPU, no render)
     blur     - face blur one reference on demand, answering with the copy to look at
-    presets  - the recommended whole-node settings (see ``presets.py``)
+    presets  - the recommended whole-node settings (see ``presets.py``) + the user's own
+    save-preset  - store the settings the panel currently has as a preset of the user's own
+    delete-preset - remove one of those saved presets (built-ins are refused)
     knobs    - the node's own widgets described for the panel's compact settings grid
     help     - the in-node guide plus a live check of the model files this install has
 
@@ -36,17 +38,21 @@ from typing import Any
 
 from aiohttp import web
 
-from . import face_blur, sheet_media, sheet_spec, sheet_store
+from . import face_blur, sheet_media, sheet_spec, sheet_store, user_presets
 from . import planner as sheet_planner
 from .help import help_payload
 from .knobs import KNOB_GROUPS, knob_groups, knob_list
 from .presets import DEFAULT_PRESET_ID, preset_list
+from .user_presets import delete_preset, save_preset
 from .sheet_store import SheetStore
 
 log = logging.getLogger("ComfyUI-MiniMax-H3-Motion-Director.sheet.routes")
 
 BASE = "/h3-character-sheet"
-_ACTIONS = ("list", "plan", "presets", "knobs", "help", "blur", "compose", "pick", "delete", "clear", "names")
+_ACTIONS = (
+    "list", "plan", "presets", "save-preset", "delete-preset", "knobs", "help", "blur",
+    "compose", "pick", "delete", "clear", "names",
+)
 
 
 def _route(routes, method: str, path: str, handler) -> None:
@@ -148,7 +154,32 @@ async def sheet_action(request):
                 "action": "presets",
                 "presets": preset_list(),
                 "default": DEFAULT_PRESET_ID,
+                "store": str(user_presets.store_path()),
             }
+        )
+    if action == "save-preset":
+        # Keep the settings the user dialled in as one of their own presets. Both answers
+        # carry the WHOLE list, so the panel never has to guess what the store now holds.
+        result = save_preset({key: value for key, value in body.items() if key != "action"})
+        return web.json_response(
+            {
+                **result,
+                "action": "save-preset",
+                "presets": preset_list(),
+                "store": str(user_presets.store_path()),
+            },
+            status=200 if result.get("ok") else 400,
+        )
+    if action == "delete-preset":
+        result = delete_preset(body.get("id"))
+        return web.json_response(
+            {
+                **result,
+                "action": "delete-preset",
+                "presets": preset_list(),
+                "store": str(user_presets.store_path()),
+            },
+            status=200 if result.get("ok") else 400,
         )
     if action == "knobs":
         # The node's own widgets, so the panel can show them as a compact grid and hide the

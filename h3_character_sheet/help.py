@@ -280,7 +280,12 @@ SECTIONS: tuple[HelpSection, ...] = (
             "character sheets - *Full Character Sheet - Balanced* (1024px cells, 1536px "
             "sheet) and *... - Fidelity* (2048 / 3840) - each one headshot, portrait, full "
             "body front, 90-degree side and back, neutral pose and expression, on a flat "
-            "neutral tan backdrop.",
+            "neutral tan backdrop. A preset that says which cells it is for **builds them "
+            "too**, so choosing one and pressing Queue is the whole job.",
+            "Found a combination you like? Press **Save...** next to the preset selector: it "
+            "keeps every knob, the backdrop, the blur area and the ticks as a preset of your "
+            "own (marked *(custom)*, stored in ComfyUI's user folder, deleted with **Delete** "
+            "- which only works on your own, not on the shipped ones).",
             "Everything else is in the **Settings** tab: every knob the node has (cell size, "
             "frames, steps, sampler, reference sizing, layout, shape, clip export), three to "
             "a row instead of one per node row. 8 steps is the default - the turbo "
@@ -362,6 +367,11 @@ SECTIONS: tuple[HelpSection, ...] = (
             "continuation off for it.",
             "**Steps**: 8 with a TURBO checkpoint (the presets and the node default), 20-30 "
             "with a plain one. More steps on a turbo model buys nothing.",
+            "**Your own presets**: *Save...* keeps the settings on the node as a preset you "
+            "can re-apply to the next sheet (they live in ``user/default/h3_character_sheet/"
+            "presets.json``, so a ComfyUI update or a cleared output folder does not take "
+            "them with it). Press it after a good render rather than before - then you keep "
+            "the numbers that actually worked.",
             "**Backdrop**: every option in the *Cells* tab is written as flat - no gradient, "
             "no vignette, no shadow - because a backdrop with a falloff makes the sheet look "
             "like N different photos. *Reference image/video* uses one reference's own "
