@@ -256,6 +256,8 @@ SECTIONS: tuple[HelpSection, ...] = (
             "picture can supply identity while another supplies clothing.",
             "Nothing is rendered until you queue, and re-compositing the sheet after picking "
             "different frames costs no GPU time.",
+            "While it renders, the panel plays a looping clip of the cell being denoised and "
+            "**↻ new seed** re-rolls any single cell - see *While it renders*.",
         ),
     ),
     HelpSection(
@@ -350,6 +352,36 @@ SECTIONS: tuple[HelpSection, ...] = (
             "*Export clips* is on), 24fps.",
             "``manifest.json`` / ``picks.json`` / ``report.txt`` - what was rendered, the "
             "seeds, and the warnings (snapped frame counts, missing references...).",
+        ),
+    ),
+    HelpSection(
+        id="render",
+        title="While it renders (live preview + new seed)",
+        intro=(
+            "A sheet takes minutes, so the panel shows the render as it happens instead of "
+            "waiting for the first cell to land on disk."
+        ),
+        bullets=(
+            "The **LIVE strip** above the tabs plays a looping clip of the cell being denoised, "
+            "with its own counter (`cell 2/5 · step 4/8 · 22-frame loop`). It opens the moment "
+            "you queue and closes when the run ends, as the finished sheet takes over in "
+            "**Results**.",
+            "**↻ new seed** on that strip re-rolls the cell you are looking at: it stops the run, "
+            "gives that one cell a new random seed, renders *only* that cell - the others keep "
+            "the frames already on disk - and puts the sheet back together from them.",
+            "The same button is on every row of the **Results** tab, so a cell you only spotted "
+            "later can be re-rolled without touching the rest of the sheet.",
+            "Cells the cancelled run had not reached yet are named in the status line "
+            "(`hero, side not rendered yet - Run again to fill them in`): a cell only reaches "
+            "the folder once it has finished.",
+            "The clip is decoded on the CPU, never on the GPU the sampler is using, so it cannot "
+            "slow a render or run it out of memory - which is why it is short on a very large "
+            "cell (at most 24 frames, and a still when even a few frames would be expensive).",
+            "A tiny VAE (`taeh3` in `models/vae_approx/`, the file ComfyUI's own H3 previews "
+            "use) makes the clip look like the render; without it the strip falls back to "
+            "latent2rgb - blurrier, still looping, nothing to install. Either way the render "
+            "itself does not care.",
+            "`render.livePreview: false` in the payload turns the strip off for a run.",
         ),
     ),
     HelpSection(

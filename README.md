@@ -3,6 +3,9 @@
 **Repo**: [The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker](https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker) ·
 **License**: GPL-3.0 · **ComfyUI node**: `MiniMaxH3CharacterSheet` · **Installs as**: a
 custom-node folder (any name), typically `ComfyUI-H3-Character-Sheet`
+**Version**: 1.0.0 (initial release) · [`CHANGELOG.md`](CHANGELOG.md) ·
+[`docs/civitai-post.md`](docs/civitai-post.md) is the short public writeup (features, model
+links, install steps)
 
 Standalone **MiniMax H3 character sheet maker** for ComfyUI: give it photos, videos
 and audio of a person, say what each reference is for, pick a matrix of views /
@@ -19,6 +22,43 @@ frame picker and the compositor.
 * Panel tabs: **References · Cells · Prompt · Results · Settings · Help**.
 * The **Help tab** carries this guide in the node, with a live ✓/✗ check of the model
   files below, so you can see what is missing from inside ComfyUI.
+
+## What it does
+
+**References with roles.** Drop up to 9 pictures, 3 videos (with their soundtracks) and 3 audios;
+each one gets a free-text role - "face and hair", "body and clothes", "this voice". The role text
+is what the prompt says, and the render wires exactly the references a cell can use, so one picture
+can carry identity while another carries the outfit.
+
+**A matrix of cells.** 15 views (face close-up, portrait, front, 90 deg profile, back, 45 deg
+views, over-shoulder, hands, legs...), 13 poses (neutral, A/T-pose, sitting, kneeling, walking,
+hands on hips...) and 20 expressions - including arousal / pleasure / orgasm, written as face
+states. Tick what you want, press *Build cells*, and every cell prompt is generated from the
+vocabulary (framing, pose, expression, what that framing cannot show).
+
+**Prompts you can read before you render.** The Prompt tab shows the exact per-cell text -
+identity, the reference legend with each role, framing, pose, expression, your own extra words and
+the suppression list - straight from the pack's planner: no GPU, no queueing, no guessing.
+
+**Face blur for non-identity references.** Auto (blurs a reference whose role does not mention the
+face) / on / off per tile, three scopes (face, face + hair, whole head) and hand-painted areas for
+tattoos, logos or a second person. Blurred copies are written to
+`input/h3_character_sheet/derived/` and cached; your original file is never modified.
+
+**Latent continuation between cells** (*Auto* chains cells that share a camera distance, *On* / *Off*
+per cell) so a row reads as one take instead of unrelated frames.
+
+**Presets.** Shipped whole-node presets (two full character sheets - balanced and fidelity) plus
+your own, saved into ComfyUI's user folder and re-appliable to the next sheet.
+
+**A sheet, and the takes it came from.** One composited sheet with captions plus per-cell frames
+(every frame of every cell is kept), the picked stills, and - when *Export clips* is on - each
+cell's clip with the audio H3 generated. Re-picking a frame and re-compositing costs no GPU time.
+
+**Watch it render, and re-roll a single cell.** The panel's **LIVE** strip plays a looping clip of
+the cell being denoised (decoded on the CPU, so it never competes with the sampler), and
+**↻ new seed** cancels the run to render *that one cell* again with a fresh seed - the other cells
+keep the frames they already have. On by default; see [the live strip](#the-live-strip-a-looping-clip-per-sampling-step).
 
 ## Models you need
 
@@ -42,6 +82,11 @@ reference runs (the 10Eros README's advice: they cost accuracy).
 The face blur is the only thing that needs the detector, and it degrades gracefully: with
 no model it reports "no face model found" and wires your original reference untouched.
 
+**Optional, for the live preview**: a `taeh3` tiny VAE in `models/vae_approx/` - the file
+ComfyUI's own H3 previews (and KJNodes' preview override) use, so you may already have it. With it
+the LIVE strip plays real frames; without it the strip falls back to latent2rgb: blurrier, still
+looping, nothing to install, and the render is unaffected either way.
+
 ## Nodes
 
 | Node | What it does |
@@ -51,9 +96,9 @@ no model it reports "no face model found" and wires your original reference unto
 
 ## Using it
 
-0. **Open the ready-made workflow**: `example_workflows/5tar5ystem MMH3 Character Sheet
-   Maker.json` (it is also installed into your ComfyUI workflow list as
-   *5tar5ystem MMH3 Character Sheet Maker*). It wires the H3 ref2va model, the Qwen3-VL
+0. **Open the ready-made workflow**: [`example_workflows/5tar5ystem MMH3 Character Sheet
+   Maker.json`](example_workflows/5tar5ystem%20MMH3%20Character%20Sheet%20Maker.json) - drag it
+   onto the canvas, or *Workflow -> Open* it. It wires the H3 ref2va model, the Qwen3-VL
    text encoder, both VAEs and a SaveImage, and pre-builds a 5-cell matrix: face close-up,
    portrait, full body front, 90 deg profile and back, all neutral pose and expression -
    the same five the *Full Character Sheet* presets build, so the file is the shortest path
@@ -672,6 +717,11 @@ a closer cell - set that cell (or the sheet) to `auto`.
   reason), `knobs` = the node's own widgets described for the Settings tab).
 
 ## Install
+
+**With ComfyUI-Manager**: *Custom Nodes Manager* -> search **MMH3 Character Sheet** (publisher
+`5tar5ystem`) -> install -> restart ComfyUI -> hard-refresh the browser (Ctrl+Shift+R).
+
+**By hand**:
 
 ```bash
 cd ComfyUI/custom_nodes
