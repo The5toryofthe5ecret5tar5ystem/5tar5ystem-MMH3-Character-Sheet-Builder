@@ -4,6 +4,28 @@ All notable changes to **5tar5ystem MMH3 Character Sheet Maker** are recorded he
 follows [semantic versioning](https://semver.org/): the node type (`MiniMaxH3CharacterSheet`) and
 the payload contract are what "breaking" refers to, not the panel's layout.
 
+## [Unreleased]
+
+### Changed
+
+* **The Settings tab is laid out in rows that mean something.** Every knob now declares which line
+  of its group it belongs on (`row` in `knobs.py`), instead of the grid deciding: *Cell size /
+  Cell shape / Frames*, then *Steps / Sampler / Scheduler*, then **the seed next to its *Seed
+  mode*** (they used to be a row apart, diagonally), then the two flow shifts. *Cell shape* moved
+  from the *Sheet* group into *Render* with the other per-cell knobs, and the row numbers and
+  widths are enforced by tests. Measured render times for the two full-sheet presets are in the
+  README (~81 s for *Balanced*, ~378 s for *Fidelity* on an RTX 5090 at 8 steps).
+* **The Help tab no longer names files on your disk.** The file check used to print
+  `found: <file>` plus `also here: <every other match>`, which is a fact about one machine's model
+  folder rather than an answer; each row now says where the file belongs and the ✓/✗ says the
+  rest. The guide's `**bold**`, `*italic*` and `` `code` `` markers render as emphasis instead of
+  reaching the tab as asterisks and backticks, and the tooltips have them stripped. The note
+  pinning one community checkpoint's beta numbering was removed in favour of the step-count advice
+  it was carrying.
+* The shipped example workflow is `example_workflows/5tar5ystem MMH3 Character Sheet Builder.json`
+  (renamed from `... Maker.json`; the contents are unchanged).
+* Screenshots added under `images/`, used by the README and the Civitai writeup.
+
 ## [1.0.0] - 2026-10-03
 
 The first release: a standalone character-sheet maker for ComfyUI's MiniMax H3, rendered by

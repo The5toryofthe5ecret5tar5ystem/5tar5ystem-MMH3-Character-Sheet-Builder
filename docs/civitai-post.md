@@ -1,9 +1,15 @@
 # Civitai post - 5tar5ystem MMH3 Character Sheet Maker (v1.0.0)
 
-Copy from the line below into the Civitai article/description, then attach 3-5 images:
-one finished sheet (the headline), the panel with references and roles filled in, the LIVE strip
-mid-render, and the Results tab. Gallery order that reads best: sheet -> panel -> live strip ->
-results.
+Copy from the line below into the Civitai article/description, then attach the images from
+`images/` in the repo (they are the ones the README shows).
+
+Suggested gallery order, and what each one is:
+
+1. `sheet-fidelity-3840p-378s.png` - the headline: a finished fidelity sheet, five cells, one image;
+2. `sheet-balanced-1536p-81s.png` - the same sheet at the balanced tier, ~81 s;
+3. `panel-references.png` - the References tab with roles filled in and blur badges on;
+4. `panel-live-preview.png` - the Cells tab during a render, LIVE strip at `cell 2/5 - step 7/8`;
+5. `panel-face-blur.png` - painting a blur region over a reference that must not supply a face.
 
 ---
 
@@ -18,7 +24,7 @@ nothing else.
 
 **Node pack (GitHub):** https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker
 **Release page (v1.0.0):** https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker/releases/tag/v1.0.0
-**Ready-made workflow** (drag it onto the canvas): https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker/blob/main/example_workflows/5tar5ystem%20MMH3%20Character%20Sheet%20Maker.json
+**Ready-made workflow** (drag it onto the canvas): https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker/blob/main/example_workflows/5tar5ystem%20MMH3%20Character%20Sheet%20Builder.json
 **Workflow, direct download** (no GitHub account needed): https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Maker/releases/download/v1.0.0/5tar5ystem.MMH3.Character.Sheet.Maker.json
 **Full manual:** the README in the repo (every knob, every option) - in-node too: the node's **Help** tab carries the same guide and checks your model files for you (✓/✗ with the exact folder to drop each one in).
 
@@ -32,6 +38,21 @@ nothing else.
 * **Presets.** Two shipped full-sheet presets (balanced / fidelity) plus your own, saved into ComfyUI's user folder.
 * **Composited sheet + the takes it came from**: the sheet with captions, per-cell picked stills, *every* frame of every cell, and each cell's clip with the audio H3 generated. Re-picking a frame and re-compositing costs no GPU time.
 * **Watch it render, re-roll one cell.** A **LIVE** strip above the tabs plays a looping clip of the cell being denoised (`cell 2/5 · step 4/8 · 22-frame loop`), and **↻ new seed** stops the run to render *that one cell* again with a fresh seed - the other cells keep the frames they already have.
+
+## How long it takes
+
+Five cells, measured on an RTX 5090 (32 GB) with a TURBO checkpoint at 8 steps, 22 frames per cell:
+
+| Sheet | Per cell | Whole sheet |
+|---|---|---|
+| **Balanced** - 1024px cells, 2304 x 1536 | ~10-13 s | **81 s** |
+| **Fidelity** - 2048px cells, 5760 x 3840 | ~60 s | **378 s** |
+
+The fidelity tier is the same five renders at twice the linear resolution (~4.7x the time). A slower card, a non-turbo checkpoint (20-30 steps) or more frames per cell costs proportionally more.
+
+## Screenshots
+
+Both sheets above are straight out of the node, captions included. The panel shots show the References tab with roles and blur badges, the Cells tab with the LIVE strip mid-render, and the blur editor where you paint a region by hand. (All of them are in the repo under `images/`.)
 
 ## Install (the node)
 

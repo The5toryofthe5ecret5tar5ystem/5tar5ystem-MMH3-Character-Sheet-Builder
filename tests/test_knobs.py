@@ -114,6 +114,62 @@ def test_groups_keep_the_declared_order_and_hold_every_knob_once():
     assert len(named) == len(set(named)), "a knob appears in exactly one group"
 
 
+def _rows_of(group: dict) -> dict[int, list[str]]:
+    rows: dict[int, list[str]] = {}
+    for knob in group["knobs"]:
+        rows.setdefault(int(knob["row"]), []).append(knob["name"])
+    return rows
+
+
+def test_every_group_is_laid_out_in_rows_that_fit_the_grid():
+    """The panel draws one grid per row, so the rows have to be a real layout.
+
+    A knob carries a ``row`` because a flowing three-column grid decides for itself where the
+    next field goes: that is how *Seed* ended up a row away from the *Seed mode* that governs
+    it. Four things have to hold for the declaration to be a layout rather than a hint:
+
+    * rows are numbered from 0 with no gaps (``0, 1, 2`` - not ``0, 2``);
+    * the flat order IS the row order, so the panel can draw group["knobs"] as it arrives;
+    * a row's spans fit the grid (otherwise a field would wrap onto the next line and the
+      row it was put in would be a lie);
+    * every knob is in a row - an undeclared row would land on 0 and shuffle the first line.
+    """
+    described = {entry["name"]: entry for entry in (*knobs.KNOB_LAYOUT, *knobs.FRONTEND_KNOBS)}
+    for group in knobs.knob_groups(knobs.knob_list()):
+        rows = _rows_of(group)
+        assert sorted(rows) == list(range(len(rows))), (
+            f"{group['group']} row numbers have a gap: {sorted(rows)}"
+        )
+        order = [int(knob["row"]) for knob in group["knobs"]]
+        assert order == sorted(order), f"{group['group']} knobs are not listed row by row"
+        for index, names in rows.items():
+            width = sum(int(described[name].get("span") or 1) for name in names)
+            assert width <= knobs.KNOB_COLUMNS, (
+                f"{group['group']} row {index} needs {width} columns of {knobs.KNOB_COLUMNS}: {names}"
+            )
+
+
+def test_knobs_that_are_one_decision_share_a_row():
+    """Where the grouping actually earns its keep, so a reorder cannot quietly split a pair."""
+    by_name = {knob["name"]: knob for knob in knobs.knob_list()}
+
+    def row(name: str) -> tuple[str, int]:
+        return (by_name[name]["group"], int(by_name[name]["row"]))
+
+    assert row("control_after_generate") == row("seed"), "the seed and its mode are one decision"
+    assert row("shift_video") == row("shift_audio"), "the two flow shifts belong together"
+    assert row("cell_size") == row("cell_aspect") == row("frames_per_cell"), (
+        "what one cell is: how big, what shape, how long"
+    )
+    assert row("steps") == row("sampler_name") == row("scheduler"), "how it is sampled"
+    assert row("sheet_layout") == row("sheet_columns") == row("sheet_aspect"), (
+        "how the sheet is arranged before how big it is"
+    )
+    assert row("output_name") == row("keep_frames"), "the Output group is one line"
+    assert row("ref_image_size") == row("ref_scope"), "both reference knobs"
+    assert row("continuity") == row("export_video"), "both per-cell extras"
+
+
 def test_an_undeclared_group_still_reaches_the_panel():
     """A new knob without a group must be reachable, not silently invisible."""
     listing = knobs.knob_list() + [

@@ -61,6 +61,21 @@ the cell being denoised (decoded on the CPU, so it never competes with the sampl
 **↻ new seed** cancels the run to render *that one cell* again with a fresh seed - the other cells
 keep the frames they already have. On by default; see [the live strip](#the-live-strip-a-looping-clip-per-sampling-step).
 
+## Screenshots
+
+A five-cell sheet straight out of the node - one image, captions included:
+
+| Balanced - 1024px cells, 2304 x 1536, ~81 s | Fidelity - 2048px cells, 5760 x 3840, ~378 s |
+| --- | --- |
+| ![Balanced character sheet](images/sheet-balanced-1536p-81s.png) | ![Fidelity character sheet](images/sheet-fidelity-3840p-378s.png) |
+
+The panel, on the same character: references with the roles that drive the prompt, the LIVE strip
+mid-render, and the blur editor for a reference that must not supply a face.
+
+| References - roles and blur badges | Cells - LIVE strip at `cell 2/5 - step 7/8` | Face blur - painting a region |
+| --- | --- | --- |
+| ![References tab](images/panel-references.png) | ![Live preview during a render](images/panel-live-preview.png) | ![Face blur editor](images/panel-face-blur.png) |
+
 ## Models you need
 
 Four files plus one optional detector. The in-node **Help** tab checks all five
@@ -88,6 +103,22 @@ ComfyUI's own H3 previews (and KJNodes' preview override) use, so you may alread
 the LIVE strip plays real frames; without it the strip falls back to latent2rgb: blurrier, still
 looping, nothing to install, and the render is unaffected either way.
 
+## How long it takes
+
+Measured on an **RTX 5090 (32 GB)** with a TURBO H3 checkpoint at 8 steps, `res_multistep` /
+`simple`, 22 frames per cell and clips exported - i.e. the shipped presets, unchanged. A sheet is
+five cells, so the per-cell figure is the wait between live-preview cells:
+
+| Sheet | Cells | Per cell | Whole sheet |
+| --- | --- | --- | --- |
+| **Full Character Sheet - Balanced** (1024px cells, 2304 x 1536) | 5 | ~10-13 s | **81 s** |
+| **Full Character Sheet - Fidelity** (2048px cells, 5760 x 3840) | 5 | ~60 s | **378 s** |
+
+*Fidelity* is the same five renders at twice the linear resolution, so it costs about four times
+the pixels and ~4.7x the wall clock (378 s vs 81 s). Those are single measurements on one machine -
+a slower GPU, more frames per cell, or a non-turbo checkpoint at 20-30 steps costs proportionally
+more - but the ratio between the two tiers is what to plan around.
+
 ## Nodes
 
 | Node | What it does |
@@ -98,7 +129,7 @@ looping, nothing to install, and the render is unaffected either way.
 ## Using it
 
 0. **Open the ready-made workflow**: [`example_workflows/5tar5ystem MMH3 Character Sheet
-   Maker.json`](example_workflows/5tar5ystem%20MMH3%20Character%20Sheet%20Maker.json) - drag it
+   Builder.json`](example_workflows/5tar5ystem%20MMH3%20Character%20Sheet%20Builder.json) - drag it
    onto the canvas, or *Workflow -> Open* it. It wires the H3 ref2va model, the Qwen3-VL
    text encoder, both VAEs and a SaveImage, and pre-builds a 5-cell matrix: face close-up,
    portrait, full body front, 90 deg profile and back, all neutral pose and expression -
@@ -116,8 +147,8 @@ bar prints that as *"Changes: Continuity, …"* rather than changing settings si
 | Preset | What it sets |
 | --- | --- |
 | **Balanced (recommended)** | 1024px cells, 22 frames, 8 steps, `per framing` references, continuation `auto` (chains only where the camera distance matches), clips exported. What this pack is tuned for. |
-| **Full Character Sheet - Balanced** | The finished article, 1024px cells on a 1536px sheet: headshot, chest-up portrait, full body front, full body 90-degree side and full body from behind - neutral expression, neutral pose, on a flat neutral tan backdrop. |
-| **Full Character Sheet - Fidelity** | The same five cells and the same neutral tan backdrop at print resolution: 2048px cells on a 3840px sheet. Several times the render time and a very large PNG - for a sheet that will be enlarged or cut out. |
+| **Full Character Sheet - Balanced** | The finished article, 1024px cells on a 1536px sheet: headshot, chest-up portrait, full body front, full body 90-degree side and full body from behind - neutral expression, neutral pose, on a flat neutral tan backdrop. **~81 s for the five cells** (RTX 5090, 8 steps). |
+| **Full Character Sheet - Fidelity** | The same five cells and the same neutral tan backdrop at print resolution: 2048px cells on a 3840px sheet. **~378 s for the same five cells** and a very large PNG - for a sheet that will be enlarged or cut out. |
 | **Fast look (no chains, no clips)** | 768px cells at H3's 5-frame minimum, every cell independent, nothing encoded - to find the framing, not to keep the result. |
 | **Max identity fidelity** | The 2048px reference pipeline (several times slower) with independent cells, 2048px cells on a 3840px sheet. |
 | **Turnaround (chained full body)** | Front -> profile -> back in one row; all three share a camera distance, so continuation holds the room, light and scale while the subject turns. |
@@ -271,6 +302,14 @@ space) - so 24 knobs cost roughly 500px of node height that the grid fits into ~
   one is the control the schema asks for (number box with the node's own `min`/`max`/`step`,
   a dropdown with the node's own list, a checkbox, a text box). Values are read from the node
   when the tab mounts, so a workflow always shows what it will render with.
+* Every field also carries a **row** - which line of its group it sits on - declared in
+  `knobs.py` next to the label. A flowing grid puts the next field wherever the previous ones
+  happen to end, which is how *Seed* and the *Seed mode* that governs it ended up on different
+  lines, diagonally apart. Now the lines are deliberate: *Cell size / Cell shape / Frames*,
+  then *Steps / Sampler / Scheduler*, then **the seed beside its mode**, then the two flow
+  shifts; *Cell shape* moved out of *Sheet* into *Render* with the other per-cell knobs. The
+  row numbers are contiguous and a row's spans have to fit the grid - both enforced by
+  `tests/test_knobs.py`, so a later reorder cannot quietly split a pair.
 * The knob list comes from the backend (`h3_character_sheet/knobs.py`), which reads the node
   schema - the panel cannot offer a value or a choice the node would reject. Editing a field
   writes the node's widget, so a render started from the panel and one started from the

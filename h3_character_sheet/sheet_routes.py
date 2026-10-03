@@ -41,7 +41,7 @@ from aiohttp import web
 from . import face_blur, sheet_media, sheet_spec, sheet_store, user_presets
 from . import planner as sheet_planner
 from .help import help_payload
-from .knobs import KNOB_GROUPS, knob_groups, knob_list
+from .knobs import KNOB_COLUMNS, KNOB_GROUPS, knob_groups, knob_list
 from .presets import DEFAULT_PRESET_ID, preset_list
 from .user_presets import delete_preset, save_preset
 from .sheet_store import SheetStore
@@ -183,7 +183,8 @@ async def sheet_action(request):
         )
     if action == "knobs":
         # The node's own widgets, so the panel can show them as a compact grid and hide the
-        # native rows. Bounds/choices come from the live schema (see knobs.py).
+        # native rows. Bounds/choices come from the live schema (see knobs.py). ``columns``
+        # travels with them so the grid's width is the layout's own number, not the panel's.
         knobs = knob_list()
         return web.json_response(
             {
@@ -191,6 +192,7 @@ async def sheet_action(request):
                 "action": "knobs",
                 "knobs": knobs,
                 "groups": knob_groups(knobs),
+                "columns": KNOB_COLUMNS,
                 "order": list(KNOB_GROUPS),
             }
         )

@@ -287,7 +287,7 @@ export const KNOB_COLUMNS = 3;
  * build makes that a glance instead of an investigation; a test keeps it in step with the
  * import, so bumping one without the other fails the suite rather than confusing a user.
  */
-export const PANEL_BUILD = "h3sheet_v53";
+export const PANEL_BUILD = "h3sheet_v54";
 
 /** The frontend's own widget/host names, straight from the shipped frontend bundle. */
 export const PREVIEW_HOST_CLASS = "comfy-img-preview";
@@ -1288,13 +1288,15 @@ export const PANEL_CSS = `
 .mmx-live.is-waiting .mmx-live__frame { display: none; }
 .mmx-live:not(.is-waiting) .mmx-live__wait { display: none; }
 /* Compact knobs: the node's own widgets, packed into columns the frontend cannot make.
-   One grid per group, each field labelled, values written straight onto the widget. */
+   One grid per declared row, each field labelled, values written straight onto the widget. */
 .mmx-settings__head { gap: 6px; }
 .mmx-knob-group { margin-bottom: 8px; }
 .mmx-knob-group__title {
   font-size: 10px; font-weight: 650; color: var(--mmx-muted); text-transform: uppercase;
   letter-spacing: .04em; margin: 2px 0 4px;
 }
+/* One grid per row, stacked: a row is the backend's unit of "these belong together". */
+.mmx-knob-rows { display: flex; flex-direction: column; gap: 5px; }
 .mmx-knob-grid { display: grid; gap: 4px 8px; align-items: end; }
 .mmx-knob { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .mmx-knob__label { font-size: 10px; color: var(--mmx-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2168,6 +2170,9 @@ export function buildSheetInterface({ state, hooks = {} }) {
     // which reads them from the node schema: the panel cannot offer a value the node
     // would reject.
     let knobGroups = [];
+    // How many columns the knob grid draws. The backend owns the number (``knobs.py``
+    // KNOB_COLUMNS, sent with the list) because the rows are laid out against it.
+    let knobColumns = KNOB_COLUMNS;
     const knobFields = new Map();
 
     const compactBox = element("input", { type: "checkbox", id: "mmx-compact-knobs" });
@@ -2232,7 +2237,7 @@ export function buildSheetInterface({ state, hooks = {} }) {
             { textContent: "Compact node", htmlFor: "mmx-compact-knobs" },
             { fontSize: "10px" },
         ),
-        element("span", { className: "mmx-muted", textContent: "previews" }, { marginLeft: "8px" }),
+        element("span", { className: "mmx-muted", textContent: "node previews" }, { marginLeft: "8px" }),
         previewSelect,
         panelPreviewSelect,
         element("span", {}, { flex: "1 1 auto" }),
@@ -2296,6 +2301,25 @@ export function buildSheetInterface({ state, hooks = {} }) {
         return { label, control };
     }
 
+    /**
+     * The knobs of one group, split into the rows the backend declared.
+     *
+     * ``knobs.py`` gives every knob a ``row``: a deliberately placed line inside its group,
+     * because a flowing three-column grid decides for itself where the next knob goes - which
+     * is how the seed ended up a row away from the mode that governs it. A group sent without
+     * rows (an older backend, or a fixture) falls back to one flowing grid, i.e. exactly the
+     * old behaviour.
+     */
+    function knobRows(knobs) {
+        const rows = [];
+        for (const knob of knobs || []) {
+            const index = Math.max(0, Math.trunc(Number(knob.row) || 0));
+            while (rows.length <= index) rows.push([]);
+            rows[index].push(knob);
+        }
+        return rows.filter((row) => row.length);
+    }
+
     function renderSettings() {
         knobFields.clear();
         settingsHost.replaceChildren();
@@ -2304,20 +2328,24 @@ export function buildSheetInterface({ state, hooks = {} }) {
             const section = element("div", { className: "mmx-knob-group" });
             section.dataset.group = group.group;
             section.append(element("div", { textContent: group.group, className: "mmx-knob-group__title" }));
-            const grid = element("div", { className: "mmx-knob-grid" }, {
-                gridTemplateColumns: `repeat(${KNOB_COLUMNS}, minmax(0, 1fr))`,
-            });
-            for (const knob of group.knobs) {
-                const { label, control } = knobField(knob);
-                grid.append(label);
-                knobFields.set(knob.name, control);
-                total += 1;
+            const body = element("div", { className: "mmx-knob-rows" });
+            for (const row of knobRows(group.knobs)) {
+                const grid = element("div", { className: "mmx-knob-grid" }, {
+                    gridTemplateColumns: `repeat(${knobColumns}, minmax(0, 1fr))`,
+                });
+                for (const knob of row) {
+                    const { label, control } = knobField(knob);
+                    grid.append(label);
+                    knobFields.set(knob.name, control);
+                    total += 1;
+                }
+                body.append(grid);
             }
-            section.append(grid);
+            section.append(body);
             settingsHost.append(section);
         }
         settingsNote.textContent = total
-            ? `${total} knobs - the same values the node renders with, in ${KNOB_COLUMNS} columns instead of ${total} node rows.`
+            ? `${total} knobs - the same values the node renders with, in ${knobColumns} columns instead of ${total} node rows.`
             : "no knobs reported by the node.";
     }
 
@@ -2338,13 +2366,15 @@ export function buildSheetInterface({ state, hooks = {} }) {
         return state.knobValues;
     }
 
-    /** Adopt the backend's knob list (labels, groups, bounds) and show the live values. */
+    /** Adopt the backend's knob list (labels, groups, rows, bounds) and show the live values. */
     function refreshSettings(data) {
         const groups = Array.isArray(data?.groups) && data.groups.length
             ? data.groups
             : (Array.isArray(data?.knobs) && data.knobs.length
                 ? [{ group: "Settings", knobs: data.knobs }]
                 : []);
+        // The grid's width is the layout's own number (``knobs.py`` KNOB_COLUMNS).
+        knobColumns = Math.max(1, Math.trunc(Number(data?.columns) || KNOB_COLUMNS));
         knobGroups = groups.map((group) => ({
             group: String(group.group || "Settings"),
             knobs: knobValues(group.knobs || [], state.knobValues),

@@ -1547,15 +1547,15 @@ ok.push("reorder / slot helpers behave");
     // groups and bounds come from the backend (knobs.py -> the node schema).
     const KNOB_FIXTURE = {
         knobs: [
-            { name: "output_name", label: "Sheet name", group: "Output", span: 2, kind: "text", default: "character_sheet" },
-            { name: "cell_size", label: "Cell size", group: "Render", span: 1, kind: "number", default: 1024, min: 256, max: 2048, step: 32 },
-            { name: "steps", label: "Steps", group: "Render", span: 1, kind: "number", default: 8, min: 1, max: 200 },
-            { name: "continuity", label: "Continuation", group: "Cells", span: 1, kind: "select", default: "off", options: ["off", "auto", "on"] },
-            { name: "export_video", label: "Export clips", group: "Cells", span: 1, kind: "toggle", default: true },
+            { name: "output_name", label: "Sheet name", group: "Output", span: 2, row: 0, kind: "text", default: "character_sheet" },
+            { name: "cell_size", label: "Cell size", group: "Render", span: 1, row: 0, kind: "number", default: 1024, min: 256, max: 2048, step: 32 },
+            { name: "steps", label: "Steps", group: "Render", span: 1, row: 0, kind: "number", default: 8, min: 1, max: 200 },
+            { name: "continuity", label: "Continuation", group: "Cells", span: 1, row: 0, kind: "select", default: "off", options: ["off", "auto", "on"] },
+            { name: "export_video", label: "Export clips", group: "Cells", span: 1, row: 0, kind: "toggle", default: true },
             // The browser adds this one to the seed row; the panel draws it like any other,
             // which is what lets the node hide every row and still leave the seed's mode.
-            { name: "seed", label: "Seed", group: "Render", span: 1, kind: "number", default: 42, min: 0 },
-            { name: "control_after_generate", label: "Seed mode", group: "Render", span: 1, kind: "select",
+            { name: "seed", label: "Seed", group: "Render", span: 1, row: 1, kind: "number", default: 42, min: 0 },
+            { name: "control_after_generate", label: "Seed mode", group: "Render", span: 1, row: 1, kind: "select",
               default: "randomize", options: ["fixed", "increment", "decrement", "randomize"], frontend: true },
         ],
     };
@@ -1565,6 +1565,7 @@ ok.push("reorder / slot helpers behave");
         { group: "Render", knobs: [KNOB_FIXTURE.knobs[1], KNOB_FIXTURE.knobs[2], KNOB_FIXTURE.knobs[5], KNOB_FIXTURE.knobs[6]] },
         { group: "Cells", knobs: [KNOB_FIXTURE.knobs[3], KNOB_FIXTURE.knobs[4]] },
     ];
+    KNOB_FIXTURE.columns = 3;
     KNOB_FIXTURE.ok = true;
 
     // Pure helpers first: coercion is where a bad number would reach the node.
@@ -1607,7 +1608,17 @@ ok.push("reorder / slot helpers behave");
     assert.deepEqual([...pane.querySelectorAll(".mmx-knob-group")].map((el) => el.dataset.group),
         ["Output", "Render", "Cells"], "grouped in the backend's order, not the schema's");
     assert.equal(pane.querySelectorAll(".mmx-knob").length, 7, "one field per knob");
-    assert.equal(pane.querySelectorAll(".mmx-knob-grid").length, 3, "one grid per group");
+    // One grid per row the backend declared - not one per group, or a row would be decided
+    // by whatever the previous field happened to end on.
+    assert.equal(pane.querySelectorAll(".mmx-knob-grid").length, 4,
+        "Output 1 row + Render 2 rows + Cells 1 row");
+    const renderRows = [...pane.querySelector('.mmx-knob-group[data-group="Render"]')
+        .querySelectorAll(".mmx-knob-grid")];
+    assert.deepEqual(renderRows.map((grid) => [...grid.querySelectorAll(".mmx-knob")].map((el) => el.dataset.knob)),
+        [["cell_size", "steps"], ["seed", "control_after_generate"]],
+        "the seed is drawn on the same row as the mode that governs it");
+    assert.ok(renderRows[0].style.gridTemplateColumns.includes("repeat(3"),
+        "the grid width is the layout's own column count");
     assert.ok(pane.querySelector(".mmx-knob").style.gridColumn.includes("span 2"),
         "a wide field can claim two columns");
     assert.equal(pane.querySelectorAll(".mmx-knob").length, KNOB_FIXTURE.knobs.length,
@@ -1691,7 +1702,7 @@ ok.push("reorder / slot helpers behave");
     await tick();
     await tick();
     assert.deepEqual(blind, [true], "a failed knob list leaves the node's own rows in place");    assert.ok(fallbackPanel.container.querySelector(".mmx-pane--settings").textContent.includes("stay on the node"));
-    ok.push("compact settings: grouped grid, live values, writes clamped, node rows hidden");
+    ok.push("compact settings: one grid per declared row, live values, writes clamped, node rows hidden");
 }
 
 // --- Help: the guide plus a live check of the files the node needs -------------
