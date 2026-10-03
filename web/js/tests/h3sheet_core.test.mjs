@@ -1705,18 +1705,23 @@ ok.push("reorder / slot helpers behave");
         missing_packages: ["ultralytics"],
         sections: [
             { id: "what", title: "What this node makes", intro: "One node turns references into a sheet.",
-              steps: [], bullets: ["Every cell is a short clip."], links: [], kind: "text" },
+              steps: [], bullets: ["Every cell is a short clip.", "The step count lives in **Settings**."],
+              links: [], kind: "text" },
             { id: "files", title: "Files you need", intro: "Five models.", steps: [], bullets: [],
               links: [], kind: "files" },
             { id: "tips", title: "Getting a good sheet", intro: "", steps: [],
-              bullets: ["Auto only chains cells that share a camera distance."],
-              links: [{ label: "10Eros-Max", url: "https://huggingface.co/TenStrip/10Eros-Max/tree/main", note: "the checkpoint" }],
+              bullets: ["**Continuation**: *Auto* only chains cells that share a camera distance, and `res_multistep` is the sampler.",
+                        "Your own presets live in ``user/default/h3_character_sheet/presets.json``."],
+              links: [{ label: "10Eros-Max", url: "https://huggingface.co/TenStrip/10Eros-Max/tree/main", note: "take a **TURBO** file" }],
               kind: "text" },
         ],
         requirements: [
+            // The backend no longer sends `found`/`matches`; this fixture still carries them
+            // to pin that the tab IGNORES them (they were real fields once, and the names
+            // they hold only exist on the machine that rendered the panel).
             { id: "unet", label: "Diffusion model (the H3 checkpoint)", node: "UNETLoader",
-              folder: "diffusion_models", where: "ComfyUI/models/diffusion_models/",
-              what: "The checkpoint that samples.", note: "", expect: ["10eros"],
+              folder: "diffusion_models", where: "ComfyUI/models/diffusion_models/ (a subfolder such as Minimax/ is fine)",
+              what: "The checkpoint that samples.", note: "Any H3 ref2va checkpoint renders.", expect: ["10eros"],
               ok: true, file_ok: true, found: "Minimax/10Eros_Max_h3_TURBO-hybrid_beta5_int8.safetensors",
               looked: "/models/diffusion_models", packages: [], missing_packages: [],
               matches: ["Minimax/10Eros_Max_h3_TURBO-hybrid_beta5_int8.safetensors",
@@ -1726,7 +1731,7 @@ ok.push("reorder / slot helpers behave");
             { id: "clip", label: "Text encoder (Qwen3-VL)", node: "CLIPLoader",
               folder: "text_encoders", where: "ComfyUI/models/text_encoders/",
               what: "CLIPLoader with type minimax.", note: "", expect: ["qwen3vl_32b_minimax_h3"],
-              ok: false, file_ok: false, found: "", looked: "/models/text_encoders",
+              ok: false, file_ok: false, looked: "/models/text_encoders",
               packages: [], missing_packages: [],
               links: [{ label: "Comfy-Org / MiniMax-H3", url: "https://huggingface.co/Comfy-Org/MiniMax-H3/tree/main/text_encoders", note: "nvfp4_awq" }] },
             // The file is there and the feature is still dead: the blur needs a package too.
@@ -1734,8 +1739,7 @@ ok.push("reorder / slot helpers behave");
               folder: "ultralytics/bbox", where: "ComfyUI/models/ultralytics/bbox/face_yolov8m.pt",
               what: "A YOLO face model.", expect: ["face_yolov8m.pt"],
               note: "Needs the ultralytics package in ComfyUI's own python.",
-              ok: false, file_ok: true, found: "ultralytics/bbox/face_yolov8m.pt",
-              looked: "/models/ultralytics/bbox",
+              ok: false, file_ok: true, looked: "/models/ultralytics/bbox",
               packages: [{ name: "ultralytics", ok: false }, { name: "cv2", ok: true }],
               missing_packages: ["ultralytics"],
               links: [{ label: "face_yolov8m.pt", url: "https://huggingface.co/Bingsu/adetailer/tree/main", note: "drop it in models/ultralytics/bbox/" }] },
@@ -1767,19 +1771,20 @@ ok.push("reorder / slot helpers behave");
     assert.equal(reqs.length, 3, "one card per required file");
     assert.ok(reqs[0].classList.contains("mmx-req--ok"));
     assert.ok(reqs[0].textContent.includes("✓"), "a present file is ticked");
-    assert.ok(reqs[0].textContent.includes("10Eros_Max_h3_TURBO-hybrid_beta5_int8"), "and named");
-    assert.ok(reqs[0].textContent.includes("also here: Minimax/10Eros_Max_h3_TURBO-hybrid_beta4"),
-        "a second match is listed too - the first one is not automatically the right one");
+    assert.ok(reqs[0].textContent.includes("in place: ComfyUI/models/diffusion_models/"),
+        "and says which folder it belongs in");
+    assert.ok(!reqs[0].textContent.includes("10Eros_Max"),
+        "but never the file names this machine happens to hold - they mean nothing to anyone else");
+    assert.ok(!reqs[0].textContent.includes("also here"), "and no list of the other checkpoints either");
     assert.ok(reqs[1].classList.contains("mmx-req--missing"), "a missing file is flagged");
     assert.ok(reqs[1].textContent.includes("✗"));
-    assert.ok(reqs[1].textContent.includes("ComfyUI/models/text_encoders/"), "with where it goes");
+    assert.ok(reqs[1].textContent.includes("put it in: ComfyUI/models/text_encoders/"), "with where it goes");
     assert.ok(reqs[1].textContent.includes("qwen3vl_32b_minimax_h3"), "and what to look for");
 
-    // The face blur: file present, package missing - the row has to say BOTH, and still
-    // name the file it found (a bare ✗ next to a file that is there is a lie).
+    // The face blur: file present, package missing - the row has to say BOTH.
     const face = reqs[2];
-    assert.ok(face.textContent.includes("found: ultralytics/bbox/face_yolov8m.pt"),
-        "the model file it did find is named");
+    assert.ok(face.textContent.includes("in place: ComfyUI/models/ultralytics/bbox/face_yolov8m.pt"),
+        "the row still says where the detector goes");
     assert.ok(face.textContent.includes("✗ python package: ultralytics"), "the missing package is called out");
     assert.ok(face.textContent.includes("✓ python package: cv2"), "and a present one is ticked");
     assert.ok(face.textContent.includes("pip install ultralytics"), "with the command that fixes it");
@@ -1789,6 +1794,24 @@ ok.push("reorder / slot helpers behave");
     assert.ok(help.textContent.includes("2 of 3 required files are missing or unusable"),
         "the header counts what is unusable, not just what is absent");
     assert.ok(help.textContent.includes("python package: ultralytics"), "and names it up front");
+
+    // The guide's markers are Markdown habits, not text: a reader used to be shown the
+    // asterisks and backticks, which read as stars that do nothing.
+    assert.deepEqual([...sections[0].querySelectorAll("strong")].map((el) => el.textContent), ["Settings"],
+        "a bold marker becomes a real <strong>");
+    assert.equal(sections[2].querySelector("strong")?.textContent, "Continuation");
+    assert.deepEqual([...sections[2].querySelectorAll("code")].map((el) => el.textContent),
+        ["res_multistep", "user/default/h3_character_sheet/presets.json"],
+        "a code marker a <code>, doubled backticks included");
+    assert.equal(sections[2].querySelector("em")?.textContent, "Auto",
+        "and *italic* an <em> - the guide uses it for values to recognise on screen");
+    for (const marker of ["**", "`", "``"]) {
+        assert.ok(!help.textContent.includes(marker), `no ${marker} reaches the tab as text`);
+    }
+    assert.equal(sections[2].querySelector("a.mmx-help__link").getAttribute("title"), "take a TURBO file",
+        "the tooltip strips the markers - it is plain text");
+    assert.equal([...sections[2].querySelectorAll(".mmx-help__link-note strong")].map((el) => el.textContent).join(),
+        "TURBO", "and the note under the link renders it");
 
     // Links: real anchors, opening away from the canvas (this is a single-page app).
     const anchors = [...help.querySelectorAll("a.mmx-help__link")];

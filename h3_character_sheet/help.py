@@ -10,9 +10,10 @@ Two things live here:
   copy and a test can check every claim that names a file or a node type;
 * the **requirements check** - the model files, resolved against the *running* install
   (``folder_paths`` + :func:`face_blur.model_path`). A guide that says "download X" is much
-  less useful than one that says "X is in the wrong folder: I looked at
-  ``models/text_encoders`` and did not find it". So the Help tab renders ✓/✗ per file, with
-  the exact folder to drop it in and a link to where it comes from.
+  less useful than one that says "X is in the wrong folder". So the Help tab renders ✓/✗ per
+  file, with the exact folder to drop it in and a link to where it comes from - and nothing
+  else: which files a given install happens to hold is that install's own business, and a
+  checkpoint name that exists on one machine reads as nonsense on every other one.
 
 The file names are pinned to what the bundled example workflow actually loads, and a test
 compares the two: recommending a file the example does not use would be a documentation bug
@@ -23,7 +24,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 log = logging.getLogger("H3-Character-Sheet.help")
@@ -125,9 +125,9 @@ REQUIREMENTS: tuple[Requirement, ...] = (
             HelpLink(
                 "10Eros-Max (TenStrip) - download page",
                 "https://huggingface.co/TenStrip/10Eros-Max/tree/main",
-                "Take a TURBO beta5 file: the 14GB w4a8 for speed/VRAM, the int8 20GB for "
-                "the last bit of quality. The turbo delta is baked in - do NOT also load a "
-                "turbo LoRA on top of a TURBO file.",
+                "Take a TURBO build: the 14GB w4a8 for speed/VRAM, the int8 20GB for the last "
+                "bit of quality. The turbo delta is baked in - do NOT also load a turbo LoRA "
+                "on top of a TURBO file.",
             ),
             HelpLink(
                 "ComfyUI's own H3 repack (fallback)",
@@ -136,9 +136,8 @@ REQUIREMENTS: tuple[Requirement, ...] = (
             ),
         ),
         note=(
-            "Any H3 ref2va checkpoint renders; the presets' 8 steps assume a turbo build. "
-            "Stick to 10Eros **beta5**: the author states that beta_3 and beta_4 are corrupted "
-            "test versions that were never meant to ship, and model managers still offer them."
+            "Any H3 ref2va checkpoint renders. The presets' 8 steps are for a TURBO build - "
+            "with a plain checkpoint raise the step count to 20-30."
         ),
     ),
     Requirement(
@@ -411,10 +410,10 @@ SECTIONS: tuple[HelpSection, ...] = (
             "the render wires, so an unchecked tile takes no number.",
             "**10Eros' own advice**: with a TURBO file, do not also load a turbo LoRA, and "
             "skip cache/Spectrum nodes on reference (ref2va) runs - they cost accuracy.",
-            "**Check WHICH beta you downloaded**: 10Eros beta_3 and beta_4 are the author's own "
-            "\"corrupted test versions\" - beta5 is the first functional one, and old betas are "
-            "still sitting in model folders (and in old workflows). The Files section above "
-            "lists every matching checkpoint it can see, not just the first.",
+            "**Checkpoints**: a model page often carries several numbered builds of the "
+            "same hybrid, and each one is a full checkpoint. Take the build the page itself "
+            "points at - a saved workflow keeps loading whatever file it was saved with, "
+            "whatever step count you set here.",
             "**Prompt side**: name each reference's job in its role box. The words are "
             "read one by one - *face*, *hair*, *eyes*, *glasses*, *clothing* (and its "
             "swimwear/underwear words), *body*, *breasts*, *intimate*, *legwear*, *shoes*, "
@@ -453,13 +452,14 @@ def _resolve_paths(folder: str) -> str:
         return ""
 
 
-def _requirement_state(requirement: Requirement) -> tuple[bool, str, str, list[str]]:
-    """``(found, what_was_found, where_we_looked, every_match)`` for one requirement.
+def _requirement_state(requirement: Requirement) -> tuple[bool, str]:
+    """``(is_it_there, where_it_belongs)`` for one requirement.
 
-    Every matching file is reported, not just the first: a model folder can hold several
-    generations of the same checkpoint (10Eros beta4 next to beta5, a pruned official build
-    next to a community merge), and "found: the beta4 file" is a very different answer from
-    "found: the beta5 file".
+    Deliberately blind to *which* files are present: the folder is reported, the file names
+    on this machine are not. A model folder can hold several generations of the same
+    checkpoint (a community beta next to the official pruned build), and the Help tab is read
+    by whoever installed the pack - naming one disk's contents would be a fact about that
+    disk, not an answer to "am I ready to render".
 
     Every lookup is guarded: a folder that a custom node registered badly, a broken
     extra_model_paths entry or a ComfyUI that simply is not there must not take the guide
@@ -474,22 +474,19 @@ def _requirement_state(requirement: Requirement) -> tuple[bool, str, str, list[s
             log.warning("Character sheet: face model lookup failed (%s)", exc)
             found = None
         if found is not None:
-            return True, str(found), str(Path(found).parent), [str(found)]
+            return True, requirement.where
         looked = ", ".join("models/" + "/".join(parts) for parts in MODEL_CANDIDATES)
-        return False, "", looked, []
+        return False, looked
     try:
         names = _resolve_names(requirement.folder)
         looked = _resolve_paths(requirement.folder) or requirement.where
     except Exception as exc:  # noqa: BLE001 - a folder listing must never break the guide
         log.warning("Character sheet: could not list %s (%s)", requirement.folder, exc)
-        return False, "", requirement.where, []
-    matches = [
-        name for name in names
-        if any(token in name.lower() for token in requirement.match)
-    ]
-    if matches:
-        return True, matches[0], looked, matches
-    return False, "", looked, []
+        return False, requirement.where
+    present = any(
+        any(token in name.lower() for token in requirement.match) for name in names
+    )
+    return present, looked
 
 
 def _package_state(package: str) -> bool:
@@ -515,12 +512,12 @@ def check_requirements() -> list[dict[str, Any]]:
     "not found" rather than raising - the guide has to render either way.
 
     ``ok`` means **usable**: the file is there AND, where the entry declares packages, they
-    are importable. ``file_ok`` keeps the two apart so the row can say "found it, but the
-    detector package is missing" instead of a bare ✗.
+    are importable. ``file_ok`` keeps the two apart so the row can say "the file is in place,
+    but the detector package is missing" instead of a bare ✗.
     """
     out: list[dict[str, Any]] = []
     for requirement in REQUIREMENTS:
-        found, name, looked, matches = _requirement_state(requirement)
+        present, where_looked = _requirement_state(requirement)
         packages = [
             {"name": package, "ok": _package_state(package)}
             for package in requirement.packages
@@ -536,12 +533,9 @@ def check_requirements() -> list[dict[str, Any]]:
                 "what": requirement.what,
                 "note": requirement.note,
                 "expect": list(requirement.match),
-                "ok": bool(found) and not missing_packages,
-                "file_ok": bool(found),
-                "found": name,
-                "matches": matches[:8],
-                "match_count": len(matches),
-                "looked": looked,
+                "ok": present and not missing_packages,
+                "file_ok": present,
+                "looked": where_looked,
                 "packages": packages,
                 "missing_packages": missing_packages,
                 "links": [

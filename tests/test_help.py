@@ -163,7 +163,6 @@ def test_the_face_detector_check_uses_the_packs_own_lookup(monkeypatch, tmp_path
     monkeypatch.setattr(face_blur, "model_path", lambda: tmp_path / "face_yolov8m.pt")
     state = {item["id"]: item for item in help_mod.check_requirements()}["face_model"]
     assert state["ok"] is True
-    assert state["found"].endswith("face_yolov8m.pt")
     assert "ultralytics/bbox/face_yolov8m.pt" in state["where"]
 
 
@@ -171,8 +170,7 @@ def test_a_missing_face_model_is_reported_not_raised(monkeypatch):
     monkeypatch.setattr(face_blur, "model_path", lambda: None)
     state = {item["id"]: item for item in help_mod.check_requirements()}["face_model"]
     assert state["ok"] is False
-    assert state["found"] == ""
-    assert "models/ultralytics/bbox/face_yolov8m.pt" in state["looked"], (
+    assert "models/ultralytics/bbox" in state["looked"], (
         "it has to say where it looked, or the answer is not actionable"
     )
     assert state["links"], "and still offer the download"
@@ -203,14 +201,15 @@ def test_a_file_in_a_subfolder_still_counts(monkeypatch):
     monkeypatch.setattr(face_blur, "model_path", lambda: None)
     state = {item["id"]: item for item in help_mod.check_requirements()}["unet"]
     assert state["ok"] is True
-    assert state["found"].startswith("Minimax/10Eros")
+    assert "ComfyUI/models/diffusion_models/" in state["where"]
 
 
-def test_every_matching_checkpoint_is_reported(monkeypatch):
-    """The first match is not necessarily the one to render with.
+def test_the_check_reports_the_folder_not_the_files_on_this_machine(monkeypatch):
+    """A ✓/✗ per file, and where it belongs - never the names this install happens to hold.
 
-    A model folder can hold several generations of the same checkpoint - and 10Eros beta3/
-    beta4 are the author's own "corrupted test versions" that old downloads still contain.
+    The Help tab is read by whoever installed the pack: naming one disk's checkpoints is a
+    fact about that disk, not an answer. The shipped guide used to print "found: <file>"
+    plus "also here:" and the whole list, which reads as gibberish on any other machine.
     """
     names = [
         "Minimax/10Eros_Max_h3_TURBO-hybrid_beta4_int8_convrot.safetensors",
@@ -223,20 +222,28 @@ def test_every_matching_checkpoint_is_reported(monkeypatch):
     )
     monkeypatch.setattr(help_mod, "_resolve_paths", lambda folder: f"/models/{folder}")
     state = {item["id"]: item for item in help_mod.check_requirements()}["unet"]
-    assert state["match_count"] == 3
-    assert sorted(state["matches"]) == sorted(names), "all of them, so a stale beta cannot hide"
-    assert "beta4" in state["found"] or "beta5" in state["found"]
+    assert state["ok"] is True, "three matching checkpoint files means the requirement is met"
+    payload = json.dumps(state)
+    for name in names:
+        assert name not in payload, f"{name} is a file on one machine, not a fact about the pack"
+    assert "matches" not in state and "match_count" not in state and "found" not in state
 
 
-def test_the_guide_warns_about_the_beta4_trap():
-    """The 10Eros author's own words: beta_3 and beta_4 are corrupted test versions."""
+def test_the_guide_does_not_pin_one_community_build():
+    """Naming one beta as "the good one" ages badly and means nothing to a new reader.
+
+    The numbers on a community model page change; beta3/beta4/beta5 are that page's own
+    history, not something this pack can promise about a file in someone else's folder.
+    """
     requirement = next(req for req in help_mod.REQUIREMENTS if req.id == "unet")
     text = " ".join(
-        [requirement.note]
+        [requirement.note, requirement.what]
+        + [link.note for link in requirement.links]
         + [part for section in help_mod.SECTIONS for part in (section.intro, *section.bullets)]
-    )
-    assert "beta5" in text, "the guide has to name the good one"
-    assert "beta4" in text or "beta_4" in text, "and warn about the bad ones"
+    ).lower()
+    assert "turbo" in text, "the step count still has to be explained"
+    for word in ("beta3", "beta4", "beta_3", "beta_4", "corrupted"):
+        assert word not in text, f"the guide should not be about {word}"
 
 
 def test_the_check_never_raises_when_comfyui_is_absent(monkeypatch):

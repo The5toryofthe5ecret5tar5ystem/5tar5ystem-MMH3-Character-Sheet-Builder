@@ -287,7 +287,7 @@ export const KNOB_COLUMNS = 3;
  * build makes that a glance instead of an investigation; a test keeps it in step with the
  * import, so bumping one without the other fails the suite rather than confusing a user.
  */
-export const PANEL_BUILD = "h3sheet_v52";
+export const PANEL_BUILD = "h3sheet_v53";
 
 /** The frontend's own widget/host names, straight from the shipped frontend bundle. */
 export const PREVIEW_HOST_CLASS = "comfy-img-preview";
@@ -1327,6 +1327,14 @@ export const PANEL_CSS = `
 .mmx-req__what { font-size: 10px; color: var(--mmx-muted); opacity: .9; }
 .mmx-req__package { font-size: 10px; color: var(--mmx-muted); }
 .mmx-req__package--missing { color: var(--mmx-danger); }
+/* The guide is authored with inline markers (bold, italic and code); these rules are what
+   makes them worth typing - before them the tab showed the asterisks and backticks. */
+.mmx-help strong, .mmx-req strong { font-weight: 700; color: var(--mmx-fg); }
+.mmx-help em, .mmx-req em { font-style: italic; color: var(--mmx-fg); }
+.mmx-help code, .mmx-req code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px;
+  background: rgba(255, 255, 255, 0.07); border-radius: 3px; padding: 0 3px;
+}
 `;
 
 // --------------------------------------------------------------------------- //
@@ -1338,6 +1346,52 @@ export function element(tag, props = {}, style = {}, children = []) {
     Object.assign(node.style, style);
     for (const child of children) if (child) node.append(child);
     return node;
+}
+
+/**
+ * The guide's inline markers, turned into elements.
+ *
+ * The guide is written as prose with Markdown habits: `**bold**` for the thing being named,
+ * `*italic*` for a value the reader has to recognise in the panel, and backticks for a path
+ * or a setting. This panel never sets innerHTML, so those markers used to reach the tab as
+ * literal asterisks - emphasis the reader never saw, and stars that mean nothing on screen.
+ *
+ * Only these markers are interpreted, and the text between them is inserted as TEXT, so a
+ * lone asterisk (or one inside a prompt example) stays exactly as typed.
+ */
+const INLINE_MARKERS = /(\*\*[^*]+\*\*|``[^`]+``|`[^`]+`|\*[^*]+\*)/g;
+
+export function inlineText(text) {
+    const source = String(text ?? "");
+    const host = element("span");
+    let at = 0;
+    for (const match of source.matchAll(INLINE_MARKERS)) {
+        if (match.index > at) host.append(document.createTextNode(source.slice(at, match.index)));
+        const token = match[0];
+        if (token.startsWith("**")) host.append(element("strong", { textContent: token.slice(2, -2) }));
+        else if (token.startsWith("``")) host.append(element("code", { textContent: token.slice(2, -2) }));
+        else if (token.startsWith("`")) host.append(element("code", { textContent: token.slice(1, -1) }));
+        else host.append(element("em", { textContent: token.slice(1, -1) }));
+        at = match.index + token.length;
+    }
+    if (at < source.length) host.append(document.createTextNode(source.slice(at)));
+    return host;
+}
+
+/** A block of guide text: markers rendered, everything else literal. */
+export function richText(tag, text, className = "") {
+    return element(tag, { className }, {}, [inlineText(text)]);
+}
+
+/**
+ * The same sentence with its markers stripped - for the places a marker cannot be rendered,
+ * such as the `title` tooltip on a link, which is plain text or nothing.
+ */
+export function plainText(text) {
+    return String(text ?? "").replace(
+        INLINE_MARKERS,
+        (token) => token.replace(/^\*+|\*+$/g, "").replace(/^`+|`+$/g, ""),
+    );
 }
 
 export function button(label, onClick, style = {}) {
@@ -2338,12 +2392,13 @@ export function buildSheetInterface({ state, hooks = {} }) {
                 target: "_blank",
                 rel: "noreferrer",
                 className: "mmx-help__link",
-                title: link.note || link.url,
+                // A tooltip is plain text: the markers would show up as asterisks in it.
+                title: plainText(link.note || link.url),
             });
             // A click inside the panel must not reach the canvas (and with it the node).
             anchor.addEventListener("click", (event) => event.stopPropagation());
             host.append(anchor);
-            if (link.note) host.append(element("span", { textContent: link.note, className: "mmx-help__link-note" }));
+            if (link.note) host.append(richText("span", link.note, "mmx-help__link-note"));
         }
         return host;
     }
@@ -2359,23 +2414,15 @@ export function buildSheetInterface({ state, hooks = {} }) {
             element("span", { textContent: item.node || "", className: "mmx-muted" }),
         );
         card.append(head);
-        if (item.what) card.append(element("div", { textContent: item.what, className: "mmx-req__what" }));
+        if (item.what) card.append(richText("div", item.what, "mmx-req__what"));
+        // Where the file belongs - never which file this machine happens to have. The tab is
+        // read by whoever installed the pack, on their install: a checkpoint name that only
+        // exists on someone else's disk is noise, not help. What the row owes the reader is
+        // "is it there, and where do I put it".
         card.append(element("div", {
-            textContent: item.file_ok === false || !item.found
-                ? `put it in: ${item.where}`
-                : `found: ${item.found}`,
+            textContent: `${item.file_ok === false ? "put it in" : "in place"}: ${item.where}`,
             className: "mmx-req__path",
         }));
-        // A model folder can hold several generations of the same checkpoint (10Eros beta4
-        // next to beta5) and the first match is not necessarily the one to render with, so
-        // every match is listed.
-        const others = (item.matches || []).filter((name) => name !== item.found);
-        if (others.length) {
-            card.append(element("div", {
-                textContent: `also here: ${others.join(", ")}`,
-                className: "mmx-req__path",
-            }));
-        }
         // A file can be right and the feature still dead (the blur needs the ultralytics
         // package), so the package state is its own line rather than folded into the ✓.
         for (const entry of item.packages || []) {
@@ -2396,7 +2443,7 @@ export function buildSheetInterface({ state, hooks = {} }) {
                 className: "mmx-req__path",
             }));
         }
-        if (item.note) card.append(element("div", { textContent: item.note, className: "mmx-req__what" }));
+        if (item.note) card.append(richText("div", item.note, "mmx-req__what"));
         if (item.links?.length) card.append(helpLinks(item.links));
         return card;
     }
@@ -2423,19 +2470,19 @@ export function buildSheetInterface({ state, hooks = {} }) {
             block.dataset.section = section.id;
             block.append(element("div", { textContent: section.title, className: "mmx-help__title" }));
             if (section.intro) {
-                block.append(element("div", { textContent: section.intro, className: "mmx-help__intro" }));
+                block.append(richText("div", section.intro, "mmx-help__intro"));
             }
             if (section.kind === "files") {
                 for (const item of requirements) block.append(requirementRow(item));
             }
             if (section.steps?.length) {
                 const list = element("ol", { className: "mmx-help__steps" });
-                for (const step of section.steps) list.append(element("li", { textContent: step }));
+                for (const step of section.steps) list.append(richText("li", step));
                 block.append(list);
             }
             if (section.bullets?.length) {
                 const list = element("ul", { className: "mmx-help__bullets" });
-                for (const bullet of section.bullets) list.append(element("li", { textContent: bullet }));
+                for (const bullet of section.bullets) list.append(richText("li", bullet));
                 block.append(list);
             }
             if (section.links?.length) block.append(helpLinks(section.links));
