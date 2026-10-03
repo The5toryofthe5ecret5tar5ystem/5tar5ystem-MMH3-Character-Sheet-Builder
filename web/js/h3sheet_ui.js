@@ -25,7 +25,7 @@ import {
     REF_GROUPS,
     PANEL_FIT,
     panelFitHeight,
-} from "./h3sheet_core.mjs?boot=h3sheet_v47";
+} from "./h3sheet_core.mjs?boot=h3sheet_v48";
 
 const CLASS = "MiniMaxH3CharacterSheet";
 const DOM_WIDGET = "h3_character_sheet_ui";

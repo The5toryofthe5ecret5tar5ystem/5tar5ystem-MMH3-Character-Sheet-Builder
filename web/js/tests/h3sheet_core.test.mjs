@@ -2144,6 +2144,54 @@ ok.push("reorder / slot helpers behave");
     ok.push("cells: Views / Poses / Expressions / Background are bold yellow-orange groups on their own greys");
 }
 
+// --- the draw-time clamp: the layout request is not the last word -------------------
+// A real node showed the frontend's own `computeLayoutSize` still installed on a preview
+// widget the frontend created when the sheet image loaded, at 1053px and a 2442px node.
+// Wrapping the DRAW call is what makes the pack's promise independent of whether a layout
+// pass happens afterwards: the image is drawn by that call, and only that call.
+{
+    const calls = [];
+    const canvas = {
+        name: "$$canvas-image-preview", hidden: false, computedHeight: 1053, node: null,
+        options: {},
+        drawWidget() { calls.push(this.computedHeight); },
+    };
+    const node = { size: [620, 2442], widgets: [canvas], setDirtyCanvas() {}, graph: {} };
+    canvas.node = node;
+
+    // compact: the draw still happens, at the cap, whatever the layout says
+    core.applyPreviewMode(node, "compact", {});
+    assert.equal(canvas.computedHeight, 1053, "the layout has not been corrected yet...");
+    canvas.drawWidget({}, { width: 620 });
+    assert.deepEqual(calls, [200], "...but the draw call clamps the height it draws at");
+    assert.equal(canvas.computedHeight, 200);
+
+    // full width: same idea, with the aspect-driven height (no media here, so 16:9)
+    calls.length = 0;
+    core.applyPreviewMode(node, "width", {});
+    canvas.drawWidget({}, { width: 620 });
+    assert.deepEqual(calls, [core.previewWidthHeight(node, canvas)],
+        "a full-width preview draws at its computed height");
+
+    // panel / off: nothing is drawn at all, so a lingering widget cannot show an image
+    calls.length = 0;
+    canvas._mmxMode = "panel";
+    canvas.drawWidget({}, { width: 620 });
+    assert.deepEqual(calls, [], "in panel mode the preview image is never drawn");
+    canvas._mmxMode = "off";
+    canvas.drawWidget({}, { width: 620 });
+    assert.deepEqual(calls, [], "and neither in off mode");
+
+    // full size: hands the frontend's own drawing back untouched
+    calls.length = 0;
+    core.applyPreviewMode(node, "full", {});
+    const before = canvas.computedHeight;
+    canvas.drawWidget({}, { width: 620 });
+    assert.deepEqual(calls, [before], "full size draws at whatever height the layout gave it");
+    assert.equal(canvas.computedHeight, before, "and the pack stops touching it");
+    ok.push("node previews: the cap is applied at DRAW time, so a late widget cannot render full width");
+}
+
 // --- the one button that creates the render is visibly different -----------------
 // "Build cells" is the step a new user has to find, so it carries an outline instead of the
 // quiet default button style. The class and the rule are both pinned here: the rule is what

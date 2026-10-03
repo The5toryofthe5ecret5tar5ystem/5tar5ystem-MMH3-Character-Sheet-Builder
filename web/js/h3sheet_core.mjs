@@ -287,7 +287,7 @@ export const KNOB_COLUMNS = 3;
  * build makes that a glance instead of an investigation; a test keeps it in step with the
  * import, so bumping one without the other fails the suite rather than confusing a user.
  */
-export const PANEL_BUILD = "h3sheet_v47";
+export const PANEL_BUILD = "h3sheet_v48";
 
 /** The frontend's own widget/host names, straight from the shipped frontend bundle. */
 export const PREVIEW_HOST_CLASS = "comfy-img-preview";
@@ -455,6 +455,28 @@ export function capPreviewWidget(widget, mode, owner = null) {
     }
     const original = widget._mmxLayoutSize;
     const wanted = nodePreviews({ nodePreviews: mode });
+    // ALSO clamp the DRAW call, not just the layout request.
+    //
+    // The layout lever above is only as good as the next pass of the frontend's own arranger, and
+    // the frontend creates this widget when the sheet image finishes loading - measured on a real
+    // node: `computeLayoutSize` still the frontend's `{minHeight:220}`, `computedHeight` 1053, a
+    // 2442px node. That is the state a user sees when a render ends while the tab is not being
+    // drawn (background tab, another window open, a screenshot taken mid-pass), and no timer can
+    // promise otherwise. The draw call cannot be missed: the image IS drawn by it.
+    if (!widget._mmxDrawPatched) {
+        widget._mmxDrawPatched = true;
+        const draw = widget.drawWidget;
+        widget.drawWidget = function (ctx, opts) {
+            const now = nodePreviews({ nodePreviews: widget._mmxMode || DEFAULT_NODE_PREVIEWS });
+            if (now === "panel" || now === "off") return undefined;   // nothing to draw at all
+            if (now !== "full") {
+                const cap = now === "width" ? previewWidthHeight(this.node, this) : PREVIEW_COMPACT_HEIGHT;
+                if (Number(this.computedHeight) !== cap) this.computedHeight = cap;
+            }
+            return typeof draw === "function" ? draw.apply(this, arguments) : undefined;
+        };
+    }
+    widget._mmxMode = wanted;
     if (wanted === "full") {
         if (original) widget.computeLayoutSize = original;
         else delete widget.computeLayoutSize;
@@ -2099,8 +2121,10 @@ export function buildSheetInterface({ state, hooks = {} }) {
     );
     panelPreviewSelect.dataset.action = "panel-preview";
     previewSelect.title =
-        "ComfyUI's own preview under this node is sized from the node width. 'Small' caps it "
-        + "and lets two fit side by side; 'Hidden' leaves the Results tab as the viewer.";
+        "ComfyUI's own preview under this node is sized from the node width, and the frontend "
+        + "re-creates it when the sheet image lands - which is why 'Small' and 'Full width' can "
+        + "be overridden for a moment. 'Panel only' removes it outright (the sheet is in the "
+        + "Results tab at the Panel preview size); 'ComfyUI default' hands it back untouched.";
     const settingsHead = element("div", { className: "mmx-row mmx-settings__head" }, { marginBottom: "4px" });
     settingsHead.append(
         compactBox,
