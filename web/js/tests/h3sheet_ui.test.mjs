@@ -83,7 +83,7 @@ assert.ok(wiring.includes("`/media?${params.toString()}`"), "the hook must call 
 assert.ok(wiring.includes('api.fetchApi("/upload/image"'), "drops must upload through core /upload/image");
 assert.ok(wiring.includes('body.append("subfolder", "h3_character_sheet")'),
     "uploads go to a dedicated input subfolder");
-assert.ok(wiring.includes("boot=h3sheet_v37"),
+assert.ok(wiring.includes("boot=h3sheet_v38"),
     "core module imports must carry a fresh boot tag (bump it on every JS change, or browsers keep the cached panel)");
 assert.ok(wiring.includes("panelFitHeight") && wiring.includes("resizing_node === node"),
     "the wiring must re-measure the node from its panel and never fight a drag");

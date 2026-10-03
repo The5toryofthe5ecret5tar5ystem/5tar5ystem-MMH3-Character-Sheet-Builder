@@ -667,6 +667,21 @@ export const PANEL_CSS = `
 .mmx-btn:hover { border-color: var(--mmx-accent); }
 .mmx-btn--primary { background: var(--mmx-accent); border-color: var(--mmx-accent); color: #fff; }
 .mmx-btn--danger { color: var(--mmx-danger); }
+/* The one action that creates the render (Cells -> Build cells). A yellow-orange outline so
+   it reads as "this is the button" without shouting like a filled primary button would.
+   Tint/foreground are local variables: the accent stays the blue the rest of the panel uses. */
+.mmx-btn--build {
+  border: 1px solid var(--mmx-build, #ff9f2e);
+  color: var(--mmx-build, #ff9f2e);
+  font-weight: 600;
+  box-shadow: 0 0 0 1px rgba(255, 159, 46, 0.25);
+}
+.mmx-btn--build:hover {
+  border-color: var(--mmx-build, #ff9f2e);
+  background: rgba(255, 159, 46, 0.16);
+  color: var(--mmx-build-bright, #ffb95e);
+}
+.mmx-btn--build:active { background: rgba(255, 159, 46, 0.28); }
 .mmx-btn--icon { padding: 2px 6px; }
 .mmx-input, .mmx-select {
   font-size: 10px; background: var(--mmx-card-2); color: var(--mmx-fg);
@@ -2881,14 +2896,19 @@ export function buildSheetInterface({ state, hooks = {} }) {
             }),
         );
         const actions = element("div", { className: "mmx-row" }, { marginTop: "4px" });
+        // "Build cells" is the step that actually creates the render, so it is the one button
+        // that carries a visible (yellow-orange) outline instead of the quiet default.
+        const buildButton = button("Build cells", () => {
+            state.cells = plannedCells();
+            state.build = ticks();
+            persist();
+            refresh();
+            notify(`${state.cells.length} cell(s) built.`);
+        });
+        buildButton.classList.add("mmx-btn--build");
+        buildButton.title = "Create the cells from the ticks above, then Queue the prompt.";
         actions.append(
-            button("Build cells", () => {
-                state.cells = plannedCells();
-                state.build = ticks();
-                persist();
-                refresh();
-                notify(`${state.cells.length} cell(s) built.`);
-            }),
+            buildButton,
             button("Clear cells", () => {
                 state.cells = [];
                 persist();

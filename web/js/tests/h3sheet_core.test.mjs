@@ -1542,5 +1542,29 @@ ok.push("reorder / slot helpers behave");
     ok.push("node previews: capped and side by side, hidden, or ComfyUI's own size");
 }
 
+// --- the one button that creates the render is visibly different -----------------
+// "Build cells" is the step a new user has to find, so it carries an outline instead of the
+// quiet default button style. The class and the rule are both pinned here: the rule is what
+// makes it look like anything at all.
+{
+    const builder2 = core.buildSheetInterface({ state: core.readState(""), hooks: {} });
+    builder2.showTab("cells");
+    const build = [...builder2.container.querySelectorAll("button")]
+        .find((b) => b.textContent === "Build cells");
+    assert.ok(build, "the Cells tab has the Build cells button");
+    assert.ok(build.classList.contains("mmx-btn--build"), "it is marked as the primary action");
+    const clear = [...builder2.container.querySelectorAll("button")]
+        .find((b) => b.textContent === "Clear cells");
+    assert.ok(clear && !clear.classList.contains("mmx-btn--build"), "Clear cells stays quiet");
+    assert.ok(build.title.includes("Queue"), "and it says what happens next");
+    const styles = builder2.container.querySelector("style").textContent;
+    const rule = styles.match(/\.mmx-btn--build\s*\{([^}]*)\}/);
+    assert.ok(rule, "the highlight rule exists");
+    assert.ok(/border:\s*1px solid var\(--mmx-build/.test(rule[1]), "a 1px outline, from the theme variable");
+    assert.ok(/color:\s*var\(--mmx-build/.test(rule[1]), "same colour for the label");
+    assert.ok(/\.mmx-btn--build:hover\s*\{/.test(styles), "with a hover state that fills in");
+    ok.push("Build cells is outlined in yellow-orange (the rest of the buttons stay quiet)");
+}
+
 console.log("h3sheet_core: PASS");
 for (const line of ok) console.log(" -", line);
