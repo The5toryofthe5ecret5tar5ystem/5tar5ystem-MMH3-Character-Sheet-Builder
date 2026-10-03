@@ -65,9 +65,13 @@ keep the frames they already have. On by default; see [the live strip](#the-live
 
 A five-cell sheet straight out of the node - one image, captions included:
 
-| Balanced - 1024px cells, 2304 x 1536, ~81 s | Fidelity - 2048px cells, 5760 x 3840, ~378 s |
-| --- | --- |
-| ![Balanced character sheet](images/sheet-balanced-1536p-81s.png) | ![Fidelity character sheet](images/sheet-fidelity-3840p-378s.png) |
+| Balanced - 1024px cells, 2304 x 1536, ~81 s | Fidelity - 2048px cells, 5760 x 3840, ~378 s | Expression row - one face, five emotions |
+| --- | --- | --- |
+| ![Balanced character sheet](images/sheet-balanced-1536p-81s.png) | ![Fidelity character sheet](images/sheet-fidelity-3840p-378s.png) | ![Expression sheet](images/sheet-expressions-5-cells.png) |
+
+Every sheet is a **reference image**: the fidelity one for identity, the expression row for what the
+face is doing (same framing, same light, only the expression changes - that is what latent
+continuation buys you on a face row).
 
 The panel, on the same character: references with the roles that drive the prompt, the LIVE strip
 mid-render, and the blur editor for a reference that must not supply a face.

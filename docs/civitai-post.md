@@ -7,9 +7,10 @@ Suggested gallery order, and what each one is:
 
 1. `sheet-fidelity-3840p-378s.png` - the headline: a finished fidelity sheet, five cells, one image;
 2. `sheet-balanced-1536p-81s.png` - the same sheet at the balanced tier, ~81 s;
-3. `panel-references.png` - the References tab with roles filled in and blur badges on;
-4. `panel-live-preview.png` - the Cells tab during a render, LIVE strip at `cell 2/5 - step 7/8`;
-5. `panel-face-blur.png` - painting a blur region over a reference that must not supply a face.
+3. `sheet-expressions-5-cells.png` - an expression row: one face, five emotions, same framing and light;
+4. `panel-references.png` - the References tab with roles filled in and blur badges on;
+5. `panel-live-preview.png` - the Cells tab during a render, LIVE strip at `cell 2/5 - step 7/8`;
+6. `panel-face-blur.png` - painting a blur region over a reference that must not supply a face.
 
 ---
 
@@ -52,7 +53,7 @@ The fidelity tier is the same five renders at twice the linear resolution (~4.7x
 
 ## Screenshots
 
-Both sheets above are straight out of the node, captions included. The panel shots show the References tab with roles and blur badges, the Cells tab with the LIVE strip mid-render, and the blur editor where you paint a region by hand. (All of them are in the repo under `images/`.)
+Both sheets above are straight out of the node, captions included, and an expression row shows the same face across five emotions with the framing and light held. The panel shots show the References tab with roles and blur badges, the Cells tab with the LIVE strip mid-render, and the blur editor where you paint a region by hand. (All of them are in the repo under `images/`.)
 
 ## Install (the node)
 
