@@ -211,9 +211,177 @@ export const CELL_CONTINUITY_LABELS = [
     ["off", "cont: no"],
 ];
 
-/** The per-cell continuation mode, defaulting to ``inherit``. */
 /** How many columns the Settings tab packs the node's knobs into. */
 export const KNOB_COLUMNS = 3;
+
+// --------------------------------------------------------------------------- //
+// the node's own output previews (the ones ComfyUI draws under the panel)
+// --------------------------------------------------------------------------- //
+// The frontend, not this pack, draws those: a `div.comfy-img-preview` flex host per IMAGE
+// output (each `<img>` sized from `--comfy-img-preview-width/height`, which the frontend
+// recomputes from the NODE WIDTH on every resize) plus a `$$comfy_animation_preview` DOM
+// widget for an image sequence. That is why they scale with the node: a 1000px node gets a
+// 980px image, and two of them stack into a very tall node. There is no setting for it.
+//
+// So the pack sizes them itself, with a class it adds to the host plus ONE stylesheet rule:
+//
+//     .mmx-preview-compact.mmx-preview-compact img { height: 200px !important; ... }
+//
+// The doubled class is deliberate: the frontend's own `.comfy-img-preview img` rule has the
+// same specificity as a single class + element, and its later-inserted stylesheets would win
+// a tie, so the rule is written to out-specify it rather than rely on document order. The
+// images are then capped whatever the frontend does with its width/height custom properties,
+// which it recomputes from the node width on every resize. `full` removes the class.
+
+/** The frontend's own widget/host names, straight from the shipped frontend bundle. */
+export const PREVIEW_HOST_CLASS = "comfy-img-preview";
+export const PREVIEW_WIDGET_NAME = "$$comfy_animation_preview";
+
+/** The class (and rule id) the pack uses to cap them. */
+export const PREVIEW_COMPACT_CLASS = "mmx-preview-compact";
+export const PREVIEW_RULE_ID = "mmx-preview-compact-rule";
+
+/** Height of one preview in `compact` mode (px): enough to judge a face, not the node. */
+export const PREVIEW_COMPACT_HEIGHT = 200;
+
+/** `compact` = small and side by side (default), `full` = what ComfyUI does, `off` = none. */
+export const NODE_PREVIEW_MODES = ["compact", "full", "off"];
+export const DEFAULT_NODE_PREVIEWS = "compact";
+
+export const NODE_PREVIEW_LABELS = [
+    ["compact", "Small (side by side)"],
+    ["full", "Full size (ComfyUI default)"],
+    ["off", "Hidden"],
+];
+
+/** The node-preview mode, defaulting to the compact one. */
+export function nodePreviews(state) {
+    const value = String(state?.nodePreviews || "").toLowerCase();
+    return NODE_PREVIEW_MODES.includes(value) ? value : DEFAULT_NODE_PREVIEWS;
+}
+
+/**
+ * The preview widgets and hosts on a node, as ``{widgets, hosts}``.
+ *
+ * Both kinds are found: the animation widget (by name - its element is a plain wrapper) and
+ * the still-image hosts (by class - they can sit inside any widget's element). Whatever the
+ * pack owns is skipped: the panel's own DOM widget is not an output preview.
+ */
+export function previewParts(node, { skip = [] } = {}) {
+    const widgets = [];
+    const hosts = [];
+    for (const widget of node?.widgets || []) {
+        if (!widget || (widget.name && skip.includes(widget.name))) continue;
+        const element = widget.element || widget.inputEl || null;
+        const host = element?.classList?.contains?.(PREVIEW_HOST_CLASS)
+            ? element
+            : (element?.querySelector?.(`.${PREVIEW_HOST_CLASS}`) || null);
+        const animated = widget.name === PREVIEW_WIDGET_NAME;
+        if (!host && !animated) continue;
+        if (!widgets.includes(widget)) widgets.push(widget);
+        if (host && !hosts.includes(host)) hosts.push(host);
+    }
+    return { widgets, hosts };
+}
+
+/** How tall a node preview should be in `mode` - the fit uses this to size the node. */
+export function previewHeight(mode) {
+    return nodePreviews({ nodePreviews: mode }) === "compact" ? PREVIEW_COMPACT_HEIGHT : 0;
+}
+
+/**
+ * Install the one rule that caps every preview image (idempotent, document-level).
+ *
+ * The height lives in the rule text, so it is written once when the mode is first applied -
+ * and the doubled class out-specifies the frontend's own `.comfy-img-preview img` rule instead
+ * of racing it on document order.
+ */
+export function ensurePreviewRule() {
+    if (typeof document === "undefined") return null;
+    const existing = document.getElementById?.(PREVIEW_RULE_ID);
+    if (existing) return existing;
+    const style = document.createElement("style");
+    style.id = PREVIEW_RULE_ID;
+    style.textContent = [
+        `.${PREVIEW_COMPACT_CLASS}.${PREVIEW_COMPACT_CLASS} img {`,
+        `  height: ${PREVIEW_COMPACT_HEIGHT}px !important;`,
+        "  width: auto !important;",
+        "  max-width: 100% !important;",
+        "  object-fit: contain !important;",
+        "  margin: 0 auto !important;",
+        "}",
+        // A preview that is a video (or a wrapper around one) is capped the same way, and the
+        // host itself cannot grow past the row the pack asked the layout for.
+        `.${PREVIEW_COMPACT_CLASS}.${PREVIEW_COMPACT_CLASS} video {`,
+        `  height: ${PREVIEW_COMPACT_HEIGHT}px !important;`,
+        "  width: auto !important;",
+        "  margin: 0 auto !important;",
+        "}",
+        `.${PREVIEW_COMPACT_CLASS}.${PREVIEW_COMPACT_CLASS} {`,
+        `  max-height: ${PREVIEW_COMPACT_HEIGHT + 16}px !important;`,
+        "  justify-content: center !important;",
+        "}",
+    ].join("\n");
+    (document.head || document.documentElement)?.append(style);
+    return style;
+}
+
+/**
+ * Size the node's output previews: small and side by side, hidden, or ComfyUI's own way.
+ *
+ * `compact` caps the height and lets the width follow each image's own aspect ratio, which is
+ * what makes two previews (the sheet and the cell sequence) sit next to each other instead of
+ * stacking: the frontend's host is a wrapping flex row, so narrower cells simply fit.
+ */
+export function applyPreviewMode(node, mode, { skip = [] } = {}) {
+    const wanted = nodePreviews({ nodePreviews: mode });
+    const { widgets, hosts } = previewParts(node, { skip });
+    const compact = wanted === "compact";
+    if (compact) ensurePreviewRule();
+    for (const host of hosts) {
+        if (compact) {
+            host.classList?.add(PREVIEW_COMPACT_CLASS);
+            host.style.display = "";
+        } else {
+            host.classList?.remove(PREVIEW_COMPACT_CLASS);
+            host.style.display = wanted === "off" ? "none" : "";
+        }
+    }
+    for (const widget of widgets) {
+        const element = widget.element || widget.inputEl || null;
+        if (wanted === "off") {
+            if (widget._mmxPreviewSize === undefined) widget._mmxPreviewSize = widget.computeSize || null;
+            element?.classList?.remove?.(PREVIEW_COMPACT_CLASS);
+            widget.hidden = true;
+            if (widget.options) widget.options.hidden = true;
+            widget.computeSize = () => [0, 0];
+        } else {
+            widget.hidden = false;
+            if (compact) element?.classList?.add?.(PREVIEW_COMPACT_CLASS);
+            else element?.classList?.remove?.(PREVIEW_COMPACT_CLASS);
+            if (widget.options) {
+                widget.options.hidden = false;
+                // The DOM-widget layout asks the widget how tall it may be: capping it here is
+                // what stops ComfyUI giving the preview the node's whole leftover height.
+                if (compact) {
+                    widget.options.getMinHeight = () => PREVIEW_COMPACT_HEIGHT;
+                    widget.options.getMaxHeight = () => PREVIEW_COMPACT_HEIGHT + 8;
+                } else {
+                    delete widget.options.getMinHeight;
+                    delete widget.options.getMaxHeight;
+                }
+            }
+            if (widget._mmxPreviewSize !== undefined) {
+                if (widget._mmxPreviewSize) widget.computeSize = widget._mmxPreviewSize;
+                else delete widget.computeSize;
+                widget._mmxPreviewSize = undefined;
+            }
+        }
+    }
+    node?.setDirtyCanvas?.(true, true);
+    node?.graph?.setDirtyCanvas?.(true, true);
+    return { mode: wanted, widgets: widgets.length, hosts: hosts.length };
+}
 
 /**
  * Should the node hide its own knob rows and let the panel draw them?
@@ -784,6 +952,8 @@ export function readState(payload) {
         presetId: String(data.render?.preset || ""),
         // Whether the node keeps its own knob rows or lets the panel draw them.
         compactKnobs: data?.ui?.compactKnobs !== false,
+        // How big ComfyUI's own output previews under the panel are allowed to be.
+        nodePreviews: nodePreviews({ nodePreviews: data?.ui?.nodePreviews }),
         build: {
             views: Array.isArray(data.build?.views) ? data.build.views.map(String) : ["face", "front"],
             poses: Array.isArray(data.build?.poses) ? data.build.poses.map(String) : ["neutral"],
@@ -819,7 +989,7 @@ export function toPayload(state) {
     if (String(state?.presetId || "").trim()) payload.render.preset = String(state.presetId).trim();
     // A view preference, not a render setting: it decides whether the node draws its own
     // knob rows or leaves that to the panel. Recorded so it survives a reload.
-    payload.ui = { compactKnobs: compactKnobs(state) };
+    payload.ui = { compactKnobs: compactKnobs(state), nodePreviews: nodePreviews(state) };
     for (const group of REF_GROUPS) {
         payload.refs[group.key] = (state.refs?.[group.key] || [])
             .filter((item) => item && item.file)
@@ -1174,6 +1344,27 @@ export function buildSheetInterface({ state, hooks = {} }) {
     });
     const settingsNote = element("div", { className: "mmx-muted", textContent: "reading the node's knobs..." });
     const settingsHost = element("div");
+
+    // How big ComfyUI's own output previews (the images it draws UNDER the panel) may be.
+    // Those are the frontend's widgets and it sizes each image from the node width, so a wide
+    // node means a giant preview - and two of them make the node enormous. The pack caps them
+    // (and lets them sit side by side) or hides them; this is the switch for that.
+    const previewSelect = selectBox(
+        NODE_PREVIEW_LABELS,
+        nodePreviews(state),
+        (value) => {
+            state.nodePreviews = nodePreviews({ nodePreviews: value });
+            hooks.setPreviewMode?.(state.nodePreviews);
+            persist();
+            notify(state.nodePreviews === "off"
+                ? "node previews hidden - the Results tab still has the sheet and the frames"
+                : `node previews: ${state.nodePreviews === "compact" ? "small, side by side" : "ComfyUI's own size"}`);
+        },
+    );
+    previewSelect.dataset.action = "node-previews";
+    previewSelect.title =
+        "ComfyUI's own preview under this node is sized from the node width. 'Small' caps it "
+        + "and lets two fit side by side; 'Hidden' leaves the Results tab as the viewer.";
     const settingsHead = element("div", { className: "mmx-row mmx-settings__head" }, { marginBottom: "4px" });
     settingsHead.append(
         compactBox,
@@ -1182,6 +1373,8 @@ export function buildSheetInterface({ state, hooks = {} }) {
             { textContent: "Compact node", htmlFor: "mmx-compact-knobs" },
             { fontSize: "10px" },
         ),
+        element("span", { className: "mmx-muted", textContent: "previews" }, { marginLeft: "8px" }),
+        previewSelect,
         element("span", {}, { flex: "1 1 auto" }),
         button("Re-read node", () => {
             syncSettings();
@@ -3127,6 +3320,7 @@ export function buildSheetInterface({ state, hooks = {} }) {
         get knobFields() { return new Map(knobFields); },
         get knobs() { return knobGroups.flatMap((group) => group.knobs); },
         get compactKnobs() { return compactKnobs(state); },
+        get nodePreviews() { return nodePreviews(state); },
     };
 }
 

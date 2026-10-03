@@ -1429,5 +1429,118 @@ ok.push("reorder / slot helpers behave");
     ok.push("Help: sections from the backend, live ✓/✗ file check, links open away from the canvas");
 }
 
+// --- node previews: ComfyUI's own output previews, sized by the panel ---------
+// The frontend draws them (a `comfy-img-preview` flex host per IMAGE output, plus a
+// `$$comfy_animation_preview` widget for a sequence) and sizes each image from the NODE
+// WIDTH, which is why a finished sheet made the node enormous. The pack caps them instead:
+// the assertions below are the exact CSS/options contract the frontend reads, including that
+// the override is `!important` (the frontend re-sets those properties inline on every
+// resize, without important, so only an important override survives).
+{
+    const host = document.createElement("div");
+    host.className = "comfy-img-preview";
+    const hostImg = document.createElement("img");
+    host.append(hostImg);
+    const hostWidget = { name: "$$comfy_preview_image", element: host };
+
+    const animWrapper = document.createElement("div");
+    const animImg = document.createElement("img");
+    animImg.className = "block size-full object-contain";
+    animWrapper.append(animImg);
+    const originalCompute = () => [100, 100];
+    const animWidget = {
+        name: core.PREVIEW_WIDGET_NAME, element: animWrapper,
+        options: {}, computeSize: originalCompute,
+    };
+
+    const panelWidget = { name: "h3_character_sheet_ui", element: document.createElement("div") };
+    const dataWidget = { name: "sheet_data", hidden: true };
+    const node = { widgets: [panelWidget, dataWidget, hostWidget, animWidget], setDirtyCanvas() {} };
+    const skip = ["h3_character_sheet_ui", "sheet_data"];
+
+    assert.equal(core.previewHeight("compact"), core.PREVIEW_COMPACT_HEIGHT);
+    assert.equal(core.previewHeight("full"), 0, "full size is the frontend's own business");
+    assert.equal(core.nodePreviews({}), "compact", "compact is the default");
+    assert.equal(core.nodePreviews({ nodePreviews: "nonsense" }), "compact");
+
+    const parts = core.previewParts(node, { skip });
+    assert.equal(parts.widgets.length, 2, "the image host and the animation widget");
+    assert.equal(parts.hosts.length, 1, "one flex host");
+    assert.ok(!parts.widgets.includes(panelWidget) && !parts.widgets.includes(dataWidget),
+        "the panel and its storage are not output previews");
+
+    // jsdom's CSS engine cannot resolve a cascade, so the assertions are on the two things the
+    // cascade is built from: the class the pack adds, and the ONE rule it injects - which is
+    // written with a doubled class on purpose (`.mmx-preview-compact.mmx-preview-compact img`)
+    // so it out-specifies the frontend's own `.comfy-img-preview img` instead of racing it on
+    // document order.
+    let result = core.applyPreviewMode(node, "compact", { skip });
+    assert.equal(result.mode, "compact");
+    assert.equal(result.hosts, 1);
+    assert.ok(host.classList.contains(core.PREVIEW_COMPACT_CLASS), "the host is marked");
+    assert.ok(animWrapper.classList.contains(core.PREVIEW_COMPACT_CLASS),
+        "and so is the animation widget's wrapper");
+    const rule = document.getElementById(core.PREVIEW_RULE_ID);
+    assert.ok(rule, "the capping rule is installed once, document-wide");
+    assert.ok(rule.textContent.includes(`.${core.PREVIEW_COMPACT_CLASS}.${core.PREVIEW_COMPACT_CLASS} img`),
+        "doubled class: a single class would tie with the frontend's rule and lose on order");
+    assert.ok(rule.textContent.includes(`height: ${core.PREVIEW_COMPACT_HEIGHT}px !important`),
+        "a fixed height, with priority");
+    assert.ok(rule.textContent.includes("width: auto !important"),
+        "auto width keeps the aspect ratio, so two previews fit side by side");
+    assert.ok(rule.textContent.includes("object-fit: contain !important"));
+    assert.ok(rule.textContent.includes("justify-content: center !important"),
+        "the flex row centres what is left instead of leaving it left-aligned");
+    assert.equal(animWidget.options.getMinHeight(), 200, "the DOM widget is capped, not stretched");
+    assert.equal(animWidget.options.getMaxHeight(), 208);
+    assert.equal(animWidget.hidden, false);
+    assert.ok(!hostImg.classList.contains(core.PREVIEW_COMPACT_CLASS),
+        "the images themselves are not marked - the rule reaches them through the host");
+
+    result = core.applyPreviewMode(node, "off", { skip });
+    assert.equal(result.mode, "off");
+    assert.equal(host.style.display, "none");
+    assert.ok(!host.classList.contains(core.PREVIEW_COMPACT_CLASS), "the cap class comes off");
+    assert.ok(!animWrapper.classList.contains(core.PREVIEW_COMPACT_CLASS));
+    assert.equal(animWidget.hidden, true, "the animation widget row goes too");
+    assert.deepEqual(animWidget.computeSize(), [0, 0]);
+
+    result = core.applyPreviewMode(node, "full", { skip });
+    assert.equal(result.mode, "full");
+    assert.equal(host.style.display, "");
+    assert.ok(!host.classList.contains(core.PREVIEW_COMPACT_CLASS));
+    assert.equal(animWidget.hidden, false);
+    assert.equal(animWidget.computeSize, originalCompute, "the widget's own computeSize is restored");
+    assert.equal("getMinHeight" in animWidget.options, false);
+
+    // Applying twice must not pile up rules (it runs after every render).
+    core.applyPreviewMode(node, "compact", { skip });
+    core.applyPreviewMode(node, "compact", { skip });
+    assert.equal(document.querySelectorAll(`#${core.PREVIEW_RULE_ID}`).length, 1,
+        "one rule, however often the mode is re-applied");
+
+    // The preference travels in the payload and the panel offers it next to the results.
+    assert.equal(core.readState(JSON.stringify({ ui: { nodePreviews: "off" } })).nodePreviews, "off");
+    assert.equal(core.toPayload(core.readState("")).ui.nodePreviews, "compact");
+    const previewCalls = [];
+    const previewState = core.readState("");
+    const previewPanel = core.buildSheetInterface({
+        state: previewState,
+        hooks: {
+            status: () => {}, listResults: async () => null,
+            setPreviewMode: (mode) => { previewCalls.push(mode); return { mode }; },
+        },
+    });
+    const select = previewPanel.container.querySelector('[data-action="node-previews"]');
+    assert.ok(select, "the Results tab offers a node-preview control");
+    assert.deepEqual([...select.options].map((o) => o.value), ["compact", "full", "off"]);
+    assert.equal(select.value, "compact");
+    select.value = "off";
+    select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    assert.deepEqual(previewCalls, ["off"], "the wiring is asked to resize them");
+    assert.equal(previewState.nodePreviews, "off", "and the choice is remembered");
+    ok.push("node previews: capped and side by side, hidden, or ComfyUI's own size");
+}
+
 console.log("h3sheet_core: PASS");
 for (const line of ok) console.log(" -", line);

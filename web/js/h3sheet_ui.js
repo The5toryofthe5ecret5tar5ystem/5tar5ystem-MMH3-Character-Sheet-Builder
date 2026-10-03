@@ -15,12 +15,16 @@ import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import {
     buildSheetInterface,
+    applyPreviewMode,
+    nodePreviews,
+    previewHeight,
+    previewParts,
     readState,
     toPayload,
     REF_GROUPS,
     PANEL_FIT,
     panelFitHeight,
-} from "./h3sheet_core.mjs?boot=h3sheet_v36";
+} from "./h3sheet_core.mjs?boot=h3sheet_v37";
 
 const CLASS = "MiniMaxH3CharacterSheet";
 const DOM_WIDGET = "h3_character_sheet_ui";
@@ -52,8 +56,15 @@ function fitNodeToPanel(node) {
     if (!widget || !element) return;
     if (app.canvas?.resizing_node === node) return;   // never fight a user's drag
     const knobs = (node.widgets || []).filter((item) => item !== widget && item.hidden !== true);
+    // ComfyUI's own output previews are DOM widgets too, and in `compact` mode the pack caps
+    // their height - so the fit has to size the node for THAT, not for the height the
+    // frontend would have given them (which is what made a finished sheet a 1000px-wide,
+    // very tall node).
+    const compactPreview = previewHeight(part.previewMode || nodePreviews(part.state));
     const rowsHeight = knobs.reduce(
-        (total, item) => total + (Number(item.computedHeight) || PANEL_FIT.rowHeight),
+        (total, item) => total + (isPreviewWidget(item, widget)
+            ? (compactPreview || Number(item.computedHeight) || PANEL_FIT.rowHeight)
+            : (Number(item.computedHeight) || PANEL_FIT.rowHeight)),
         0,
     );
     // Measure the panel's CONTENT, not the height the node handed it: the element is sized by
@@ -289,6 +300,13 @@ function mountPanel(node) {
         readWidgets: (names) => readWidgets(node, names),
         /** Take the node's own knob rows away (or give them back), leaving the values. */
         setKnobsVisible: (visible) => setKnobsVisible(node, visible),
+        /** ComfyUI's own output previews: smaller, side by side, or gone. */
+        setPreviewMode: (mode) => {
+            const result = applyNodePreviews(node, mode);
+            // The node can be a lot shorter once the previews are capped.
+            scheduleFit(node);
+            return result;
+        },
         /** Write a preset's values onto the node's own knobs (cell size, steps, layout...). */
         applyWidgets: async (values) => {
             const applied = [];
@@ -364,13 +382,18 @@ function mountPanel(node) {
     }
 
     node._mmxSheet = { state, panel, widget, hooks, refresh: () => panel.refresh() };
-
     // Follow the run: while a prompt is executing the panel polls faster (every few
     // seconds) so the Results tab fills in cell by cell - the per-cell saver writes
     // each cell to disk the moment it finishes.
     if (!node._mmxSheetEvents) {
         const onStart = () => panel.setRunning(true);
-        const onStop = () => panel.setRunning(false);
+        const onStop = () => {
+            panel.setRunning(false);
+            // The previews are created/updated by the frontend as the images arrive, so the
+            // node's preview size is re-applied once the run is over (and once more as the
+            // DOM settles).
+            schedulePreviewMode(node);
+        };
         node._mmxSheetEvents = { onStart, onStop };
         api.addEventListener("execution_start", onStart);
         api.addEventListener("executing", (event) => { if (!event?.detail) onStop(); });
@@ -385,7 +408,43 @@ function mountPanel(node) {
     }, POLL_MS);
     panel.refreshResults();
     scheduleFit(node);
+    // ComfyUI's own previews are already on the node when a saved workflow is opened (and
+    // arrive after each render), so the node's preview size is applied from the start.
+    applyNodePreviews(node, nodePreviews(state));
     return panel;
+}
+
+/** Is this widget one of ComfyUI's own output previews (image host or the animation one)? */
+function isPreviewWidget(widget, panelWidget = null) {
+    if (!widget || widget === panelWidget) return false;
+    return previewParts({ widgets: [widget] }).widgets.length > 0;
+}
+
+/**
+ * Size the node's own output previews (ComfyUI's, under the panel).
+ *
+ * The frontend computes each preview image from the node width, so a wide node means a
+ * giant preview and two of them make the node enormous. This caps them (and puts them side
+ * by side) or hides them, per the panel's preference; `fitNodeToPanel` then sizes the node to
+ * match. Re-applied after each render because the frontend creates/updates the preview
+ * widgets when images arrive.
+ */
+function applyNodePreviews(node, mode) {
+    const part = node?._mmxSheet;
+    const skip = [DOM_WIDGET, DATA_WIDGET];
+    const result = applyPreviewMode(node, mode, { skip });
+    if (part) part.previewMode = result.mode;
+    return result;
+}
+
+/** Apply now, then again as the frontend's own preview widgets settle after a run. */
+function schedulePreviewMode(node) {
+    const part = node?._mmxSheet;
+    if (!part) return;
+    applyNodePreviews(node, part.previewMode || nodePreviews(part.state));
+    for (const delay of FIT_DELAYS) {
+        setTimeout(() => { if (node._mmxSheet) applyNodePreviews(node, node._mmxSheet.previewMode); }, delay);
+    }
 }
 
 function wrapNode(nodeType) {
@@ -409,6 +468,7 @@ function wrapNode(nodeType) {
             // A workflow can be saved either way round: put the knob rows back where the
             // payload says they belong (setState above read the same flag).
             setKnobsVisible(this, !this._mmxSheet.panel.compactKnobs);
+            applyNodePreviews(this, this._mmxSheet.panel.nodePreviews);
             // ...and a saved node size that no longer matches the panel (that is the
             // "node is suddenly enormous" state after a refresh) gets corrected too.
             scheduleFit(this);
