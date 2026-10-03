@@ -88,8 +88,9 @@ export const REF_GROUPS = [
         key: "pictures",
         file: "imageFile",
         label: "Pictures",
+        // The kind is also the icon name: see ICONS (a text glyph used to live here, and
+        // "\u25a3" read as "some box" rather than "a picture").
         kind: "image",
-        icon: "\u25a3",
         slots: 9,
         columns: 3,
         accept: "image/*",
@@ -101,7 +102,6 @@ export const REF_GROUPS = [
         file: "videoFile",
         label: "Videos",
         kind: "video",
-        icon: "\u25b6",
         slots: 3,
         columns: 3,
         accept: "video/*",
@@ -113,7 +113,6 @@ export const REF_GROUPS = [
         file: "audioFile",
         label: "Audios",
         kind: "audio",
-        icon: "\u266a",
         slots: 3,
         columns: 2,
         accept: "audio/*",
@@ -713,7 +712,14 @@ export const PANEL_CSS = `
   color: var(--mmx-build-bright, #ffb95e);
 }
 .mmx-btn--build:active { background: rgba(255, 159, 46, 0.28); }
-.mmx-btn--icon { padding: 2px 6px; }
+/* An SVG icon: block-level so it carries no text baseline, and centred by whatever flex
+   container holds it. These replaced font glyphs and an emoji, which came with their own
+   bearings and sat off-centre inside their buttons with a lot of empty box around them. */
+.mmx-icon { display: block; flex: 0 0 auto; }
+/* Icon buttons are square and sized to the icon: no text baseline, no padding to balance. */
+.mmx-btn--icon {
+  padding: 0; width: 20px; height: 20px; min-height: 0; justify-content: center;
+}
 .mmx-input, .mmx-select {
   font-size: 10px; background: var(--mmx-card-2); color: var(--mmx-fg);
   border: 1px solid var(--mmx-line); border-radius: 6px; padding: 2px 5px;
@@ -770,7 +776,7 @@ export const PANEL_CSS = `
 .mmx-tile--add { border-style: dashed; background: transparent; color: var(--mmx-muted); }
 .mmx-tile--add:hover { border-color: var(--mmx-accent); color: var(--mmx-fg); }
 .mmx-tile--add-empty { aspect-ratio: 16 / 6; }
-.mmx-tile--add .mmx-tile__note b { font-size: 18px; }
+.mmx-tile--add .mmx-tile__note { color: var(--mmx-muted); }
 .mmx-tile--add .mmx-tile__note span { max-width: 100%; }
 .mmx-tile__thumb { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: transparent; }
 /* Top strip: ONE flowing row - kind badge and enable checkbox on the left, the hover
@@ -781,7 +787,8 @@ export const PANEL_CSS = `
 .mmx-tile__top { position: absolute; top: 0; left: 0; right: 0; z-index: 3; display: flex; align-items: center; gap: 4px; padding: 3px 4px; flex-wrap: nowrap; pointer-events: none; }
 .mmx-tile__top > * { pointer-events: auto; }
 .mmx-tile__kind {
-  font-size: 10px; line-height: 1; padding: 2px 4px; border-radius: 4px; flex: 0 0 auto;
+  width: 18px; height: 18px; padding: 0; border-radius: 4px; flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center;
   background: rgba(0,0,0,.66); color: #fff; border: 1px solid rgba(255,255,255,.18);
 }
 .mmx-tile__kind--video { color: #ffd8a8; }
@@ -813,8 +820,7 @@ export const PANEL_CSS = `
 .mmx-paint__canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
 .mmx-paint__canvas.is-idle { cursor: default; }
 .mmx-paint__radius { width: 90px; }
-.mmx-tile__note { display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--mmx-muted); text-align: center; padding: 4px; }
-.mmx-tile__note b { font-size: 16px; font-weight: 500; }
+.mmx-tile__note { display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--mmx-muted); text-align: center; padding: 4px; }
 .mmx-tile__badge {
   position: absolute; right: 0; bottom: 0; z-index: 2;
   background: rgba(0,0,0,.62); color: #fff; font-size: 10px; padding: 0 5px; border-top-left-radius: 6px;
@@ -834,9 +840,16 @@ export const PANEL_CSS = `
    owner each. */
 .mmx-tile__actions {
   position: absolute; top: 3px; right: 3px; z-index: 4; display: flex; flex-direction: column;
-  gap: 3px; opacity: 0; pointer-events: none; transition: opacity .12s;
+  gap: 2px; opacity: 0; pointer-events: none; transition: opacity .12s;
 }
-.mmx-tile__actions .mmx-btn { width: 22px; height: 22px; min-height: 0; padding: 0; font-size: 12px; line-height: 1; }
+/* Sized to the icon it holds (11px mark in an 18px box) and centred by flexbox, so the two
+   buttons read as one small stack over the picture instead of two big grey squares. They also
+   carry their own translucent chip colour, because they sit on a photo, not on the panel. */
+.mmx-tile__actions .mmx-btn {
+  width: 18px; height: 18px; min-height: 0; padding: 0; border-radius: 5px;
+  justify-content: center; background: rgba(0,0,0,.66); border-color: rgba(255,255,255,.18);
+}
+.mmx-tile__actions .mmx-btn:hover { border-color: var(--mmx-accent); background: rgba(0,0,0,.8); }
 .mmx-tile:hover .mmx-tile__actions, .mmx-tile:focus-within .mmx-tile__actions { opacity: 1; pointer-events: auto; }
 /* In the top row, not pinned to a corner: it sits beside the kind badge, so the hover
    actions (far right) and the checkbox (left) can never land on the same pixels. */
@@ -937,10 +950,89 @@ export function button(label, onClick, style = {}) {
     return node;
 }
 
-function iconButton(glyph, title, onClick, extraClass = "") {
-    const node = button(glyph, onClick);
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/**
+ * The panel's icons, as shapes on a 24x24 grid.
+ *
+ * These replaced TEXT glyphs - "\u25a3" for a picture, "\u25b6" for a video, "\u266a" for audio,
+ * an eye EMOJI and "\u2715" - for two reasons one screenshot made obvious. A font glyph arrives
+ * with its own side bearings and baseline, so the mark sits off-centre inside whatever box
+ * holds it (and an emoji is drawn by the OS: a different size, shape and colour per machine).
+ * Stroked paths on a shared grid, centred by flexbox, are centred by construction and are the
+ * same drawing everywhere - and they take `currentColor`, so a chip's tint or a danger red
+ * carries into the icon instead of being overridden by a glyph's own palette.
+ *
+ * Shapes (not markup strings) on purpose: nothing here is parsed as HTML, and a test can
+ * count the geometry it is supposed to have. `fill: none` + `stroke` is what makes them
+ * match the outline style of the buttons they live in.
+ */
+export const ICONS = {
+    image: [
+        ["rect", { x: 3, y: 4, width: 18, height: 16, rx: 2.5 }],
+        ["circle", { cx: 8.6, cy: 9.6, r: 1.6 }],
+        ["path", { d: "M4 16.8l4.7-4.7 4.6 4.6 2.7-2.7 3.7 3.7" }],
+    ],
+    video: [
+        ["rect", { x: 2.6, y: 5.4, width: 18.8, height: 13.2, rx: 2.6 }],
+        ["path", { d: "M10.3 9.2l4.6 2.8-4.6 2.8z" }],
+    ],
+    audio: [
+        ["path", { d: "M9.2 16.8V6.5l9.3-1.9v10.2" }],
+        ["circle", { cx: 6.6, cy: 17.2, r: 2.6 }],
+        ["circle", { cx: 15.9, cy: 15.3, r: 2.6 }],
+    ],
+    preview: [
+        ["path", { d: "M2 12s3.7-6.4 10-6.4S22 12 22 12s-3.7 6.4-10 6.4S2 12 2 12z" }],
+        ["circle", { cx: 12, cy: 12, r: 2.9 }],
+    ],
+    remove: [
+        ["path", { d: "M6.7 6.7l10.6 10.6" }],
+        ["path", { d: "M17.3 6.7L6.7 17.3" }],
+    ],
+    plus: [
+        ["path", { d: "M12 5.6v12.8" }],
+        ["path", { d: "M5.6 12h12.8" }],
+    ],
+};
+
+/**
+ * One icon as an SVG element, sized and stroked with the current text colour.
+ *
+ * `size` is the icon's own box in px, so a caller can say how big the MARK is and let CSS
+ * handle the box around it - which is the other half of the centring problem: the buttons are
+ * sized to the icon rather than the icon being squeezed into a padded text button.
+ */
+export function icon(name, { size = 12, className = "mmx-icon" } = {}) {
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("width", String(size));
+    svg.setAttribute("height", String(size));
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "2");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    for (const part of String(className).split(" ").filter(Boolean)) svg.classList.add(part);
+    for (const [tag, attributes] of ICONS[name] || []) {
+        const shape = document.createElementNS(SVG_NS, tag);
+        for (const [key, value] of Object.entries(attributes)) shape.setAttribute(key, String(value));
+        svg.append(shape);
+    }
+    return svg;
+}
+
+/**
+ * A square icon button: the box is sized to the icon (not to a text line), and the SVG is
+ * centred by flexbox, so the mark cannot drift off-centre the way a glyph does.
+ */
+function iconButton(name, title, onClick, extraClass = "", { size = 12, label = "" } = {}) {
+    const node = button(label, onClick);
     node.classList.add("mmx-btn--icon");
     if (extraClass) node.classList.add(extraClass);
+    node.append(icon(name, { size }));
     node.title = title;
     node.setAttribute("aria-label", title);
     return node;
@@ -2153,10 +2245,9 @@ export function buildSheetInterface({ state, hooks = {} }) {
             else media.addEventListener(group.kind === "image" ? "load" : "loadedmetadata", read, { once: true });
             box.append(media);
         } else {
-            box.append(element("div", { className: "mmx-tile__note" }, {}, [
-                element("b", { textContent: group.icon }),
-                element("span", { textContent: slot.file.split("/").pop(), className: "mmx-muted" }),
-            ]));
+            // No element to show (audio has no thumbnail): the icon alone. The filename is
+            // already the tile's caption below, and saying it twice was pure noise.
+            box.append(element("div", { className: "mmx-tile__note" }, {}, [icon(group.kind, { size: 22 })]));
         }
         // Bottom-left corner: the filename for a video / audio tile, and for a picture the
         // face-blur toggle. "auto" means "blur this unless it is the identity reference".
@@ -2187,9 +2278,9 @@ export function buildSheetInterface({ state, hooks = {} }) {
         const top = element("div", { className: "mmx-tile__top" });
         const active = slot.enabled !== false;
         const kindChip = element("span", {
-            textContent: group.icon,
             className: `mmx-tile__kind mmx-tile__kind--${group.kind}`,
         });
+        kindChip.append(icon(group.kind, { size: 12 }));
         kindChip.title = active
             ? `${group.label} reference - number ${ordinal} of ${group.slots}`
             : `${group.label} reference - unchecked, not sent to the render`;
@@ -2217,11 +2308,11 @@ export function buildSheetInterface({ state, hooks = {} }) {
         const actions = element("div", { className: "mmx-tile__actions" });
         if (slot.file) {
             actions.append(
-                iconButton("\ud83d\udc41", "Preview", (event) => {
+                iconButton("preview", "Preview", (event) => {
                     event.stopPropagation();
                     openPreview(group, index);
                 }),
-                iconButton("\u2715", "Remove this reference", (event) => {
+                iconButton("remove", "Remove this reference", (event) => {
                     event.stopPropagation();
                     state.refs[group.key][index] = { file: "", role: slot.role, enabled: false };
                     persist();
@@ -2301,7 +2392,7 @@ export function buildSheetInterface({ state, hooks = {} }) {
         box.tabIndex = 0;
         box.title = "Add pictures, video or audio - drop files here, or click to browse";
         box.append(element("div", { className: "mmx-tile__note" }, {}, [
-            element("b", { textContent: "+" }),
+            icon("plus", { size: 20 }),
             element("span", {
                 textContent: empty ? "Add Media - drop pictures, video or audio here" : "Add Media",
                 className: "mmx-muted",
@@ -3093,15 +3184,15 @@ export function buildSheetInterface({ state, hooks = {} }) {
                         card.append(element("img", { src: viewUrl(item.url), alt: item.name, loading: "lazy" }));
                     } else {
                         card.append(element("div", { className: "mmx-tile__note" }, {}, [
-                            element("b", { textContent: item.kind === "video" ? "🎬" : "♪" }),
+                            icon(item.kind, { size: 22 }),
                             element("span", { textContent: item.kind, className: "mmx-muted" }),
                         ]));
                     }
                     // Which kind this is, so one picker can serve all three.
                     const chip = element("span", {
-                        textContent: item.kind === "video" ? "\u25b6" : item.kind === "audio" ? "\u266a" : "\u25a3",
                         className: `mmx-tile__kind mmx-tile__kind--${item.kind}`,
                     }, { position: "absolute", top: "4px", left: "4px" });
+                    chip.append(icon(item.kind, { size: 12 }));
                     card.style.position = "relative";
                     card.append(chip, element("span", { textContent: item.name }));
                     card.addEventListener("click", () => {
@@ -3326,12 +3417,11 @@ export function buildSheetInterface({ state, hooks = {} }) {
                 persist();
                 refresh();
             });
-            const remove = button("✕", () => {
+            const remove = iconButton("remove", "Remove this cell", () => {
                 state.cells.splice(index, 1);
                 persist();
                 refresh();
-            });
-            remove.classList.add("mmx-btn--icon", "mmx-btn--danger");
+            }, "mmx-btn--danger");
             const continuityBadge = selectBox(
                 CELL_CONTINUITY_LABELS,
                 cellContinuity(cell),

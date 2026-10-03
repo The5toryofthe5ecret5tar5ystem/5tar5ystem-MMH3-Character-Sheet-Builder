@@ -212,6 +212,13 @@ ok.push("per-tile face blur: auto -> on -> off, pictures only");
     assert.ok(!box.querySelector(".mmx-tile__name"), "replacing the filename there, not adding to it");
     assert.ok(gridTiles()[1].querySelector(".mmx-tile__name"),
         "a video keeps its filename: nothing to blur there");
+    // The audio tile has no thumbnail, so it shows the kind icon - and its filename in ONE
+    // place (the caption), which used to be repeated inside the placeholder.
+    const audioTile = gridTiles()[2];
+    assert.ok(audioTile.querySelector(".mmx-tile__note svg"), "the audio tile draws the kind icon");
+    assert.equal(audioTile.querySelectorAll(".mmx-tile__name").length, 1);
+    assert.ok(!audioTile.querySelector(".mmx-tile__note span"),
+        "and does not say the filename twice");
     const rule = /\.mmx-tile__blur \{([^}]*)\}/.exec(core.PANEL_CSS);
     assert.ok(rule && /bottom:\s*3px/.test(rule[1]) && /left:\s*4px/.test(rule[1]),
         "pinned to the bottom-left corner on purpose");
@@ -644,6 +651,85 @@ ok.push("an empty node renders (and can materialise) exactly what the ticks ask 
     assert.equal(core.readState(JSON.stringify({ render: { background: "reference", backgroundRef: "pictures:0" } }))
         .backgroundRef, "pictures:0");
     ok.push("reference backdrop: picker numbers references like the prompt, round-trips the choice");
+}
+
+// --- icons: drawn, not typed --------------------------------------------------
+// The tile badges and the hover actions used to be TEXT glyphs ("▣" for a picture, "▶", "♪",
+// an eye emoji, "✕"). A glyph brings its own bearings and baseline, so the mark sat
+// off-centre in its button and the button had to be much bigger than the mark to look
+// balanced - and an emoji is drawn by the OS, so it looked different on every machine.
+{
+    for (const name of ["image", "video", "audio", "preview", "remove", "plus"]) {
+        const svg = core.icon(name, { size: 14 });
+        assert.equal(svg.namespaceURI, "http://www.w3.org/2000/svg", `${name} is real SVG`);
+        assert.equal(svg.getAttribute("viewBox"), "0 0 24 24", `${name} shares the icon grid`);
+        assert.equal(svg.getAttribute("width"), "14", "sized by the caller");
+        assert.equal(svg.getAttribute("stroke"), "currentColor",
+            "an icon takes the colour of the box around it (chip tint, danger red)");
+        assert.equal(svg.getAttribute("fill"), "none");
+        assert.ok(core.ICONS[name].length >= 2, `${name} is drawn from several shapes`);
+        assert.equal(svg.childElementCount, core.ICONS[name].length);
+        assert.equal(svg.textContent, "", "an icon contributes no text");
+    }
+    assert.equal(core.icon("nonsense").childElementCount, 0, "an unknown name is empty, not a crash");
+    for (const glyph of ["\u25a3", "\u25b6", "\u266a", "\u2715", "\u266b"]) {
+        assert.ok(!core.PANEL_CSS.includes(glyph), `no font glyph (${glyph}) is styled as an icon`);
+    }
+    // The boxes are sized to the mark and centred by flexbox: that is what keeps the icon and
+    // its chip concentric, which a glyph baseline cannot promise at any font.
+    const iconRule = core.PANEL_CSS.slice(core.PANEL_CSS.indexOf(".mmx-btn--icon"),
+        core.PANEL_CSS.indexOf(".mmx-input, .mmx-select"));
+    assert.ok(/justify-content:\s*center/.test(iconRule), "an icon button centres its icon");
+    assert.ok(/width:\s*20px/.test(iconRule) && /height:\s*20px/.test(iconRule),
+        "and is square, sized to the icon rather than to a text line");
+    const stackRule = core.PANEL_CSS.slice(core.PANEL_CSS.indexOf(".mmx-tile__actions .mmx-btn"),
+        core.PANEL_CSS.indexOf(".mmx-tile:hover .mmx-tile__actions"));
+    assert.ok(/width:\s*18px/.test(stackRule) && /justify-content:\s*center/.test(stackRule),
+        "the tile's hover buttons are 18px squares around an 11px mark");
+    assert.ok(!/font-size/.test(stackRule), "nothing about them depends on a font any more");
+    assert.ok(/position:\s*absolute/.test(core.PANEL_CSS.slice(core.PANEL_CSS.indexOf(".mmx-tile__actions {"),
+        core.PANEL_CSS.indexOf(".mmx-tile:hover .mmx-tile__actions"))), "and they stay pinned to the corner");
+    ok.push("icons are drawn SVG on one grid, centred in boxes sized to the mark");
+}
+
+// --- the tile badges and hover buttons USE those icons ------------------------
+{
+    const iconState = core.readState(JSON.stringify({
+        refs: {
+            pictures: [{ imageFile: "face.png", role: "face and hair" }],
+            videos: [{ videoFile: "clip.mp4", role: "clothing" }],
+            audios: [{ audioFile: "voice.wav", role: "voice" }],
+        },
+    }));
+    const panel = core.buildSheetInterface({ state: iconState, hooks: { status: () => {} } });
+    const chips = [...panel.container.querySelectorAll(".mmx-tile__kind")];
+    assert.equal(chips.length, 3, "one kind badge per reference kind");
+    for (const chip of chips) {
+        const svg = chip.querySelector("svg");
+        assert.ok(svg, "the kind badge is an icon, not a character");
+        assert.equal(chip.textContent, "", "and carries no glyph text at all");
+        assert.equal(svg.getAttribute("width"), "12",
+            "a 12px mark in the 18px chip: the icon reads as the icon, the box as its background");
+        assert.ok(["image", "video", "audio"].some((kind) => chip.classList.contains(`mmx-tile__kind--${kind}`)),
+            "tinted by kind, which the icon inherits");
+    }
+    const actions = [...panel.container.querySelectorAll(".mmx-tile__actions .mmx-btn")];
+    assert.equal(actions.length, 6, "two hover buttons per filled tile");
+    const titles = actions.map((button) => button.title);
+    for (const wanted of ["Preview", "Remove this reference"]) {
+        assert.ok(titles.includes(wanted), `${wanted} is still offered`);
+    }
+    for (const button of actions) {
+        assert.equal(button.childElementCount, 1, "the button holds exactly one icon");
+        assert.equal(button.firstElementChild.tagName.toLowerCase(), "svg");
+        assert.equal(button.firstElementChild.getAttribute("width"), "12", "and the same 12px mark");
+        assert.equal(button.textContent, "", "and no text");
+        assert.ok(button.getAttribute("aria-label"), "icon-only buttons keep a label for screen readers");
+    }
+    // The add tile's "+" is an icon too, so the whole grid draws the same way.
+    const addNote = panel.container.querySelector(".mmx-tile--add .mmx-tile__note");
+    assert.ok(addNote.querySelector("svg"), "the Add Media tile draws its plus");
+    ok.push("reference tiles draw image/video/audio, eye and X as SVG (nothing typed)");
 }
 
 // --- the ticks are part of the payload -----------------------------------------
