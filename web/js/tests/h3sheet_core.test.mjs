@@ -1917,13 +1917,93 @@ ok.push("reorder / slot helpers behave");
     });
     const select = previewPanel.container.querySelector('[data-action="node-previews"]');
     assert.ok(select, "the Results tab offers a node-preview control");
-    assert.deepEqual([...select.options].map((o) => o.value), ["compact", "full", "off"]);
+    assert.deepEqual([...select.options].map((o) => o.value), ["compact", "width", "full", "off"]);
     assert.equal(select.value, "compact");
     select.value = "off";
     select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
     assert.deepEqual(previewCalls, ["off"], "the wiring is asked to resize them");
     assert.equal(previewState.nodePreviews, "off", "and the choice is remembered");
     ok.push("node previews: capped and side by side, hidden, or ComfyUI's own size");
+}
+
+// --- full width: the height is what decides the width ----------------------------
+// ComfyUI contains a preview inside the box the layout gives it and never upscales it
+// (`calculateImageGrid` and `renderPreview` both do `min(scaleX, scaleY, 1)`), so a 200px-tall
+// box can only ever draw a wide sheet ~355px wide however wide the node is. The `width` mode
+// therefore asks for the height the media's own aspect needs at this node width, which makes
+// the height the limiting scale and puts the media exactly on the node's width.
+{
+    const owner = { size: [1000, 700], imgs: [{ naturalWidth: 3840, naturalHeight: 2160 }] };
+    const canvasWidget = { name: core.PREVIEW_CANVAS_IMAGE_WIDGET, options: {} };
+
+    assert.ok(core.NODE_PREVIEW_MODES.includes("width"), "the mode exists");
+    assert.equal(core.nodePreviews({ nodePreviews: "width" }), "width");
+    assert.equal(core.previewHeight("width"), 0,
+        "its height comes from the media, so the fit reads the widget's own computedHeight");
+
+    // The aspect is asked of whatever the widget actually holds.
+    assert.equal(core.previewMediaAspect(owner, canvasWidget), 3840 / 2160,
+        "the canvas image widget has no element: its media lives on node.imgs");
+    const imgEl = document.createElement("img");
+    Object.defineProperty(imgEl, "naturalWidth", { value: 1024 });
+    Object.defineProperty(imgEl, "naturalHeight", { value: 1024 });
+    const imgWrap = document.createElement("div");
+    imgWrap.append(imgEl);
+    const imgWidget = { name: core.PREVIEW_ANIMATION_WIDGET, element: imgWrap, options: {} };
+    assert.equal(core.previewMediaAspect(owner, imgWidget), 1, "the sequence widget holds an <img>");
+    const videoEl = document.createElement("video");
+    Object.defineProperty(videoEl, "videoWidth", { value: 288 });
+    Object.defineProperty(videoEl, "videoHeight", { value: 512 });
+    const videoWrap = document.createElement("div");
+    videoWrap.append(videoEl);
+    const videoWidget = { name: core.PREVIEW_VIDEO_WIDGET, element: videoWrap, options: {} };
+    assert.equal(core.previewMediaAspect(owner, videoWidget), 288 / 512,
+        "a video answers with its real pixel size");
+    assert.equal(core.previewMediaAspect(owner, { name: core.PREVIEW_VIDEO_WIDGET, options: {} }), 16 / 9,
+        "nothing known: a sane default instead of a guess from nothing");
+
+    // Height = node width / aspect (+ a small slack so the fit is width-limited), clamped.
+    assert.equal(core.previewWidthHeight(owner, canvasWidget), 563 + core.PREVIEW_WIDTH_SLACK,
+        "1000px of 16:9, plus the slack that keeps the fit width-limited");
+    const tall = { size: [1000, 700], imgs: [{ naturalWidth: 9, naturalHeight: 16 }] };
+    assert.equal(core.previewWidthHeight(tall, canvasWidget), core.PREVIEW_WIDTH_MAX_HEIGHT,
+        "a portrait clip is capped instead of making a 1780px node");
+    const pano = { size: [1000, 700], imgs: [{ naturalWidth: 40, naturalHeight: 1 }] };
+    assert.equal(core.previewWidthHeight(pano, canvasWidget), core.PREVIEW_WIDTH_MIN_HEIGHT);
+
+    // Applying it: no cap class (the media fills the host), the layout height is the aspect's,
+    // and it FOLLOWS a resize instead of freezing the height it was installed with.
+    const widthHost = document.createElement("div");
+    widthHost.className = core.PREVIEW_HOST_CLASS;
+    const widthHostWidget = { name: "some-preview-host", element: widthHost, options: {} };
+    const widthNode = {
+        size: [1000, 700],
+        imgs: [{ naturalWidth: 3840, naturalHeight: 2160 }],
+        widgets: [widthHostWidget],
+        setDirtyCanvas() {},
+    };
+    const applied = core.applyPreviewMode(widthNode, "width", {});
+    assert.equal(applied.mode, "width");
+    assert.ok(!widthHost.classList.contains(core.PREVIEW_COMPACT_CLASS),
+        "no fixed-height rule: the frontend's own img/video rules fill the host instead");
+    assert.deepEqual(widthHostWidget.computeLayoutSize(), { minHeight: 579, maxHeight: 579, minWidth: 1 });
+    widthNode.size = [1600, 700];
+    assert.equal(widthHostWidget.computeLayoutSize().minHeight, core.PREVIEW_WIDTH_MAX_HEIGHT,
+        "1600px of 16:9 would be 900px tall, so the cap trims it (still far wider than 355px)");
+    widthNode.size = [1000, 700];
+    assert.equal(widthHostWidget.computeLayoutSize().minHeight, 579);
+
+    // The keeper is quiet while the height is right, and pulls back an inflated one.
+    assert.equal(core.enforcePreviewCaps(widthNode, "width", {}).changed, 0,
+        "a correct full-width preview is left alone");
+    widthHostWidget.computedHeight = 1400;
+    assert.equal(core.enforcePreviewCaps(widthNode, "width", {}).changed, 1, "an inflated one is fixed");
+    assert.equal(widthHostWidget.computedHeight, 579);
+
+    // And `full` still hands the widget's own function back.
+    core.applyPreviewMode(widthNode, "full", {});
+    assert.equal("computeLayoutSize" in widthHostWidget, false);
+    ok.push("node previews: full width - the height is computed from the media's aspect");
 }
 
 // --- the one button that creates the render is visibly different -----------------

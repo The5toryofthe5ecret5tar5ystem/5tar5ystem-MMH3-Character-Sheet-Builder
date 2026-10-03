@@ -253,7 +253,7 @@ export const KNOB_COLUMNS = 3;
  * build makes that a glance instead of an investigation; a test keeps it in step with the
  * import, so bumping one without the other fails the suite rather than confusing a user.
  */
-export const PANEL_BUILD = "h3sheet_v44";
+export const PANEL_BUILD = "h3sheet_v45";
 
 /** The frontend's own widget/host names, straight from the shipped frontend bundle. */
 export const PREVIEW_HOST_CLASS = "comfy-img-preview";
@@ -280,12 +280,29 @@ export const PREVIEW_RULE_ID = "mmx-preview-compact-rule";
 /** Height of one preview in `compact` mode (px): enough to judge a face, not the node. */
 export const PREVIEW_COMPACT_HEIGHT = 200;
 
-/** `compact` = small and side by side (default), `full` = what ComfyUI does, `off` = none. */
-export const NODE_PREVIEW_MODES = ["compact", "full", "off"];
+//: The tallest a `width` preview may get. Full width means the height the media's own aspect
+//: needs at this node width - ~560px for a 16:9 sheet in a 1000px node, and ~1780px for a
+//: portrait cell clip, which is a node nobody wants. Past this the preview is centred instead
+//: (see previewWidthHeight): a portrait clip is never going to fill a wide node anyway.
+export const PREVIEW_WIDTH_MAX_HEIGHT = 720;
+
+/** The shortest a `width` preview may get, so a panorama is still a preview. */
+export const PREVIEW_WIDTH_MIN_HEIGHT = 120;
+
+//: Slack added to the computed height (px). The two paths that draw a preview both shave the box
+//: before fitting the media into it - the DOM grid asks for `node.size[0] - 20` and the canvas
+//: renderer reserves 15px when the size label is on - and the fit is a `min(scaleX, scaleY)`:
+//: being a few px SHORT turns a full-width preview into a centred one, while being a few px TALL
+//: only letterboxes it. So err long.
+export const PREVIEW_WIDTH_SLACK = 16;
+
+/** `compact` = small and side by side (default), `width` = fills the node width, `off` = none. */
+export const NODE_PREVIEW_MODES = ["compact", "width", "full", "off"];
 export const DEFAULT_NODE_PREVIEWS = "compact";
 
 export const NODE_PREVIEW_LABELS = [
     ["compact", "Small (side by side)"],
+    ["width", "Full width (stacked)"],
     ["full", "Full size (ComfyUI default)"],
     ["off", "Hidden"],
 ];
@@ -335,23 +352,84 @@ export function previewParts(node, { skip = [] } = {}) {
  * ignored it too). Overriding the widget's own function is the one lever that works for all
  * three kinds; the original is kept, so ``full`` hands the node back exactly what it had.
  */
-export function capPreviewWidget(widget, mode) {
+export function capPreviewWidget(widget, mode, owner = null) {
     if (!widget) return false;
     if (!Object.prototype.hasOwnProperty.call(widget, "_mmxLayoutSize")) {
         widget._mmxLayoutSize = widget.computeLayoutSize || null;
     }
     const original = widget._mmxLayoutSize;
-    if (nodePreviews({ nodePreviews: mode }) === "full") {
+    const wanted = nodePreviews({ nodePreviews: mode });
+    if (wanted === "full") {
         if (original) widget.computeLayoutSize = original;
         else delete widget.computeLayoutSize;
         return true;
     }
-    const height = nodePreviews({ nodePreviews: mode }) === "off" ? 0 : PREVIEW_COMPACT_HEIGHT;
+    if (wanted === "width") {
+        // Recomputed on every call, not frozen at install time: the node is resizable, and a
+        // full-width preview has to follow the width it is filling.
+        const node = owner || widget.node || null;
+        widget.computeLayoutSize = () => {
+            const height = previewWidthHeight(node, widget);
+            return { minHeight: height, maxHeight: height, minWidth: 1 };
+        };
+        return true;
+    }
+    const height = wanted === "off" ? 0 : PREVIEW_COMPACT_HEIGHT;
     widget.computeLayoutSize = () => ({ minHeight: height, maxHeight: height, minWidth: 1 });
     return true;
 }
 
-/** How tall a node preview should be in `mode` - the fit uses this to size the node. */
+/**
+ * The media aspect ratio (width / height) of one preview widget, or 16/9 when unknown.
+ *
+ * The three kinds hold their media differently, so each is asked the way it can answer:
+ * a `video-preview` widget holds a `<video>` (its `videoWidth`/`videoHeight` are the real
+ * pixels), the still-image host holds an `<img>` (`naturalWidth`/`naturalHeight`), and the
+ * canvas image widget has NO element at all - its media lives on the node as `node.imgs`.
+ * A missing answer falls back to 16/9 rather than guessing, and jsdom (no media at all)
+ * exercises that path.
+ */
+export function previewMediaAspect(node, widget) {
+    const element = widget?.element || widget?.inputEl || null;
+    const video = element?.querySelector?.("video") || null;
+    const videoWidth = Number(video?.videoWidth) || 0;
+    const videoHeight = Number(video?.videoHeight) || 0;
+    if (videoWidth > 0 && videoHeight > 0) return videoWidth / videoHeight;
+    const img = element?.querySelector?.("img") || null;
+    const naturalWidth = Number(img?.naturalWidth) || 0;
+    const naturalHeight = Number(img?.naturalHeight) || 0;
+    if (naturalWidth > 0 && naturalHeight > 0) return naturalWidth / naturalHeight;
+    const images = node?.imgs || null;
+    const still = images?.[Number(node?.imageIndex) || 0] || images?.[0] || null;
+    const stillWidth = Number(still?.naturalWidth) || 0;
+    const stillHeight = Number(still?.naturalHeight) || 0;
+    if (stillWidth > 0 && stillHeight > 0) return stillWidth / stillHeight;
+    return 16 / 9;
+}
+
+/**
+ * How tall one preview must be to fill the node's width (px, clamped to the band).
+ *
+ * This is what makes full width possible at all. ComfyUI CONTAINS a preview inside the box
+ * the layout hands it and never upscales it (`calculateImageGrid` and `renderPreview` both do
+ * `min(scaleX, scaleY, 1)`), so the drawn width is decided by the HEIGHT: a 200px-tall box can
+ * only ever show a wide sheet ~355px wide, whatever the node's width is. Asking for
+ * `width / aspect` makes scaleY the limiting one, i.e. the media lands exactly on the node's
+ * width.
+ */
+export function previewWidthHeight(node, widget) {
+    const width = Math.max(80, Number(node?.size?.[0]) || 0);
+    const aspect = previewMediaAspect(node, widget) || 16 / 9;
+    const height = Math.round(width / aspect) + PREVIEW_WIDTH_SLACK;
+    return Math.max(PREVIEW_WIDTH_MIN_HEIGHT, Math.min(PREVIEW_WIDTH_MAX_HEIGHT, height));
+}
+
+/** How tall a node preview should be in `mode` - the fit uses this to size the node.
+ *
+ * `compact` is a fixed number the fit can add up. `width` answers 0 on purpose: its height
+ * comes from the aspect and the node's width, so the widget's own `computedHeight` (which the
+ * layout just set from our function) is the number the fit should use.
+ */
 export function previewHeight(mode) {
     return nodePreviews({ nodePreviews: mode }) === "compact" ? PREVIEW_COMPACT_HEIGHT : 0;
 }
@@ -410,6 +488,10 @@ export function applyPreviewMode(node, mode, { skip = [] } = {}) {
             host.classList?.add(PREVIEW_COMPACT_CLASS);
             host.style.display = "";
         } else {
+            // `width` deliberately goes through this branch: the host is sized by the layout
+            // (which is asking for the height the aspect needs), and the frontend's own
+            // `.comfy-img-preview img/video` rules then fill it - `object-fit: contain`
+            // letterboxes at worst, and with the right height there is nothing to letterbox.
             host.classList?.remove(PREVIEW_COMPACT_CLASS);
             host.style.display = wanted === "off" ? "none" : "";
         }
@@ -418,7 +500,7 @@ export function applyPreviewMode(node, mode, { skip = [] } = {}) {
         const element = widget.element || widget.inputEl || null;
         // The layout's own lever, for every kind of preview widget - the DOM options below are
         // only read by the generic DOM widget, and the still image is not a DOM widget at all.
-        capPreviewWidget(widget, wanted);
+        capPreviewWidget(widget, wanted, node);
         if (wanted === "off") {
             if (widget._mmxPreviewSize === undefined) widget._mmxPreviewSize = widget.computeSize || null;
             element?.classList?.remove?.(PREVIEW_COMPACT_CLASS);
@@ -473,13 +555,27 @@ export function enforcePreviewCaps(node, mode, { skip = [] } = {}) {
     const wanted = nodePreviews({ nodePreviews: mode });
     const { widgets } = previewParts(node, { skip });
     if (wanted === "full") return { mode: wanted, changed: 0 };
-    const cap = wanted === "off" ? 0 : PREVIEW_COMPACT_HEIGHT;
     let changed = 0;
     for (const widget of widgets) {
+        // The height this widget SHOULD have in this mode. `width` recomputes from the node's
+        // current width and the media's aspect, so a resize is corrected on the next pass.
+        const cap = wanted === "off"
+            ? 0
+            : (wanted === "width" ? previewWidthHeight(node, widget) : PREVIEW_COMPACT_HEIGHT);
         const before = typeof widget.computeLayoutSize === "function" ? widget.computeLayoutSize() : null;
-        capPreviewWidget(widget, wanted);
+        capPreviewWidget(widget, wanted, node);
         const after = typeof widget.computeLayoutSize === "function" ? widget.computeLayoutSize() : null;
-        if (!before || !after || before.minHeight !== after.minHeight || before.maxHeight !== after.maxHeight) {
+        // "Changed" drives the node re-fit, so it has to answer both questions: is the bound
+        // wrong (`after !== cap`, e.g. this mode's height moved with a resize), and did THIS
+        // pass install it (`before !== after`, e.g. a widget the frontend created late)? Only
+        // the second one is true on the pass that caps a fresh widget, and only the first is
+        // true after a resize - both have to re-sit the node, and neither fires when the
+        // preview is already exactly as this mode wants it.
+        if (
+            !before || !after
+            || after.minHeight !== cap || after.maxHeight !== cap
+            || before.minHeight !== after.minHeight || before.maxHeight !== after.maxHeight
+        ) {
             changed += 1;
         }
         if (wanted === "off") {
@@ -490,7 +586,7 @@ export function enforcePreviewCaps(node, mode, { skip = [] } = {}) {
             }
             continue;
         }
-        // A height above the cap means something re-arranged after the cap went in.
+        // A height above what this mode asked for means something re-arranged afterwards.
         if (Number(widget.computedHeight) > cap + 4) {
             widget.computedHeight = cap;
             changed += 1;
@@ -1849,9 +1945,10 @@ export function buildSheetInterface({ state, hooks = {} }) {
             state.nodePreviews = nodePreviews({ nodePreviews: value });
             hooks.setPreviewMode?.(state.nodePreviews);
             persist();
+            const label = (NODE_PREVIEW_LABELS.find(([id]) => id === state.nodePreviews) || [])[1];
             notify(state.nodePreviews === "off"
                 ? "node previews hidden - the Results tab still has the sheet and the frames"
-                : `node previews: ${state.nodePreviews === "compact" ? "small, side by side" : "ComfyUI's own size"}`);
+                : `node previews: ${String(label || state.nodePreviews).toLowerCase()}`);
         },
     );
     previewSelect.dataset.action = "node-previews";

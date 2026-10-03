@@ -225,15 +225,24 @@ space) - so 24 knobs cost roughly 500px of node height that the grid fits into ~
 
 ### Node previews (the same Settings tab)
 
-ComfyUI's own output previews under the node are sized by the frontend: an image preview is as
-wide as the node, and two of them stack into a very tall node. The **previews** selector next
-to *Compact node* changes that:
+ComfyUI's own output previews under the node are sized by the frontend, and two of them stack into a
+very tall node. The **previews** selector next to *Compact node* changes that:
 
 | Mode | What it does |
 | --- | --- |
 | **Small (side by side)** (default) | Caps the sheet preview and the cell-clip preview at 200px tall, width following each media's own shape - so the node stays the height of its panel and two previews sit next to each other instead of stacking. |
-| **Full size (ComfyUI default)** | Hands the previews back to ComfyUI's own sizing (the pack restores each widget's original layout function). |
+| **Full width (stacked)** | Gives each preview the height its own aspect ratio needs for the node's current width, so the media fills the width edge to edge (~580px for a 16:9 sheet in a 1000px node). Two previews stack, because two full-width images cannot sit side by side. Follows the node when it is resized, and stops at 720px tall - a portrait cell clip would otherwise ask for ~1780px. |
+| **Full size (ComfyUI default)** | Hands the previews back to ComfyUI's own sizing (the pack restores each widget's original layout function). The preview then takes whatever height the node has left over, which is why it can be much taller than the media needs. |
 | **Hidden** | No node previews at all; the **Results** tab is the viewer. |
+
+**Why the compact cap cannot also be full width.** ComfyUI *contains* a preview inside the box the
+layout hands it and never upscales it - both the grid calculation and the canvas draw end in
+`min(scaleX, scaleY, 1)`. The drawn width is therefore decided by the **height**: a 200px-tall box can
+only ever show a 16:9 sheet ~355px wide, however wide the node is. *Full width* works by asking for the
+height (node width ÷ aspect), which makes the height the limiting scale and puts the media exactly on
+the node's width. Two consequences worth knowing: an image narrower than the node is shown at its own
+size rather than stretched, and a preview taller than the 720px cap is centred instead of filling the
+width.
 
 That needed three different levers, because this frontend draws the three kinds of preview
 differently: a still image is an `ImagePreviewWidget` drawn **on the canvas** (`$$canvas-image-preview` -
@@ -243,7 +252,9 @@ laid out by asking the widget for `computeLayoutSize()`, and an undefined `maxHe
 "unbounded" - the widget then absorbs every pixel of node height left over, which is why capping only
 the DOM kinds left the still image a ~900px-tall node. The pack bounds that function on all three
 (remembering the original, so *Full size* puts it back) and additionally caps the media inside the DOM
-kinds with one stylesheet rule.
+kinds with one stylesheet rule. The height a *Full width* preview asks for is measured from whatever the
+widget actually holds - a `<video>` reports `videoWidth`/`videoHeight`, the still-image host an `<img>`
+with `naturalWidth`, and the canvas widget has no element at all, so its media is read from `node.imgs`.
 
 The bound is re-asserted **on every draw pass** of the node, not just when the run ends: the frontend
 creates those widgets when the image finishes loading (seconds after a run on a big sheet), which is
