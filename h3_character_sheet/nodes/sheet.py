@@ -43,7 +43,8 @@ from ..planner import (
     work_summary,
 )
 from ..name_tokens import expand_tokens, has_tokens
-from ..preview_silence import silence_model_previews
+from ..preview_stream import EVENT as PREVIEW_EVENT
+from ..preview_stream import attach_sheet_preview
 from ..sheet_plan import drop_empty_payload_warning, plan_payload
 from ..sheet_spec import (
     CELL_ASPECTS,
@@ -89,6 +90,7 @@ def build_sheet_graph(
     export_video: bool = True,
     clip_fps: float = CLIP_FPS,
     comfy_preview: bool = False,
+    live_preview: bool = True,
     node_id: Any = None,
 ) -> tuple[Any, Any, Any]:
     """Build the expansion; returns the (sheet, cells, report) output links.
@@ -96,11 +98,19 @@ def build_sheet_graph(
     Split out of ``execute`` so the wiring can be asserted in tests without a GPU:
     it only builds graph nodes.
     """
-    # No ComfyUI preview for a sheet render: the pack draws the sheet in its own panel, and the
-    # sampler's own per-step preview is what puts a preview area under the node at all (see
-    # preview_silence). Wrapped BEFORE the sigma shift so every cell inherits it.
-    if not comfy_preview:
-        model = silence_model_previews(model, node_id=node_id)
+    # Previews, one decision on the model every cell samples through and therefore before the
+    # sigma shift: the pack streams its OWN per-step frame to the panel (live_preview, on by
+    # default) and mutes ComfyUI's own stream (see preview_stream / preview_silence).
+    # `render.comfyPreview: true` keeps ComfyUI's stream as well.
+    if live_preview or not comfy_preview:
+        model = attach_sheet_preview(
+            model,
+            mute=not comfy_preview,
+            stream=live_preview,
+            name=str(name or ""),
+            cells_total=len(work_items),
+            node_id=node_id,
+        )
 
     shifted_model = graph.node(
         "MiniMaxH3SigmaShift",
@@ -599,6 +609,7 @@ class MiniMaxH3CharacterSheet(io.ComfyNode):
             scheduler=str(scheduler),
             export_video=bool(spec.render.export_video),
             comfy_preview=bool(spec.render.comfy_preview),
+            live_preview=bool(spec.render.live_preview),
         )
         for line in work_summary(spec, work_items):
             log.info("Character sheet: %s", line)
@@ -606,6 +617,22 @@ class MiniMaxH3CharacterSheet(io.ComfyNode):
             log.info("Character sheet: %s", line)
         if blur_lines:
             report = f"{report}\n\n" + "\n".join(blur_lines)
+        # Say where to look while it runs: the panel's own preview is the only place a sheet
+        # render is visible before it finishes, and both halves are switches.
+        preview_lines = []
+        if spec.render.live_preview:
+            preview_lines.append(
+                f"Live preview: on - one frame per step to the panel ('{PREVIEW_EVENT}' events)."
+            )
+        else:
+            preview_lines.append("Live preview: off (render.livePreview).")
+        preview_lines.append(
+            "ComfyUI's own preview: kept (render.comfyPreview)." if spec.render.comfy_preview
+            else "ComfyUI's own preview: muted - the panel shows the sheet and this stream."
+        )
+        report = f"{report}\n\n" + "\n".join(preview_lines)
+        for line in preview_lines:
+            log.info("Character sheet: %s", line)
         return io.NodeOutput(sheet, cells, report, expand=graph.finalize())
 
 

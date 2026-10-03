@@ -267,7 +267,8 @@ sends it from the progress hook as a binary websocket frame. So a sheet render w
 an `OUTER_SAMPLE` wrapper (`h3_character_sheet/preview_silence.py`) that swaps
 `decode_latent_to_preview_image` for a no-op while sampling runs and restores it in a `finally`,
 leaving the progress callback (and the progress bar) untouched. That is the lever KJNodes'
-*Model Preview Override* uses for its `suppress_default_preview`.
+*Model Preview Override* uses for its `suppress_default_preview` - and this pack now *replaces* that
+stream with the live strip above rather than just silencing it.
 
 Two things worth knowing:
 
@@ -288,7 +289,37 @@ installed) and streams its own preview to its own panel widget, independent of t
 default) / `Full width`. It sizes the sheet image the **panel** draws in its Results tab - the sheet
 plus the newest cell clip, both served from the output folder, both openable full size by clicking.
 Two independent knobs on purpose: the node can keep a small ComfyUI preview while the panel shows a
-big one, or the other way round.
+big one, or the other way round. `Off` also switches off the live strip below.
+
+**The live strip: a frame per sampling step.** From *queued* to the finished sheet there is a wait,
+and a sheet render is legible while it runs: the node streams one small frame per step to its own
+panel, drawn above the tabs as a `LIVE` strip with `cell 2/5 · step 4/8 · 3 frames` beside it. The
+strip opens the moment a run starts (holding the frame's space, so the node settles its height once
+rather than when the first frame lands) and closes when the run ends - the finished sheet takes over
+in Results.
+
+How it works, because it is a chain of three facts worth knowing when it misbehaves:
+
+* The sampler's callback is the only place a render is legible mid-flight, and an `OUTER_SAMPLE`
+  wrapper (`h3_character_sheet/preview_stream.py`) is the only place to stand in front of it. The
+  callback is handed H3's latent in the sampler's own **flat packed** form - `(B, 1, N)`, every
+  stream's features in one row - so the frame is taken by unpacking it with the `latent_shapes` the
+  wrapper is given, the same call `comfy.samplers.sample_custom` makes for ComfyUI's own previewer.
+* It is decoded with the `taeh3` tiny VAE (the file is already installed for ComfyUI's previews),
+  **on the CPU in float32, on a worker thread**. The GPU is the sampler's: a preview that competes
+  for VRAM or for the sampling thread is a preview that costs a render. Float32 on the CPU is not
+  fussiness either - fp16 is ~350x slower there (50s for a frame that takes 143ms).
+* A frame is ~110-150ms, so previews are throttled to one per 0.35s and the worker keeps a
+  two-frame queue, dropping anything older: a late preview of a step that already passed is worth
+  nothing. The last step always gets through, so the strip ends on the finished cell.
+
+Nothing about it can fail a render: a patcher that refuses to clone, a frame that will not decode,
+a dead websocket - each logs and stops the stream instead. When the tiny VAE is missing it falls
+back to ComfyUI's own latent2rgb factors (3ms, no model: blurrier, never absent).
+
+Two payload switches, both round-tripping through the saved workflow: `"livePreview": false` turns
+the strip off, and `"comfyPreview": true` keeps ComfyUI's own preview stream *as well* (it is muted
+by default - see below). Neither is needed day to day.
 
 **Why the compact cap cannot also be full width.** ComfyUI *contains* a preview inside the box the
 layout hands it and never upscales it - both the grid calculation and the canvas draw end in

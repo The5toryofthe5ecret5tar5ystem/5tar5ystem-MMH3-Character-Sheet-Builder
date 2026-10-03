@@ -749,6 +749,10 @@ class SheetRenderSpec:
     #: shown in the panel instead (see ``preview_silence``). Set ``render.comfyPreview``
     #: when the preview is wanted - it is the switch the live A/B test renders flip.
     comfy_preview: bool = False
+    #: Stream the panel's own live preview while a render runs: one small frame per sampling
+    #: step, decoded from the latent and sent over the websocket (see ``preview_stream``). On by
+    #: default - it is the only thing on screen between "queued" and the finished sheet.
+    live_preview: bool = True
     #: Which recommended preset these settings came from (see ``presets.py``). A record, not
     #: a lock: applied presets write their values, and editing a knob afterwards leaves the
     #: id in place so a sheet can still say how it started.
@@ -858,6 +862,7 @@ class SheetSpec:
                 "exportVideo": bool(self.render.export_video),
                 # Round-trips so a run's own preview choice comes back with its settings.
                 "comfyPreview": bool(self.render.comfy_preview),
+                "livePreview": bool(self.render.live_preview),
                 "preset": self.render.preset,
             },
             "cells": [
@@ -1311,6 +1316,9 @@ def parse_sheet_spec(raw: Any) -> SheetSpec:
         ),
         comfy_preview=_as_bool(
             render_raw.get("comfyPreview", render_raw.get("comfy_preview")), False
+        ),
+        live_preview=_as_bool(
+            render_raw.get("livePreview", render_raw.get("live_preview")), True
         ),
         preset=str(render_raw.get("preset") or "").strip(),
     )

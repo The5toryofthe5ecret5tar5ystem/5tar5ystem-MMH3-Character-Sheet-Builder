@@ -22,10 +22,11 @@ import {
     previewParts,
     readState,
     toPayload,
+    LIVE_PREVIEW_EVENT,
     REF_GROUPS,
     PANEL_FIT,
     panelFitHeight,
-} from "./h3sheet_core.mjs?boot=h3sheet_v48";
+} from "./h3sheet_core.mjs?boot=h3sheet_v49";
 
 const CLASS = "MiniMaxH3CharacterSheet";
 const DOM_WIDGET = "h3_character_sheet_ui";
@@ -419,11 +420,22 @@ function mountPanel(node) {
             // DOM settles).
             schedulePreviewMode(node);
         };
-        node._mmxSheetEvents = { onStart, onStop };
+        // The render streams a frame per step for this panel (`preview_stream.py`). Every node
+        // listens; the sheet name is what tells two nodes' streams apart, and a payload without
+        // one (an older node, or a hand-written graph) is shown by whoever is listening.
+        const onLive = (event) => {
+            const data = event?.detail || {};
+            const mine = sheetName(node);
+            if (data.name && mine && data.name !== mine) return;
+            if (data.node_id != null && node.id != null && String(data.node_id) !== String(node.id)) return;
+            panel.setLivePreview?.(data);
+        };
+        node._mmxSheetEvents = { onStart, onStop, onLive };
         api.addEventListener("execution_start", onStart);
         api.addEventListener("executing", (event) => { if (!event?.detail) onStop(); });
         api.addEventListener("execution_error", onStop);
         api.addEventListener("execution_interrupted", onStop);
+        api.addEventListener(LIVE_PREVIEW_EVENT, onLive);
     }
 
     clearInterval(node._mmxSheetPoll);
@@ -575,6 +587,16 @@ function wrapNode(nodeType) {
         stopPreviewKeeper(this);
         for (const timer of this._mmxSheetFitTimers || []) clearTimeout(timer);
         this._mmxSheetFitTimers = null;
+        // Listeners hold this node (and its panel) alive: the live stream one would keep a
+        // deleted node's DOM in memory for the rest of the session.
+        const events = this._mmxSheetEvents;
+        if (events) {
+            api.removeEventListener?.("execution_start", events.onStart);
+            api.removeEventListener?.("execution_error", events.onStop);
+            api.removeEventListener?.("execution_interrupted", events.onStop);
+            api.removeEventListener?.(LIVE_PREVIEW_EVENT, events.onLive);
+            this._mmxSheetEvents = null;
+        }
         // The panel watches its own size to re-lay-out a resized node: that observer has to go
         // with the node, or it keeps a detached container alive.
         this._mmxSheet?.panel?.dispose?.();

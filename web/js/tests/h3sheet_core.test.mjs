@@ -2295,5 +2295,68 @@ ok.push("reorder / slot helpers behave");
     ok.push("a resized node re-lays-out the tab (ResizeObserver, debounced)");
 }
 
+// --- the live stream from the render --------------------------------------- 
+// One frame per sampling step arrives as a websocket event (see preview_stream.py); the panel
+// shows it above the tabs so the wait for the first cell is not a blank node.
+{
+    const layoutCalls = [];
+    const live = core.buildSheetInterface({
+        state: core.readState(""),
+        hooks: {
+            status: () => {}, listResults: async () => null,
+            layoutChanged: () => layoutCalls.push("layout"),
+        },
+    });
+    const strip = live.liveStrip;
+    const frame = live.liveFrame;
+    assert.ok(strip, "the panel has a live strip");
+    assert.equal(strip.style.display, "none", "and it starts hidden");
+    assert.ok(strip.parentElement === live.container, "it belongs to the panel");
+    assert.ok(
+        live.container.querySelector(".mmx-tabs").compareDocumentPosition(strip)
+            & 4 /* DOCUMENT_POSITION_FOLLOWING */,
+        "it sits after the tab bar",
+    );
+
+    const dataUrl = "data:image/jpeg;base64,AAAA";
+    live.setLivePreview({ image: dataUrl, cell: 2, cells: 5, step: 3, steps: 8, name: "sheet" });
+    assert.equal(strip.style.display, "flex", "a frame makes it visible");
+    assert.equal(frame.getAttribute("src"), dataUrl, "and the frame is the one sent");
+    assert.match(live.liveMeta.textContent, /cell 2\/5/, "the cell is named");
+    assert.match(live.liveMeta.textContent, /step 3\/8/, "and the step");
+    assert.match(live.liveMeta.textContent, /1 frame/, "and how many have arrived");
+    assert.ok(layoutCalls.length >= 1, "the node is asked to re-measure for the new row");
+
+    live.setLivePreview({ image: dataUrl, cell: 2, cells: 5, step: 4, steps: 8, name: "sheet" });
+    assert.equal(live.liveFrames, 2, "frames are counted across the stream");
+    assert.equal(frame.getAttribute("src"), dataUrl, "the same frame is not re-assigned");
+
+    // A finished run takes the strip away: the sheet in Results is the deliverable.
+    live.setRunning(true);
+    assert.equal(strip.style.display, "flex", "a run opens the strip straight away");
+    assert.ok(strip.classList.contains("is-waiting"), "holding the frame's space while it starts");
+    assert.match(live.liveMeta.textContent, /waiting for the first frame/);
+    assert.ok(live.liveWait, "the dashed placeholder is what holds that space");
+    live.setLivePreview({ image: dataUrl, cell: 1, cells: 1, step: 1, steps: 4, name: "sheet" });
+    assert.equal(strip.style.display, "flex");
+    assert.ok(!strip.classList.contains("is-waiting"), "the first frame replaces the placeholder");
+    live.setRunning(false);
+    assert.equal(strip.style.display, "none", "stopping the run clears the strip");
+    assert.equal(frame.getAttribute("src"), null, "and drops the frame");
+    assert.equal(live.liveFrames, 0, "and resets the counter");
+    assert.equal(live.lastLiveFrame, null);
+
+    // The panel preview setting is the size of everything the panel shows, this included.
+    const quiet = core.buildSheetInterface({
+        state: core.readState(JSON.stringify({ ui: { panelPreview: "off" } })),
+        hooks: { status: () => {}, listResults: async () => null },
+    });
+    quiet.setLivePreview({ image: dataUrl, cell: 1, cells: 1, step: 1, steps: 4 });
+    assert.equal(quiet.liveStrip.style.display, "none", "previews off means no strip either");
+    quiet.dispose();
+    live.dispose();
+    ok.push("the render's live frames show above the tabs and clear when the run ends");
+}
+
 console.log("h3sheet_core: PASS");
 for (const line of ok) console.log(" -", line);

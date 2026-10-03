@@ -158,22 +158,21 @@ def test_no_model_is_not_an_error():
     assert preview_silence.is_silenced(None) is False
 
 
-def test_the_sheet_graph_mutes_the_model_before_every_cell():
-    """The one wiring assertion that matters: it happens at build time, before the shift."""
+def test_the_nodes_wiring_goes_through_the_stream_wrapper():
+    """The graph-level wiring is asserted in test_preview_stream (one wrapper does both jobs).
+
+    This module owns the mute itself; what it must still guarantee for the pack is that the
+    sheet render never reaches for ComfyUI's preview stream on its own - the wrapper is the
+    single place that decides.
+    """
     import pathlib
     import re
 
     source = pathlib.Path(__file__).resolve().parents[1] / "h3_character_sheet" / "nodes" / "sheet.py"
     text = source.read_text()
-    call = text.find("silence_model_previews(model")
-    shift = text.find('"MiniMaxH3SigmaShift"')
-    assert call != -1, "build_sheet_graph must mute the preview"
-    assert shift != -1
-    assert call < shift, "mute the incoming model, so every cell inherits it"
-    assert re.search(r"if not comfy_preview:\s*\n\s+model = silence_model_previews", text), (
-        "the render spec's comfyPreview switch must be able to keep the preview"
+    assert "attach_sheet_preview(" in text, "the graph builder must attach the wrapper"
+    assert not re.search(r"^from \.\.preview_silence import", text, re.M), (
+        "one wrapper, one decision: the mute is a parameter of the stream wrapper, not a "
+        "second wrapper on the same model"
     )
-    assert re.search(r"from \.\.preview_silence import silence_model_previews", text)
-    assert re.search(r"comfy_preview=bool\(spec\.render\.comfy_preview\)", text), (
-        "execute must pass the switch through to the graph builder"
-    )
+    assert "silence_model_previews(" not in text, "the mute is not called from the graph builder"

@@ -287,7 +287,7 @@ export const KNOB_COLUMNS = 3;
  * build makes that a glance instead of an investigation; a test keeps it in step with the
  * import, so bumping one without the other fails the suite rather than confusing a user.
  */
-export const PANEL_BUILD = "h3sheet_v48";
+export const PANEL_BUILD = "h3sheet_v49";
 
 /** The frontend's own widget/host names, straight from the shipped frontend bundle. */
 export const PREVIEW_HOST_CLASS = "comfy-img-preview";
@@ -362,6 +362,17 @@ export const PANEL_PREVIEW_SIZES = [
 ];
 export const PANEL_PREVIEW_HEIGHTS = { off: 0, small: 240, medium: 420 };
 export const DEFAULT_PANEL_PREVIEW = "medium";
+
+/**
+ * The websocket event the node's render streams frames on (see `preview_stream.py`).
+ *
+ * One event for the whole pack, carrying `cell`/`cells`/`step`/`steps` and a JPEG data URL: the
+ * panel filters by node id and sheet name, so two sheets rendering at once each show their own.
+ */
+export const LIVE_PREVIEW_EVENT = "h3_sheet_preview";
+//: The streamed frame never grows past this on screen, however big the node is: it is a look at
+//: the run, not the deliverable (the finished sheet is shown at the panel-preview size).
+export const LIVE_PREVIEW_MAX_HEIGHT = 220;
 
 /** The panel's own preview size, defaulting to a medium sheet. */
 export function panelPreview(state) {
@@ -1242,6 +1253,28 @@ export const PANEL_CSS = `
   white-space: pre-wrap; word-break: break-word;
 }
 .mmx-results img { border-radius: 4px; }
+/* The live stream: the one thing on screen between "queued" and the finished sheet. It sits
+   above the tabs so it is visible whichever tab is open, and it is only as tall as one frame. */
+.mmx-live { display: flex; flex-direction: column; gap: 3px; margin: 2px 0 6px; }
+.mmx-live[hidden] { display: none; }
+.mmx-live__head { display: flex; align-items: center; gap: 6px; }
+.mmx-live__tag {
+  font-size: 9px; font-weight: 700; letter-spacing: .08em; color: #101014;
+  background: var(--mmx-tick); border-radius: 3px; padding: 1px 5px;
+}
+.mmx-live__meta { font-size: 10px; color: var(--mmx-muted); }
+.mmx-live__frame {
+  width: 100%; max-height: 220px; object-fit: contain; border-radius: 4px;
+  background: rgba(0,0,0,.25);
+}
+/* While a run is starting the frame's space is held open (dashed), so the node settles its
+   height once instead of growing when the first frame lands. */
+.mmx-live__wait {
+  min-height: 180px; border: 1px dashed rgba(255,185,94,.35); border-radius: 4px;
+  background: rgba(0,0,0,.14);
+}
+.mmx-live.is-waiting .mmx-live__frame { display: none; }
+.mmx-live:not(.is-waiting) .mmx-live__wait { display: none; }
 /* Compact knobs: the node's own widgets, packed into columns the frontend cannot make.
    One grid per group, each field labelled, values written straight onto the widget. */
 .mmx-settings__head { gap: 6px; }
@@ -2439,8 +2472,22 @@ export function buildSheetInterface({ state, hooks = {} }) {
         tabButtons[key] = tab;
         tabBar.append(tab);
     }
+    // The live stream strip sits between the tabs and the panes: on every tab, and outside the
+    // Results pane (which `renderResults` rebuilds from scratch on each refresh).
+    const liveStrip = element("div", { className: "mmx-live" }, { display: "none" });
+    const liveMeta = element("span", { className: "mmx-live__meta", textContent: "" });
+    const liveFrame = element("img", { className: "mmx-live__frame", alt: "", src: "" });
+    const liveWait = element("div", { className: "mmx-live__wait", title: "waiting for the render's first frame" });
+    liveStrip.append(
+        element("div", { className: "mmx-live__head" }, {}, [
+            element("span", { className: "mmx-live__tag", textContent: "LIVE" }),
+            liveMeta,
+        ]),
+        liveFrame,
+        liveWait,
+    );
     container.append(
-        tabBar, panes.references, panes.cells, panes.prompts, panes.results, panes.settings, panes.help,
+        tabBar, liveStrip, panes.references, panes.cells, panes.prompts, panes.results, panes.settings, panes.help,
     );
     const refsHost = panes.references;
     const cellsHost = panes.cells;
@@ -4121,6 +4168,73 @@ export function buildSheetInterface({ state, hooks = {} }) {
             liveTimer = null;
             refreshResults().then(() => refreshTabs());
         }
+        // The stream belongs to a run: it appears when one starts and goes when it ends (the
+        // finished sheet takes over in Results). Starting the run opens the strip's space right
+        // away - a row that appears mid-render would resize the node mid-render.
+        if (running) openLiveStrip();
+        else setLivePreview(null);
+    }
+
+    /** Open the strip for a run that is starting: space held, no frame yet. */
+    function openLiveStrip() {
+        if (panelPreview(state) === "off") return;
+        liveCount = 0;
+        liveLast = null;
+        liveFrame.removeAttribute("src");
+        liveStrip.classList.add("is-waiting");
+        liveMeta.textContent = "waiting for the first frame…";
+        if (liveStrip.style.display === "none") {
+            liveStrip.style.display = "flex";
+            hooks.layoutChanged?.();
+        }
+    }
+
+    // ------------------------------------------------------------ live stream
+    // One frame per sampling step, straight from the render (`preview_stream.py`), so the panel
+    // shows what is being sampled rather than waiting for the first cell to land on disk. Every
+    // frame is a JPEG data URL, so nothing here fetches anything.
+    let liveCount = 0;
+    let liveLast = null;
+
+    /**
+     * Show one streamed frame, or clear the strip with `null`.
+     *
+     * `data` is the payload of the node's `h3_sheet_preview` event. The panel-preview setting
+     * decides whether there is a strip at all: with the panel's own preview switched Off, the
+     * user asked for a smaller node, and a streaming image is the opposite of that.
+     */
+    function setLivePreview(data) {
+        const frame = data && typeof data.image === "string" ? data : null;
+        if (!frame || panelPreview(state) === "off") {
+            liveStrip.classList.remove("is-waiting");
+            liveStrip.style.display = "none";
+            if (!frame) {
+                liveCount = 0;
+                liveLast = null;
+                liveFrame.removeAttribute("src");
+                liveMeta.textContent = "";
+            }
+            return;
+        }
+        liveCount += 1;
+        liveLast = data;
+        liveStrip.classList.remove("is-waiting");
+        if (liveFrame.getAttribute("src") !== data.image) liveFrame.src = data.image;
+        const parts = [];
+        const cell = Number(data.cell) || 0;
+        const cells = Number(data.cells) || 0;
+        if (cell) parts.push(cells > 1 || cell > 1 ? `cell ${cell}${cells ? `/${cells}` : ""}` : "cell 1");
+        const step = Number(data.step) || 0;
+        const steps = Number(data.steps) || 0;
+        if (step && steps) parts.push(`step ${step}/${steps}`);
+        parts.push(`${liveCount} frame${liveCount === 1 ? "" : "s"}`);
+        liveMeta.textContent = parts.join(" · ");
+        if (liveStrip.style.display === "none") {
+            liveStrip.style.display = "flex";
+            // The strip adds a row to the panel: the node has to re-measure, exactly like a tab
+            // switch or a new result does.
+            hooks.layoutChanged?.();
+        }
     }
 
     function dispose() {
@@ -4222,10 +4336,16 @@ export function buildSheetInterface({ state, hooks = {} }) {
         container, status, results, refresh, renderResults, refreshResults, refreshTabs,
         refreshPlan, refreshSettings, syncSettings, renderHelp, noteResize,
         autoRefresh: auto, openBrowse, openPreview, closeOverlay, showTab, setState, dispose,
-        setRunning,
+        setRunning, setLivePreview,
         get activeTab() { return activeTab; },
         get overlay() { return overlay; },
         get live() { return Boolean(liveTimer); },
+        get liveStrip() { return liveStrip; },
+        get liveFrame() { return liveFrame; },
+        get liveWait() { return liveWait; },
+        get liveMeta() { return liveMeta; },
+        get liveFrames() { return liveCount; },
+        get lastLiveFrame() { return liveLast; },
         get promptBox() { return container.querySelector(".mmx-sheet-prompt"); },
         get negativeBox() { return container.querySelector(".mmx-sheet-negative"); },
         get knobFields() { return new Map(knobFields); },

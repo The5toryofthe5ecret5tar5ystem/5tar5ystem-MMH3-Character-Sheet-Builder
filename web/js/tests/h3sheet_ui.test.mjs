@@ -36,6 +36,27 @@ ok.push("correct ComfyUI imports (app from app.js, api from api.js)");
 assert.ok(wiring.includes("panel.setRunning(true)"),
     "the panel must follow a running prompt so results fill in cell by cell");
 
+// --- the render's own live preview -------------------------------------------
+// The model wrapper streams a frame per step under its own event (preview_stream.py): the
+// wiring subscribes to it, tells two sheets apart, and lets it go with the node.
+assert.ok(core.includes('export const LIVE_PREVIEW_EVENT = "h3_sheet_preview"'),
+    "the event name lives in the panel module, next to the DOM it fills");
+assert.ok(core.includes("export function setLivePreview")
+    || core.includes("function setLivePreview"),
+    "the panel owns the strip: the wiring only hands it frames");
+assert.ok(wiring.includes("LIVE_PREVIEW_EVENT") && wiring.includes("api.addEventListener(LIVE_PREVIEW_EVENT, onLive)"),
+    "the wiring must listen for the stream it asked the render for");
+assert.ok(wiring.includes("panel.setLivePreview?."),
+    "the frames go to the panel");
+assert.ok(/data\.name && mine && data\.name !== mine/.test(wiring),
+    "two sheet nodes render in one session: a stream must be matched to its own sheet");
+assert.ok(wiring.includes("api.removeEventListener?.(LIVE_PREVIEW_EVENT, events.onLive)"),
+    "and a deleted node must stop listening (the listener holds its DOM alive)");
+assert.ok(sheet.includes("attach_sheet_preview(") && sheet.includes("live_preview"),
+    "the graph builder attaches the stream wrapper with the payload switch");
+assert.ok(sheet.includes('from ..preview_stream import EVENT as PREVIEW_EVENT'),
+    "the report names the event the panel listens for");
+
 // --- mounted inside the node, interface first, no popup ------------------------
 assert.ok(wiring.includes("addDOMWidget("), "the panel must mount as a DOM widget");
 assert.ok(!/document\.body\.append|showModal/.test(wiring), "no popup/modal");
