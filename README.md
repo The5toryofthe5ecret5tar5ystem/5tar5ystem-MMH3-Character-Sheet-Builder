@@ -223,6 +223,28 @@ space) - so 24 knobs cost roughly 500px of node height that the grid fits into ~
   the knob list cannot be read the panel leaves the node's own rows alone rather than hiding
   knobs it cannot draw.
 
+### Node previews (the same Settings tab)
+
+ComfyUI's own output previews under the node are sized by the frontend: an image preview is as
+wide as the node, and two of them stack into a very tall node. The **previews** selector next
+to *Compact node* changes that:
+
+| Mode | What it does |
+| --- | --- |
+| **Small (side by side)** (default) | Caps the sheet preview and the cell-clip preview at 200px tall, width following each media's own shape - so the node stays the height of its panel and two previews sit next to each other instead of stacking. |
+| **Full size (ComfyUI default)** | Hands the previews back to ComfyUI's own sizing (the pack restores each widget's original layout function). |
+| **Hidden** | No node previews at all; the **Results** tab is the viewer. |
+
+That needed three different levers, because this frontend draws the three kinds of preview
+differently: a still image is an `ImagePreviewWidget` drawn **on the canvas** (`$$canvas-image-preview` -
+no element, no class and no DOM option to reach), an image sequence is a `$$comfy_animation_preview`
+DOM widget, and a video is a `video-preview` DOM widget with its own layout function. All three are
+laid out by asking the widget for `computeLayoutSize()`, and an undefined `maxHeight` there means
+"unbounded" - the widget then absorbs every pixel of node height left over, which is why capping only
+the DOM kinds left the still image a ~900px-tall node. The pack bounds that function on all three
+(remembering the original, so *Full size* puts it back) and additionally caps the media inside the DOM
+kinds with one stylesheet rule.
+
 ### Where uploads go
 
 Dropped / chosen files are uploaded through core `POST /upload/image` with

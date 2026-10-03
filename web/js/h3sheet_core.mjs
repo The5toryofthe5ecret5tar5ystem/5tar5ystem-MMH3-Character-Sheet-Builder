@@ -220,25 +220,46 @@ export const KNOB_COLUMNS = 3;
 // --------------------------------------------------------------------------- //
 // the node's own output previews (the ones ComfyUI draws under the panel)
 // --------------------------------------------------------------------------- //
-// The frontend, not this pack, draws those: a `div.comfy-img-preview` flex host per IMAGE
-// output (each `<img>` sized from `--comfy-img-preview-width/height`, which the frontend
-// recomputes from the NODE WIDTH on every resize) plus a `$$comfy_animation_preview` DOM
-// widget for an image sequence. That is why they scale with the node: a 1000px node gets a
-// 980px image, and two of them stack into a very tall node. There is no setting for it.
+// The frontend, not this pack, draws those, and it does it THREE different ways in the
+// current build - which is why capping only one of them left the node huge:
 //
-// So the pack sizes them itself, with a class it adds to the host plus ONE stylesheet rule:
+//   * a still image is an `ImagePreviewWidget` named `$$canvas-image-preview`, drawn on the
+//     CANVAS (no element, no class, no DOM option) at the height the widget layout gives it;
+//   * an image sequence is a `$$comfy_animation_preview` DOM widget holding one `<img>`;
+//   * a video is a `video-preview` DOM widget holding one `<video>`.
+//
+// All three are laid out by `_arrangeWidgets`, which asks each widget for
+// `computeLayoutSize()` and gives `{minHeight, maxHeight}` to `distributeSpace`: an undefined
+// `maxHeight` means unbounded, so that widget absorbs every pixel of height the node has left
+// over. Overriding `computeLayoutSize` is therefore the pack's lever (see capPreviewWidget):
+// it bounds the widget however the frontend chose to draw it. For the DOM kinds a class plus
+// one stylesheet rule caps the MEDIA itself as well, since the wrapper's height and the drawn
+// image's height are two different numbers:
 //
 //     .mmx-preview-compact.mmx-preview-compact img { height: 200px !important; ... }
 //
 // The doubled class is deliberate: the frontend's own `.comfy-img-preview img` rule has the
 // same specificity as a single class + element, and its later-inserted stylesheets would win
-// a tie, so the rule is written to out-specify it rather than rely on document order. The
-// images are then capped whatever the frontend does with its width/height custom properties,
-// which it recomputes from the node width on every resize. `full` removes the class.
+// a tie, so the rule is written to out-specify it rather than rely on document order. `full`
+// restores the widget's original function and removes the class.
 
 /** The frontend's own widget/host names, straight from the shipped frontend bundle. */
 export const PREVIEW_HOST_CLASS = "comfy-img-preview";
-export const PREVIEW_WIDGET_NAME = "$$comfy_animation_preview";
+//: A still image is NOT a DOM element in this frontend: an `ImagePreviewWidget` named
+//: `$$canvas-image-preview` draws it on the canvas (so there is no element to class or to
+//: style, and no `getMinHeight` option for the layout to read - see capPreviewWidget).
+export const PREVIEW_CANVAS_IMAGE_WIDGET = "$$canvas-image-preview";
+//: An image sequence is one <img> inside a DOM widget...
+export const PREVIEW_ANIMATION_WIDGET = "$$comfy_animation_preview";
+//: ...and a video is one <video> inside a DOM widget with its own layout sizing.
+export const PREVIEW_VIDEO_WIDGET = "video-preview";
+//: Every widget that IS an output preview. All three are capped the same way, or one of them
+//: quietly keeps the node tall (which is exactly what happened to the still image).
+export const PREVIEW_WIDGET_NAMES = [
+    PREVIEW_CANVAS_IMAGE_WIDGET, PREVIEW_ANIMATION_WIDGET, PREVIEW_VIDEO_WIDGET,
+];
+/** The animation widget's name, kept as its own export (it was the only one recognised). */
+export const PREVIEW_WIDGET_NAME = PREVIEW_ANIMATION_WIDGET;
 
 /** The class (and rule id) the pack uses to cap them. */
 export const PREVIEW_COMPACT_CLASS = "mmx-preview-compact";
@@ -266,9 +287,10 @@ export function nodePreviews(state) {
 /**
  * The preview widgets and hosts on a node, as ``{widgets, hosts}``.
  *
- * Both kinds are found: the animation widget (by name - its element is a plain wrapper) and
- * the still-image hosts (by class - they can sit inside any widget's element). Whatever the
- * pack owns is skipped: the panel's own DOM widget is not an output preview.
+ * Both kinds are found: the frontend's own preview widgets (by name - the canvas image one
+ * has no element at all, the other two are DOM widgets) and the still-image hosts (by class -
+ * they can sit inside any widget's element). Whatever the pack owns is skipped: the panel's
+ * own DOM widget is not an output preview.
  */
 export function previewParts(node, { skip = [] } = {}) {
     const widgets = [];
@@ -279,12 +301,42 @@ export function previewParts(node, { skip = [] } = {}) {
         const host = element?.classList?.contains?.(PREVIEW_HOST_CLASS)
             ? element
             : (element?.querySelector?.(`.${PREVIEW_HOST_CLASS}`) || null);
-        const animated = widget.name === PREVIEW_WIDGET_NAME;
-        if (!host && !animated) continue;
+        const named = PREVIEW_WIDGET_NAMES.includes(widget.name);
+        if (!host && !named) continue;
         if (!widgets.includes(widget)) widgets.push(widget);
         if (host && !hosts.includes(host)) hosts.push(host);
     }
     return { widgets, hosts };
+}
+
+/**
+ * Bound one preview widget's height, the way THIS frontend lays widgets out.
+ *
+ * ``LGraphNode._arrangeWidgets`` asks every widget for ``computeLayoutSize()`` and hands
+ * ``{minHeight, maxHeight}`` to ``distributeSpace`` - and a missing/undefined ``maxHeight``
+ * means "unbounded", so that widget absorbs all the height the node has left over. The canvas
+ * image preview asks for ``{minHeight: 220}`` with no maximum, which is why a finished sheet
+ * was drawn ~900px tall however small the panel was: nothing the pack did - a CSS rule on
+ * ``.comfy-img-preview img``, ``options.getMinHeight`` - could reach it, because there is no
+ * element and no options hook on that path (``options.getMinHeight`` is only read by the
+ * *generic* DOM widget, so the video preview, which defines its own ``computeLayoutSize``,
+ * ignored it too). Overriding the widget's own function is the one lever that works for all
+ * three kinds; the original is kept, so ``full`` hands the node back exactly what it had.
+ */
+export function capPreviewWidget(widget, mode) {
+    if (!widget) return false;
+    if (!Object.prototype.hasOwnProperty.call(widget, "_mmxLayoutSize")) {
+        widget._mmxLayoutSize = widget.computeLayoutSize || null;
+    }
+    const original = widget._mmxLayoutSize;
+    if (nodePreviews({ nodePreviews: mode }) === "full") {
+        if (original) widget.computeLayoutSize = original;
+        else delete widget.computeLayoutSize;
+        return true;
+    }
+    const height = nodePreviews({ nodePreviews: mode }) === "off" ? 0 : PREVIEW_COMPACT_HEIGHT;
+    widget.computeLayoutSize = () => ({ minHeight: height, maxHeight: height, minWidth: 1 });
+    return true;
 }
 
 /** How tall a node preview should be in `mode` - the fit uses this to size the node. */
@@ -352,6 +404,9 @@ export function applyPreviewMode(node, mode, { skip = [] } = {}) {
     }
     for (const widget of widgets) {
         const element = widget.element || widget.inputEl || null;
+        // The layout's own lever, for every kind of preview widget - the DOM options below are
+        // only read by the generic DOM widget, and the still image is not a DOM widget at all.
+        capPreviewWidget(widget, wanted);
         if (wanted === "off") {
             if (widget._mmxPreviewSize === undefined) widget._mmxPreviewSize = widget.computeSize || null;
             element?.classList?.remove?.(PREVIEW_COMPACT_CLASS);

@@ -732,6 +732,69 @@ ok.push("an empty node renders (and can materialise) exactly what the ticks ask 
     ok.push("reference tiles draw image/video/audio, eye and X as SVG (nothing typed)");
 }
 
+// --- node previews: small and side by side, hidden, or ComfyUI's own -----------
+{
+    // The frontend lays widgets out by asking each one for `computeLayoutSize()`, and an
+    // undefined maxHeight means "unbounded" - the widget takes all the height the node has
+    // left over. The STILL IMAGE preview is exactly that ({minHeight: 220}, no maximum) and it
+    // is drawn on the canvas, so it has no element to class and no DOM option for the layout
+    // to read: capping the DOM kinds only left a finished sheet a ~900px-tall node. All three
+    // kinds are pinned here, because missing one is the bug that shipped.
+    const canvasImage = {
+        name: "$$canvas-image-preview",
+        computeLayoutSize: () => ({ minHeight: 220, minWidth: 1 }),
+    };
+    const animation = {
+        name: "$$comfy_animation_preview", element: dom.window.document.createElement("div"),
+        options: {},
+    };
+    const video = {
+        name: "video-preview", element: dom.window.document.createElement("div"),
+        options: {},
+        computeLayoutSize: () => ({ minHeight: 256, minWidth: 256 }),
+    };
+    const panelWidget = { name: "h3_character_sheet_ui", element: dom.window.document.createElement("div"), options: {} };
+    const node = { widgets: [panelWidget, canvasImage, animation, video], setDirtyCanvas: () => {}, graph: { setDirtyCanvas: () => {} } };
+
+    const found = core.previewParts(node, { skip: ["h3_character_sheet_ui"] });
+    assert.equal(found.widgets.length, 3, "every preview widget is found, including the canvas one");
+    assert.ok(!found.widgets.includes(panelWidget), "the panel is never treated as a preview");
+
+    const compact = core.applyPreviewMode(node, "compact", { skip: ["h3_character_sheet_ui"] });
+    assert.equal(compact.mode, "compact");
+    assert.equal(compact.widgets, 3);
+    for (const widget of [canvasImage, animation, video]) {
+        const size = widget.computeLayoutSize();
+        assert.equal(size.minHeight, core.PREVIEW_COMPACT_HEIGHT, `${widget.name} has a floor`);
+        assert.equal(size.maxHeight, core.PREVIEW_COMPACT_HEIGHT,
+            `${widget.name} must also have a CEILING, or it swallows the node's free height`);
+    }
+    assert.equal(core.previewHeight("compact"), core.PREVIEW_COMPACT_HEIGHT,
+        "and the node fit counts the same height");
+    // The DOM kinds still get the class + option caps (the media inside is capped separately).
+    assert.ok(animation.element.classList.contains(core.PREVIEW_COMPACT_CLASS));
+    assert.equal(animation.options.getMaxHeight(), core.PREVIEW_COMPACT_HEIGHT + 8);
+
+    // `off` is the frontend's own way of saying "no layout": a hidden widget is skipped
+    // entirely by getLayoutWidgets(), so nothing is left to swallow height.
+    core.applyPreviewMode(node, "off", { skip: ["h3_character_sheet_ui"] });
+    for (const widget of [canvasImage, animation, video]) {
+        assert.equal(widget.hidden, true, `${widget.name} is hidden`);
+        assert.deepEqual(widget.computeSize(), [0, 0], `${widget.name} takes no height`);
+    }
+    assert.equal(core.previewHeight("off"), 0);
+
+    // `full` hands the node back exactly what the frontend had, function for function.
+    core.applyPreviewMode(node, "full", { skip: ["h3_character_sheet_ui"] });
+    assert.equal(canvasImage.computeLayoutSize().minHeight, 220, "the canvas widget's own sizing is back");
+    assert.equal(video.computeLayoutSize().minHeight, 256, "and the video widget's");
+    assert.equal(animation.computeLayoutSize, undefined,
+        "a widget that had no layout function does not grow one");
+    assert.equal(animation.hidden, false);
+    assert.equal(animation.options.getMaxHeight, undefined, "no left-over caps");
+    ok.push("node previews: the canvas still image is capped too, not only the DOM widgets");
+}
+
 // --- the ticks are part of the payload -----------------------------------------
 // An empty cell list used to mean "render the built-in 8-view matrix", which is
 // how a sheet the user never asked for got rendered. The ticks now travel with the
