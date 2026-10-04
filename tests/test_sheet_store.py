@@ -191,6 +191,46 @@ def test_a_rule_pick_is_still_recomputed_on_an_existing_sheet(store):
     assert json.loads(store.picks_path.read_text(encoding="utf-8"))["c1"].get("manual") is not True
 
 
+def test_every_rebuild_writes_the_next_dated_file(store):
+    """A rebuild keeps the sheet it replaces; the render keeps one file per run.
+
+    The render's own export is stable (a workflow's SaveImage points at it). A rebuild from the
+    panel is an iteration on frames already on disk, and the sheet it would otherwise overwrite is
+    a finished render - so it writes the next dated file, the folder keeps the sequence, and the
+    listing follows the newest one.
+    """
+    store.save_cell_frames("c1", _frames(3))
+    store.save_cell_frames("c2", _frames(3))
+    store.rebuild_sheet(_payload(), new_export=True)
+    store.rebuild_sheet(_payload(), {"c1": {"mode": "manual", "index": 1}}, new_export=True)
+    store.rebuild_sheet(_payload(), {"c2": {"mode": "manual", "index": 2}}, new_export=True)
+
+    written = sorted(path.name for path in store.dir.glob("*.png"))
+    assert len(written) == 3, f"three composes, three sheets: {written}"
+    assert len(set(written)) == 3, "and none of them replaced another"
+    assert store.sheet_path.name == written[-1] or store.sheet_path.name in written
+    assert store.scan()["sheetFile"] == store.sheet_path.name, "the listing follows what was written"
+    # Every sheet that was written is still on disk and readable.
+    for name in written:
+        with Image.open(store.dir / name) as image:
+            assert image.size[0] > 0
+    # A later store (the next HTTP request) reads the manifest, so it must follow the newest
+    # file too - otherwise the panel would show the sheet from before the rebuild.
+    fresh_read = store_mod.SheetStore("test sheet", node_id="42")
+    assert fresh_read.sheet_file == store.sheet_path.name
+
+
+def test_the_render_keeps_one_file_for_the_run(store):
+    """Without ``new_export`` a compose edits the sheet that is there (the run's export)."""
+    store.save_cell_frames("c1", _frames(3))
+    store.save_cell_frames("c2", _frames(3))
+    store.rebuild_sheet(_payload())
+    name = store.sheet_path.name
+    store.rebuild_sheet(_payload(), {"c1": {"mode": "manual", "index": 1}})
+    assert store.sheet_path.name == name, "the run's own file name does not move"
+    assert len(list(store.dir.glob("*.png"))) == 1, "and nothing else was written"
+
+
 # --------------------------------------------------------------------------- #
 # scan
 # --------------------------------------------------------------------------- #

@@ -293,7 +293,11 @@ SECTIONS: tuple[HelpSection, ...] = (
             "checkpoints' own range is 6-8, so raise it only for a non-turbo model.",
             "Queue. Cells finish one at a time; the **Results** tab fills in as they land.",
             "Click any thumbnail to make it that cell's frame, then *Rebuild sheet* - that "
-            "only re-composites, no GPU involved.",
+            "only re-composites, no GPU involved. The click is a **decision**: the row says "
+            "*chosen by hand* afterwards, and that frame survives later rebuilds (and a "
+            "re-render) until you pick a rule for that cell again in the *Cells* tab. Each "
+            "rebuild writes the next dated file, and the status line names it - the previous "
+            "sheet is kept, so a sequence of choices is never overwritten.",
         ),
     ),
     HelpSection(

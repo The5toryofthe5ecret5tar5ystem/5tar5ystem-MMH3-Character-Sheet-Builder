@@ -232,7 +232,11 @@ async def sheet_action(request):
                 return _json_error("pick index must be a number.")
             entry = dict(picks or {})
             entry[cell_id] = {"mode": mode, "index": index}
-            result = store.rebuild_sheet(spec or store.read_manifest().get("spec") or {}, entry)
+            # A rebuild from the panel keeps the sheet it replaces (see rebuild_sheet): a pick
+            # writes the next dated file, so a sequence of choices is not overwritten.
+            result = store.rebuild_sheet(
+                spec or store.read_manifest().get("spec") or {}, entry, new_export=True
+            )
             return web.json_response(
                 _listing(
                     store,
@@ -242,7 +246,9 @@ async def sheet_action(request):
             )
 
         if action == "compose":
-            result = store.rebuild_sheet(spec or store.read_manifest().get("spec") or {}, picks)
+            result = store.rebuild_sheet(
+                spec or store.read_manifest().get("spec") or {}, picks, new_export=True
+            )
             return web.json_response(
                 _listing(store, action=action, extra={"size": list(result["size"]), "missing": result["missing"]})
             )
@@ -253,7 +259,7 @@ async def sheet_action(request):
                 return _json_error("delete needs the cell id.")
             removed = store.delete_cell(cell_id)
             if spec:
-                store.rebuild_sheet(spec, picks)
+                store.rebuild_sheet(spec, picks, new_export=True)
             return web.json_response(_listing(store, action=action, extra={"removed": removed}))
 
         if action == "clear":

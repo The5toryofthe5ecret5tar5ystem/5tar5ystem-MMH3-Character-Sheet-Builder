@@ -1819,7 +1819,8 @@ export function buildSheetInterface({ state, hooks = {} }) {
                 const answer = await hooks.compose?.();
                 const sheet = answer?.sheet || null;
                 notify(sheet?.sheetFile
-                    ? `sheet rebuilt from the frames on disk → ${sheet.sheetFile} (no re-render)`
+                    ? `sheet rebuilt from the frames on disk → ${sheet.sheetFile} `
+                        + "(a new file; the previous sheet is kept, no re-render)"
                     : "sheet rebuilt from the frames on disk (no re-render).");
                 await refreshResults(sheet);
             } catch (error) {

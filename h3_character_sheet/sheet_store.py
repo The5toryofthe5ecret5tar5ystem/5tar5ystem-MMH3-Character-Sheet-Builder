@@ -215,6 +215,27 @@ class SheetStore:
         except OSError:
             return None
 
+    def _mint_stem(self) -> str:
+        """Stem for a NEW export file (the date is added by :func:`export_stem`)."""
+        if self._export_name:
+            return self._export_name
+        if has_tokens(self.requested) and is_expanded(self.name):
+            # The folder IS the expanded name (``character_sheet-180705``): follow it instead
+            # of stamping a second date onto it.
+            return self.name
+        return export_stem(self.requested)
+
+    def new_export_name(self) -> str:
+        """A fresh dated file name, for a compose that must not replace the previous sheet.
+
+        The render keeps ONE file per run, so a workflow's own output (and its SaveImage) stays
+        stable. A rebuild from the panel is a different act: it iterates on the frames already on
+        disk, and the sheet before it is a finished render rather than a draft - so every rebuild
+        writes the next dated file, and the folder keeps the sequence of choices.
+        """
+        self.ensure()
+        return unique_sheet_name(self.dir, safe_sheet_name(self._mint_stem(), "character_sheet"))
+
     def _resolve_sheet_file(self) -> str:
         # The manifest is authoritative; a folder without one (a hand-made sheet, or a
         # run that died before the manifest) still resolves to the newest export, so a
@@ -226,16 +247,7 @@ class SheetStore:
             latest = self._latest_export()
             if latest is not None:
                 return latest.name
-        if self._export_name:
-            stem = self._export_name
-        elif self.fresh and has_tokens(self.requested) and is_expanded(self.name):
-            # A raw tokenised name resolves to a run folder that IS the expanded name
-            # (``character_sheet-180705``), so the file follows it instead of gaining a
-            # second date stamp.
-            stem = self.name
-        else:
-            stem = export_stem(self.requested)
-        return unique_sheet_name(self.dir, safe_sheet_name(stem, "character_sheet"))
+        return unique_sheet_name(self.dir, safe_sheet_name(self._mint_stem(), "character_sheet"))
 
     @property
     def sheet_path(self) -> Path:
@@ -511,12 +523,18 @@ class SheetStore:
         picks: dict[str, Any] | None = None,
         *,
         save_cells: bool = True,
+        new_export: bool = False,
     ) -> dict[str, Any]:
         """Compose the sheet from the frames already on disk (no re-render).
 
         ``spec`` is the current panel payload, so a new layout / aspect / caption
         setting can be applied to a finished render. Picks may be overridden per
         call (``{cellId: {"mode": "sharpest", "index": 3}}``).
+
+        ``new_export`` writes the result as the NEXT dated file instead of replacing the sheet
+        that is already there. The render leaves it off (one file per run, so a workflow's own
+        output is stable); a rebuild from the panel - a pick, a re-compose - turns it on, because
+        the sheet it would otherwise overwrite is a finished render, not a draft.
 
         An index that arrives WITH a request is a hand-pick (the panel's click on a
         thumbnail) and always wins; the index stored by a previous compose is only a
@@ -618,8 +636,17 @@ class SheetStore:
 
         sheet = compose_from_arrays(arrays, parsed.layout, cells=cells, captions=captions)
         self.ensure()
-        sheet.save(self.sheet_path)
+        target = self.dir / (self.new_export_name() if new_export else self.sheet_file)
+        sheet.save(target)
+        if new_export:
+            # Remember the file this compose wrote: the panel's listing, the next compose and
+            # any other store read the manifest's ``sheetFile``, so without this they would keep
+            # pointing at the sheet from before the rebuild.
+            self._export_name = target.name
+            self._sheet_file = target.name
         self.write_picks(resolved)
+        if new_export:
+            self.write_manifest(self.read_manifest())
         if missing and isinstance(parsed.warnings, list):
             parsed.warnings.append(
                 "Cells without frames were left empty: " + ", ".join(missing)

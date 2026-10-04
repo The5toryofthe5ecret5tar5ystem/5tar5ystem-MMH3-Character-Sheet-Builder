@@ -288,7 +288,14 @@ setting nobody chose.
 5. Queue. Each cell is a short clip (default 22 frames, snapped to H3's `17k+5`
    grid) and **every frame is kept**.
 6. In **Results**, click any thumbnail to make it that cell's frame, then
-   **Rebuild sheet** - a re-composite with no GPU work.
+   **Rebuild sheet** - a re-composite with no GPU work. A **click is a decision**: the cell's pick
+   becomes *chosen by hand* and stays that way through later rebuilds (and through a re-render),
+   until you choose a rule for that cell again in the Cells tab.
+
+   Every rebuild writes the **next dated file** (`character_sheet-20261003-192805.png`,
+   `…-192812.png`, …) and the status line names it, so a sequence of choices is kept rather than
+   overwritten. The render itself still writes one file per run, so a workflow's own output stays
+   put. `Clear sheet` removes the frames, the cells, the picks and every dated sheet in the folder.
 
 ### Compact settings (the Settings tab)
 
