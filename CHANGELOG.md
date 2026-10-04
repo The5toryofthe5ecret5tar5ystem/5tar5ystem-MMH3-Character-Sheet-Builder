@@ -4,7 +4,11 @@ All notable changes to **5tar5ystem MMH3 Character Sheet Builder** are recorded 
 follows [semantic versioning](https://semver.org/): the node type (`MiniMaxH3CharacterSheet`) and
 the payload contract are what "breaking" refers to, not the panel's layout.
 
-## [Unreleased]
+## [1.2.1] - 2026-10-04
+
+Reference videos reach the RefMod bundle (as motion and as sound), the export expands date and
+seed placeholders in its own name, and the panel no longer accepts a squeezed width from the
+frontend.
 
 ### Added
 
