@@ -177,63 +177,90 @@ def test_framing_distance_knows_the_three_camera_distances():
     assert ss.framing_distance("nonsense") == "", "an unknown view never matches another"
 
 
-def test_auto_chains_only_where_the_camera_distance_AND_the_view_match():
-    """A framing change is rendered on its own - and so is an ANGLE change.
+def test_auto_chains_a_run_at_one_camera_distance_including_the_turn():
+    """Same distance chains - INCLUDING a different angle: that is how a turnaround turns.
 
-    The hand-over carries the previous cell's scale, so chaining a full body after a
-    chest-up cell lands mid-zoom - the feet cut off. It also carries the previous cell's
-    POSTURE: chaining a profile cell after a frontal one renders frontal again, because
-    the five handed-over frames outweigh a prompt that asks the subject to turn. Measured
-    on a 5-cell turnaround (face / portrait / front / profile / back) with a frontal
-    reference: with the angle chained, every full-body cell came back facing the camera.
+    The clip spends its first frames turning and settles by roughly frame 8 of 22, which is
+    why the picker only ranks the settled tail. Three chained turnarounds rendered exactly
+    that way. What the chain needs is a reference the model can re-pose the body from, and
+    that is what :func:`test_an_angle_change_without_an_outfit_reference_is_reported` pins.
     """
     spec = _sheet("face", "portrait", "front", "profile", "back")
     plan = ss.continuity_plan(spec)
-    assert [plan[cell.id] for cell in spec.cells] == [0, 0, 0, 0, 0], (
-        "a 90-degree walk of views is five independent cells, not one continuous move"
+    assert [plan[cell.id] for cell in spec.cells] == [0, 0, 0, 5, 5], (
+        "the framing changes break; the full-body run at one distance chains"
     )
-
-
-def test_auto_still_chains_the_same_view_with_a_different_pose_or_expression():
-    """That is what the hand-over is for: same camera, same angle, new state."""
-    spec = _sheet("front", "front", "front")
-    spec.cells[1].pose = "a-pose"
-    spec.cells[2].expression = "smile"
-    plan = ss.continuity_plan(spec)
-    assert [plan[cell.id] for cell in spec.cells] == [0, 5, 5]
-
-
-def test_auto_breaks_at_the_next_view_change():
-    spec = _sheet("front", "front", "profile", "back", "three-quarter")
-    plan = ss.continuity_plan(spec)
-    assert [plan[cell.id] for cell in spec.cells] == [0, 5, 0, 0, 0]
 
 
 def test_the_shared_rule_is_what_the_graph_and_the_report_use():
     """One rule, so "why is this cell not continuing?" cannot disagree with the wiring."""
-    assert ss.continuation_keeps_scale_and_angle("front", "front") is True
-    assert ss.continuation_keeps_scale_and_angle("front", "profile") is False
-    assert ss.continuation_keeps_scale_and_angle("profile", "back") is False
-    assert ss.continuation_keeps_scale_and_angle("face", "portrait") is False
-    assert ss.continuation_keeps_scale_and_angle("front", "nonsense") is False
-
+    assert ss.continuation_keeps_scale("front", "profile") is True
+    assert ss.continuation_keeps_scale("profile", "back") is True
+    assert ss.continuation_keeps_scale("face", "portrait") is False
+    assert ss.continuation_keeps_scale("front", "nonsense") is False
+    assert ss.continuation_keeps_scale("", "front") is False
 
 def test_a_cell_can_force_auto_inside_an_otherwise_independent_sheet():
-    """Per-cell 'auto' still has to satisfy the rule (same camera AND same view)."""
-    spec = _sheet("face", "front", "front", mode="off",
-                  **{"c2-front": {"continuity": "auto"},
-                     "c3-front": {"continuity": "auto"}})
+    spec = _sheet("face", "portrait", "front", "profile", mode="off",
+                  **{"c4-profile": {"continuity": "auto"}})
     plan = ss.continuity_plan(spec)
-    assert [plan[cell.id] for cell in spec.cells] == [0, 0, 5], (
-        "c2 breaks (face -> front is a framing change), c3 continues (front -> front)"
-    )
+    assert [plan[cell.id] for cell in spec.cells] == [0, 0, 0, 5]
 
 
-def test_a_cell_cannot_force_auto_across_a_view_change():
-    spec = _sheet("front", "profile", mode="off",
-                  **{"c2-profile": {"continuity": "auto"}})
-    plan = ss.continuity_plan(spec)
-    assert [plan[cell.id] for cell in spec.cells] == [0, 0]
+def test_an_angle_change_without_an_outfit_reference_is_reported():
+    """The failure that started this: a chained turnaround with a face-only reference.
+
+    The chain is left ALONE (that is how a turnaround animates its turn) - but the report has
+    to name the missing input, because the hand-over keeps the angle it was handed and the
+    full-body cells then come back facing the previous one's way. Every chained turnaround
+    that worked had an outfit/body reference; the one that failed had one face/hair/skin bust.
+    """
+    payload = {
+        "name": "faces only",
+        "refs": {"pictures": [{"imageFile": "a.png", "role": "face, hair, skin"}]},
+        "render": {"continuity": "auto"},
+        "cells": [{"id": "c1-front", "view": "front"},
+                  {"id": "c2-profile", "view": "profile"}],
+    }
+    spec = ss.parse_sheet_spec(payload)
+    warnings: list[str] = []
+    plan = ss.continuity_plan(spec, warnings=warnings)
+    assert plan["c2-profile"] == ss.CONTINUITY_FRAMES, "the plan is not changed"
+    assert any("different angle" in line and "outfit" in line for line in warnings), warnings
+    assert any("c2-profile" in line for line in warnings), "the warning names the cell"
+
+
+def test_an_outfit_reference_silences_that_warning():
+    """'body and clothes' is exactly what the working chained turnarounds carried."""
+    payload = {
+        "name": "with an outfit",
+        "refs": {"pictures": [{"imageFile": "face.png", "role": "face, hair, skin"},
+                              {"imageFile": "outfit.png", "role": "body and clothes"}]},
+        "render": {"continuity": "auto"},
+        "cells": [{"id": "c1-front", "view": "front"},
+                  {"id": "c2-profile", "view": "profile"}],
+    }
+    spec = ss.parse_sheet_spec(payload)
+    warnings: list[str] = []
+    plan = ss.continuity_plan(spec, warnings=warnings)
+    assert plan["c2-profile"] == ss.CONTINUITY_FRAMES
+    assert not any("different angle" in line for line in warnings), warnings
+
+
+def test_a_same_view_chain_never_asks_for_an_outfit_reference():
+    """No angle change, no body to re-pose: a front -> a-pose chain is fine on a bust."""
+    payload = {
+        "name": "same view",
+        "refs": {"pictures": [{"imageFile": "a.png", "role": "face, hair, skin"}]},
+        "render": {"continuity": "auto"},
+        "cells": [{"id": "c1-front", "view": "front"},
+                  {"id": "c2-front", "view": "front", "pose": "a-pose"}],
+    }
+    spec = ss.parse_sheet_spec(payload)
+    warnings: list[str] = []
+    plan = ss.continuity_plan(spec, warnings=warnings)
+    assert plan["c2-front"] == ss.CONTINUITY_FRAMES
+    assert not any("different angle" in line for line in warnings), warnings
 
 
 def test_forcing_continuation_across_a_framing_change_is_reported():
@@ -257,19 +284,9 @@ def test_the_summary_explains_an_auto_break():
     lines = pl.work_summary(spec, pl.cell_work_items(spec))
     joined = "\n".join(lines)
     assert "kept independent at a framing change" in joined
-    assert "c4-profile" in joined.split("kept independent")[1].split("\n")[0], (
-        "an angle change is a break too - the reason the profile cell used to stay frontal"
+    assert "c4-profile" not in joined.split("kept independent")[1].split("\n")[0], (
+        "a cell that DID continue (same framing) is not listed as a break"
     )
-    assert not any("continues 5f" in line for line in lines), (
-        "nothing continues in a 90-degree walk of views"
-    )
-
-
-def test_the_summary_still_reports_a_real_continuation():
-    """Same view, new pose: the report has to say which cell carries a hand-over."""
-    spec = _sheet("front", "front")
-    spec.cells[1].pose = "a-pose"
-    lines = pl.work_summary(spec, pl.cell_work_items(spec))
     assert any("continues 5f" in line for line in lines)
 
 

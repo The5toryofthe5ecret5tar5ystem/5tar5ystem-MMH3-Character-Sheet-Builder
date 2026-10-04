@@ -184,16 +184,15 @@ def test_a_five_frame_preset_does_not_pretend_it_can_continue():
     assert set(ss.continuity_plan(spec).values()) == {0}, "5-frame cells can never continue"
 
 
-def test_the_turnaround_preset_renders_each_view_independently():
+def test_the_turnaround_preset_chains_a_full_body_run():
     spec = ss.parse_sheet_spec(apply_to_payload(_payload(), "turnaround"))
-    # Its ticks build three full-body cells at the same camera distance, which is what
-    # 'auto' used to CHAIN - and that is the bug this pins: the hand-over carries the
-    # previous cell's ANGLE as well as its scale, so front -> profile -> back came back as
-    # three frontal cells. A 90-degree walk is three independent renders.
+    # Its ticks build three full-body cells at one camera distance, and the chain is the point
+    # of the preset: the subject turns inside each clip and settles. (The references have to
+    # carry the body for that - see test_sheet_continuity.)
     cells = ss.cell_matrix(views=["front", "profile", "back"], poses=["neutral"])
     spec.cells = ss.parse_sheet_spec({**_payload(), "cells": cells}).cells
     plan = ss.continuity_plan(spec)
-    assert list(plan.values()) == [0, 0, 0]
+    assert list(plan.values()) == [0, ss.CONTINUITY_FRAMES, ss.CONTINUITY_FRAMES]
 
 
 def test_the_expression_preset_chains_identical_framing():

@@ -296,7 +296,7 @@ export const KNOB_COLUMNS = 3;
  * build makes that a glance instead of an investigation; a test keeps it in step with the
  * import, so bumping one without the other fails the suite rather than confusing a user.
  */
-export const PANEL_BUILD = "h3sheet_v60";
+export const PANEL_BUILD = "h3sheet_v61";
 
 /** The frontend's own widget/host names, straight from the shipped frontend bundle. */
 export const PREVIEW_HOST_CLASS = "comfy-img-preview";
@@ -3858,9 +3858,10 @@ export function buildSheetInterface({ state, hooks = {} }) {
             + "previous cell at the start of the next one, so a run of cells continues "
             + "instead of restarting. Those frames of each cell re-render the previous "
             + "tail, and the picked frame stays after them. 'Auto' only chains cells that "
-            + "share a camera distance AND a view - a hand-over carries the previous "
-            + "angle as well as its framing, so a front -> profile -> back turnaround "
-            + "renders each view on its own. Per cell override below.";
+            + "share a camera distance (full body -> full body), which is how a turnaround "
+            + "animates its turn - and it needs a reference that shows the body (an "
+            + "outfit/body role), or the hand-over's angle wins and the report warns. "
+            + "Per cell override below.";
         continuityRow.append(
             element("span", { textContent: "Latent continuation", className: "mmx-muted" },
                 { flex: "0 0 96px" }),

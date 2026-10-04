@@ -40,7 +40,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field, replace
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 # --------------------------------------------------------------------------- #
 # limits (H3 reference limits + a sane cell cap for one run)
@@ -560,12 +560,14 @@ DEFAULT_REF_SCOPE = "per framing"
 #: instead of restarting - the same trick the Motion Director uses to hold a room,
 #: a light and a framing across segments.
 #:
-#: ``auto`` chains only where the camera distance AND the view already match (see
-#: :func:`continuation_keeps_scale_and_angle`): a run of the same view (front -> a-pose,
-#: face -> face-smirk) continues, while the angle changes in a sheet - a turnaround -
-#: stay independent, because the hand-over carries the previous angle too. ``on`` chains
-#: everything, including across a framing change - which the model resolves by keeping
-#: the framing it was handed, so use it for a genuinely continuous move.
+#: ``auto`` chains only where the camera distance already matches (see
+#: :func:`continuation_keeps_scale`): a run of full-body views turns the subject without the
+#: model fighting a zoom, and the framing changes in a sheet stay crisp - a chained turnaround
+#: IS how the turn animates inside a 22-frame cell, with the picked frame from its settled tail.
+#: An angle-changing chain re-poses the body, so the report warns when the cell's own
+#: references carry no outfit/body for the model to do that from. ``on`` chains everything,
+#: including across a framing change - which the model resolves by keeping the framing it was
+#: handed, so use it for a genuinely continuous move.
 CONTINUITY_MODES = ("off", "auto", "on")
 DEFAULT_CONTINUITY = "off"
 
@@ -2007,22 +2009,38 @@ def framing_distance(view: Any) -> str:
     return FRAMING_DISTANCES.get(str(view or "").strip().lower(), "")
 
 
-def continuation_keeps_scale_and_angle(previous_view: Any, view: Any) -> bool:
+def continuation_keeps_scale(previous_view: Any, view: Any) -> bool:
     """May ``auto`` hand a cell over from a cell with ``previous_view``?
 
-    The hand-over carries the previous cell's **scale and posture**, not just its zoom:
-    the model continues what it is given. So ``auto`` needs the same camera distance (or
-    the new cell lands mid-zoom, feet cropped) AND the same view (or the new cell keeps
-    the angle it was handed - a profile chained after a frontal cell renders frontal).
+    The hand-over carries the previous cell's SCALE, so chaining a full body after a chest-up
+    cell lands mid-zoom with the feet cut off. That is the whole rule: the camera DISTANCE has
+    to match.
 
-    This is the single rule, so the graph builder, the frame picker and the report cannot
-    disagree about it; ``on`` bypasses it on purpose.
+    A different ANGLE at the same distance is allowed on purpose - it is how the turnarounds
+    animate: the clip spends its first frames turning and settles by roughly frame 8 of 22,
+    which is why the frame picker only ranks the settled tail. Three chained turnarounds
+    rendered exactly that way (one with two face references plus an outfit reference).
+
+    What an angle-changing chain does need is a reference the model can re-pose the BODY from;
+    every chained turnaround that worked had a clothing/body reference, and the one that came
+    back frontal had a single face/hair/skin bust. :func:`continuity_plan` WARNS about that
+    combination (see :func:`reference_supplies_outfit`) instead of changing the plan quietly:
+    the behaviour is the user's to keep. ``on`` bypasses this rule in any case.
     """
     previous = framing_distance(previous_view)
     mine = framing_distance(view)
-    if not previous or not mine or previous != mine:
-        return False
-    return str(previous_view or "").strip().lower() == str(view or "").strip().lower()
+    return bool(previous) and previous == mine
+
+
+def reference_supplies_outfit(refs: Sequence[SheetRef]) -> bool:
+    """Does one of these references carry the body an angle change has to re-pose?
+
+    Deliberately about CLOTHING, not the ``body`` bucket: "face, hair, skin" maps to ``body``
+    through *skin* (skin tone), and that is exactly the reference set that failed. An outfit
+    picture - "body and clothes", "body and bikini", "Dress, clothing" - is what the working
+    chained turnarounds had.
+    """
+    return any("clothing" in reference_attributes(ref.role) for ref in refs)
 
 
 def continuity_plan(
@@ -2078,10 +2096,28 @@ def continuity_plan(
             if warnings is not None:
                 warnings.append(note)
         if wants and mode == "auto" and position > 0:
-            if previous_cell is None or not continuation_keeps_scale_and_angle(
+            if previous_cell is None or not continuation_keeps_scale(
                 previous_cell.view, cell.view
             ):
                 wants = False
+            elif (warnings is not None
+                  and str(previous_cell.view or "").strip().lower()
+                  != str(cell.view or "").strip().lower()):
+                # The chain crosses an angle, so this cell is re-posing the body: say so when
+                # the references it receives cannot help with that. The plan is left alone.
+                # (`ref_scope` is a node widget, not part of the payload: the default is what
+                # every other reader of a plan assumes, and a full-body view hides nothing.)
+                wired = cell_references(spec, cell, scope=DEFAULT_REF_SCOPE)
+                if not reference_supplies_outfit(wired):
+                    warnings.append(
+                        f"cell {cell.id}: continues from a different angle "
+                        f"({previous_cell.view} -> {cell.view}) and no reference of its own "
+                        "supplies the outfit or the body - the hand-over keeps the angle it "
+                        "was handed, so this cell can come back facing the previous one's way "
+                        "(a turnaround with one face/hair/skin reference did). Add a picture "
+                        "whose role names the body or the outfit, or set this cell's "
+                        "continuation to off."
+                    )
         if wants and mode == "on" and position > 0 and previous_cell is not None:
             mine = framing_distance(cell.view)
             theirs = framing_distance(previous_cell.view)
@@ -2437,7 +2473,8 @@ __all__ = [
     "build_cell_prompt",
     "cell_matrix",
     "cell_references",
-    "continuity_keeps_scale_and_angle",
+    "continuation_keeps_scale",
+    "reference_supplies_outfit",
     "continuity_plan",
     "continuity_settle",
     "describe_background",

@@ -6,34 +6,41 @@ the payload contract are what "breaking" refers to, not the panel's layout.
 
 ## [Unreleased]
 
+### Changed
+
+* **`auto` chaining is back to "same camera distance", and the real cause of a frontal
+  turnaround is now reported instead of guessed at.** An earlier note in this section claimed
+  chaining front -> profile -> back was simply the wrong rule. It is not: that chain is *how a
+  turnaround animates its turn* - the cell spends its first frames turning and settles by
+  roughly frame 8 of 22, which is why the frame picker only ranks the settled tail - and three
+  sheets rendered exactly that way with `continuity: auto`.
+  What separates those from the failing ones is visible in the sheets' own embedded workflows:
+  each chained turnaround that worked carried a reference whose role names the outfit or the
+  body ("body and clothes", "body and bikini", "Dress, clothing"), while the failing run had a
+  single `"face, hair, skin"` bust - nothing the model can re-pose the body from, so the
+  hand-over's posture won and every full-body cell kept the angle it was handed. The rule is
+  restored (`sheet_spec.continuation_keeps_scale`, one rule for the graph builder, the picker
+  and the report), and the plan/report now names the failing combination instead of changing
+  the plan quietly:
+
+  > cell c3-profile: continues from a different angle (front -> profile) and no reference of its
+  > own supplies the outfit or the body - the hand-over keeps the angle it was handed ... Add a
+  > picture whose role names the body or the outfit, or set this cell's continuation to off.
+
+  The turnaround preset keeps `auto` (it is the preset that most wants a chain) and its hint now
+  says a body/outfit reference is what makes it work.
+
 ### Fixed
 
-* **Continuation no longer chains a cell after a DIFFERENT angle.** `auto` used to chain any
-  two cells with the same camera distance, on the reasoning that the hand-over only carries
-  scale - but it carries the previous cell's **posture** too: H3 resolves a hand-over by
-  continuing what it was handed, so five frames of a frontal clip outweigh a prompt that asks
-  the subject to turn. Measured on a 5-cell turnaround (face / portrait / front / profile /
-  back) at `continuity: auto`: every full-body cell came back facing the camera, and the
-  profile and back prompts ("90 degrees, side", "from behind") were ignored. `auto` now needs
-  the same camera distance **and the same view**, so a 90-degree walk is five independent
-  renders - which is what the turnaround presets ask for - while same-view cells with a new
-  pose or expression (`front` -> `a-pose`, `front` -> `front-smile`) still chain. `on` still
-  chains everything, for a genuinely continuous move. One rule
-  (`sheet_spec.continuation_keeps_scale_and_angle`) is shared by the graph builder, the frame
-  picker and the report.
-* **The turnaround preset no longer promises chaining it cannot deliver.** Its label was
-  "Turnaround (chained full body)" and its hint said continuation "holds the room, the light and
-  the scale while the subject turns" - which is the assumption the measurement above disproves.
-  It now sets continuation `off` (each view is rendered from its own noise, so the subject is in
-  the requested view from frame 1) and says why.
 * **An expression that asks for eye contact is no longer used where the framing says there is
   none.** The smile option reads "Warm smile, eyes engaged."; on a `profile` cell that landed
   directly after the frame text's "gaze away from the camera, no eye contact with the viewer" -
-  a contradiction the model resolved by turning the body back to the lens. Expressions now
-  carry an `aside` (the same expression without the gaze clause, e.g. "Warm smile.") and it is
-  used exactly for the views whose own text forbids eye contact (`NO_EYE_CONTACT_VIEWS`, read
-  from the view table so the two cannot drift apart). Face, portrait and frontal cells keep the
-  full text.
+  a contradiction the model resolved by turning the body back to the lens (no proven-good run
+  used a non-neutral expression on a profile cell, so nothing that worked is affected).
+  Expressions now carry an `aside` (the same expression without the gaze clause, e.g. "Warm
+  smile.") and it is used exactly for the views whose own text forbids eye contact
+  (`NO_EYE_CONTACT_VIEWS`, read from the view table so the two cannot drift apart). Face,
+  portrait and frontal cells keep the full text.
 
 ## [1.2.2] - 2026-10-04
 

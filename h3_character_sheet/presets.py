@@ -213,16 +213,17 @@ PRESETS: tuple[SheetPreset, ...] = (
     ),
     SheetPreset(
         id="turnaround",
-        label="Turnaround (each view on its own)",
+        label="Turnaround (chained full body)",
         hint=(
-            "Front -> profile -> back in one row, each cell rendered from its own noise so "
-            "the subject is IN the requested view from the first frame. Continuation is off "
-            "on purpose: a hand-over carries the previous cell's ANGLE as well as its scale, "
-            "so chaining front -> profile -> back gave three frontal cells (measured). "
-            "Continuation is what the Balanced/Fidelity presets use for runs of the same "
-            "view; per cell, 'on' still chains a genuine continuous move."
+            "Front -> profile -> back in one row, chained across the turn: the subject turns "
+            "inside the first frames of each cell and settles, and the picked frame comes from "
+            "that settled tail - watch the clips, not just the sheet. This is what the full-body "
+            "chain is FOR, and it needs a reference that shows the body: the full-body cells "
+            "re-pose what a chest-up or face reference cannot (a role like 'body and clothes', "
+            "'body and bikini'). Without one, the report warns and the cells keep the angle the "
+            "hand-over gave them."
         ),
-        render={"continuity": "off", "exportVideo": True, "framesPerCell": 22},
+        render={"continuity": "auto", "exportVideo": True, "framesPerCell": 22},
         sheet={"layout": "turnaround", "columns": 3, "aspect": "21:9", "shortEdge": 2048},
         widgets={
             **_BALANCED_WIDGETS,

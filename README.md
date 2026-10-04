@@ -167,7 +167,7 @@ bar prints that as *"Changes: Continuity, …"* rather than changing settings si
 | **Full Character Sheet - Fidelity** | The same five cells and the same neutral tan backdrop at print resolution: 2048px cells on a 3840px sheet. **~378 s for the same five cells** and a very large PNG - for a sheet that will be enlarged or cut out. |
 | **Fast look (no chains, no clips)** | 768px cells at H3's 5-frame minimum, every cell independent, nothing encoded - to find the framing, not to keep the result. |
 | **Max identity fidelity** | The 2048px reference pipeline (several times slower) with independent cells, 2048px cells on a 3840px sheet. |
-| **Turnaround (each view on its own)** | Front -> profile -> back in one row, each cell rendered from its own noise so the subject is in the requested view from the first frame. A hand-over carries the previous cell's *angle* as well as its scale, so a chained front -> profile -> back came back as three frontal cells - this preset keeps continuation off for that reason. |
+| **Turnaround (chained full body)** | Front -> profile -> back in one row, chained: the subject turns inside the first frames of each cell and settles, and the picked frame comes from that settled tail (watch the clips, not just the sheet). Needs a reference that shows the body - an outfit/body role such as "body and clothes" - because the full-body cells re-pose what a chest-up or face reference cannot; without one the plan warns. |
 | **Expression sheet (chained face)** | Five face close-ups in one row: identical framing, so the chain carries the light and the head position while only the expression changes. |
 
 **Every preset samples at 8 steps** (and so does a fresh node). The community TURBO H3
@@ -792,14 +792,16 @@ MiniMaxH3AddGuide(positive=conditioning, latent=AV latent, vae=video_vae,
   after them is the new pose. Sampling cost is unchanged; the only addition is one
   video-VAE encode of 5 frames per continuing cell.
 * **Three modes.** `off` renders every cell from its own noise. `auto` chains only
-  cells that already match in **camera distance and angle** (`face` close, `portrait`
-  medium, `front` / `profile` / `back` full), so a run of the same view (front -> a-pose,
-  face -> face-smirk) continues while a turnaround - front -> profile -> back - stays
-  independent: the hand-over carries the previous **angle** as well as its scale, and a
-  chained turnaround came back as frontal cells (measured). `on` chains everything,
-  including across a framing change - and says so in the report, because the hand-over
-  carries the previous camera distance: a chest-up cell continuing a face close-up stays a
-  close-up, and a full body continuing a chest-up cell lands mid-zoom with the feet
+  cells whose **camera distance already matches** (`face` close, `portrait` medium,
+  `front` / `profile` / `back` full), so a full-body turn continues while the
+  framing changes in a sheet stay crisp. A chained turnaround is *how the turn animates*:
+  the cell spends its first frames turning and settles by roughly frame 8 of 22, and the
+  picker ranks only the settled tail. That needs a reference the model can re-pose the body
+  from - an outfit/body picture - or the hand-over's posture wins and the full-body cells
+  keep the previous angle: the plan warns when a chained cell has none. `on` chains
+  everything, including across a framing change - and says so in the report, because the
+  hand-over carries the previous camera distance: a chest-up cell continuing a face close-up
+  stays a close-up, and a full body continuing a chest-up cell lands mid-zoom with the feet
   cut off. **`auto` is the mode to use on a normal sheet.**
 * **The first cell never continues** (nothing precedes it), and a cell whose own
   length is not larger than the hand-over cannot: the guide would fill the whole
