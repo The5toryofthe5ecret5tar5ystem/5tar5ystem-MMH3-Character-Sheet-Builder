@@ -3,7 +3,7 @@
 **Repo**: [The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder](https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder) ·
 **License**: GPL-3.0 · **ComfyUI node**: `MiniMaxH3CharacterSheet` · **Installs as**: a
 custom-node folder (any name), typically `ComfyUI-H3-Character-Sheet`
-**Version**: 1.0.1 · [`CHANGELOG.md`](CHANGELOG.md) ·
+**Version**: 1.1.0 · [`CHANGELOG.md`](CHANGELOG.md) ·
 [releases](https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/releases) ·
 [`docs/civitai-post.md`](docs/civitai-post.md) is the short public writeup (features, model
 links, install steps)
@@ -55,6 +55,12 @@ your own, saved into ComfyUI's user folder and re-appliable to the next sheet.
 **A sheet, and the takes it came from.** One composited sheet with captions plus per-cell frames
 (every frame of every cell is kept), the picked stills, and - when *Export clips* is on - each
 cell's clip with the audio H3 generated. Re-picking a frame and re-compositing costs no GPU time.
+
+**Export it as a RefMod - appearance *and* voice.** [ComfyUI-MiniMaxH3Mod](https://github.com/Luisacaotica/ComfyUI-MiniMaxH3Mod)
+"RefMods" are tiny no-training reference adapters that ride H3's own reference path. `H3 Sheet →
+RefMod` turns the sheet into one: the picked cells stacked, the composite as a second member, and a
+voice member from a clip you connect or from the audio H3 generated with a cell. Written to
+`models/refmods/`, where `Load H3 RefMods` lists it - no training, no second pass.
 
 **Watch it render, and re-roll a single cell.** The panel's **LIVE** strip plays a looping clip of
 the cell being denoised (decoded on the CPU, so it never competes with the sampler), and
@@ -141,6 +147,10 @@ more - but the ratio between the two tiers is what to plan around.
    the same five the *Full Character Sheet* presets build, so the file is the shortest path
    from "opened it" to "queued it". Drop your references into the panel, type who the
    character is, press Queue.
+   [`... Builder + RefMod.json`](example_workflows/5tar5ystem%20MMH3%20Character%20Sheet%20Builder%20+%20RefMod.json)
+   is the same graph with the export node appended: one queue renders the sheet, saves the
+   PNG *and* writes the RefMod bundle (cells + composite + the first cell's own voice), so a
+   sheet you like is a mod you can use without a second pass.
 
 ### Presets (top of the panel)
 
@@ -647,6 +657,10 @@ The fourth output, `sheet_dir`, is that folder as an absolute path - wire it int
 node that reads what the run wrote (the RefMod export below does).
 
 ## Exporting the sheet as a RefMod (appearance + voice)
+
+`example_workflows/5tar5ystem MMH3 Character Sheet Builder + RefMod.json` is this whole
+section, wired and ready: render the sheet, save the PNG, write the bundle - one Queue.
+The rest of this section is what the export node is doing.
 
 A character sheet *is* a multi-view identity board, which is what a
 [RefMod](https://github.com/Luisacaotica/ComfyUI-MiniMaxH3Mod) wants: a VAE latent that

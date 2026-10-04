@@ -4,7 +4,10 @@ All notable changes to **5tar5ystem MMH3 Character Sheet Builder** are recorded 
 follows [semantic versioning](https://semver.org/): the node type (`MiniMaxH3CharacterSheet`) and
 the payload contract are what "breaking" refers to, not the panel's layout.
 
-## [Unreleased]
+## [1.1.0] - 2026-10-03
+
+RefMods: a finished sheet can now be exported as one, appearance and voice together, and both
+shipped workflows do it in a single queue.
 
 ### Changed
 
@@ -18,6 +21,17 @@ the payload contract are what "breaking" refers to, not the panel's layout.
 
 ### Added
 
+* **A second shipped workflow: `... Builder + RefMod.json`.** The same graph as the first example
+  with the export node appended, wired to the sheet's `cells`, `sheet` *and* `sheet_dir` outputs and
+  to both VAEs: one Queue renders the sheet, saves the PNG and writes the RefMod bundle. Its
+  settings are the ones the release notes recommend - *Full Reference* at `ref_resolution` 1152 with
+  a 9216 token cap, which keeps **all five** fidelity cells (5 x 1728 = 8640). That number is not
+  cosmetic: the first draft of this example used 1472, where five cells cost 14030 tokens against
+  the same 9216 cap, so the export silently shipped three of the five views. A test now derives the
+  cost from the workflow's own `cell_size` / `cell_aspect` / `ref_resolution` / `max_tokens` and
+  fails if a future edit re-introduces the cap, and another test refuses a shipped example whose
+  payload names a machine-local reference (a picture or voice that only its author has would look
+  like a broken example on every other install).
 * **`H3 Sheet → RefMod`: export the sheet as a RefMod bundle with appearance *and* voice
   members.** A sheet is a multi-view identity board, which is what
   [ComfyUI-MiniMaxH3Mod](https://github.com/Luisacaotica/ComfyUI-MiniMaxH3Mod) wants: a latent

@@ -1,4 +1,4 @@
-# Civitai post - 5tar5ystem MMH3 Character Sheet Builder (v1.0.1)
+# Civitai post - 5tar5ystem MMH3 Character Sheet Builder (v1.1.0)
 
 Copy from the line below into the Civitai article/description, then attach the images from
 `images/` in the repo (they are the ones the README shows).
@@ -24,9 +24,10 @@ Built for ComfyUI's MiniMax H3. Renders on **ComfyUI core H3 nodes** - this pack
 nothing else.
 
 **Node pack (GitHub):** https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder
-**Release page (v1.0.1):** https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/releases/tag/v1.0.1
+**Release page (v1.1.0):** https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/releases/tag/v1.1.0
 **Ready-made workflow** (drag it onto the canvas): https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/blob/main/example_workflows/5tar5ystem%20MMH3%20Character%20Sheet%20Builder.json
-**Workflow, direct download** (no GitHub account needed): https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/releases/download/v1.0.1/5tar5ystem.MMH3.Character.Sheet.Builder.json
+**Workflow, direct download** (no GitHub account needed): https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/releases/download/v1.1.0/5tar5ystem.MMH3.Character.Sheet.Builder.json
+**Workflow + RefMod export** (sheet *and* RefMod bundle in one queue): https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/releases/download/v1.1.0/5tar5ystem.MMH3.Character.Sheet.Builder.Plus.RefMod.json
 **Full manual:** the README in the repo (every knob, every option) - in-node too: the node's **Help** tab carries the same guide and checks your model files for you (✓/✗ with the exact folder to drop each one in).
 
 ## What it does
@@ -39,6 +40,17 @@ nothing else.
 * **Presets.** Two shipped full-sheet presets (balanced / fidelity) plus your own, saved into ComfyUI's user folder.
 * **Composited sheet + the takes it came from**: the sheet with captions, per-cell picked stills, *every* frame of every cell, and each cell's clip with the audio H3 generated. Re-picking a frame and re-compositing costs no GPU time.
 * **Watch it render, re-roll one cell.** A **LIVE** strip above the tabs plays a looping clip of the cell being denoised (`cell 2/5 · step 4/8 · 22-frame loop`), and **↻ new seed** stops the run to render *that one cell* again with a fresh seed - the other cells keep the frames they already have.
+* **Export the sheet as a RefMod - appearance *and* voice.** With [ComfyUI-MiniMaxH3Mod](https://github.com/Luisacaotica/ComfyUI-MiniMaxH3Mod) installed, the **H3 Sheet → RefMod** node writes one bundle: your picked cells stacked (a multi-view identity board), the composite sheet as a second member, and a voice member taken from the audio H3 generated with a cell or from a clip you connect. No training - a RefMod is a small no-training adapter that rides H3's own reference path, so a sheet you already like becomes a reusable reference in one queue.
+
+## Turn the sheet into a RefMod (appearance + voice)
+
+A character sheet *is* a multi-view identity board, which is exactly what a RefMod wants: a VAE latent that H3 attends to like a real reference, at a fraction of the tokens. The **+ RefMod** workflow does both steps in one Queue:
+
+1. renders the sheet from your references (and saves the PNG, as always);
+2. encodes the picked stills into `<name>_views`, the composite into `<name>_sheet`, and the first cell's own generated audio into `<name>_voice_cell1`;
+3. writes it to `models/refmods/<subfolder>/<name>.safetensors` - the tree **Load H3 RefMods** lists, so it appears there after a ComfyUI reload.
+
+**Full Reference** (the default) stores the real VAE encode, so a face survives - that is the mode a character sheet is for. **Compressed Reference** pools it into a tiny grid: nearly free to inject, and it carries concept rather than identity. The node's report prints each member's token count and the total, because that - not the file size - is what the export costs at sampling time. In the shipped example (five fidelity cells at `ref_resolution` 1152) it is 8640 tokens, injection-free of any training.
 
 ## How long it takes
 
@@ -113,5 +125,5 @@ Built by **5tar5ystem**. Feedback, sheets you made with it, and issues are welco
 - [ ] Gallery: finished sheet (cover) → panel with references + roles → LIVE strip mid-render → Results tab.
 - [ ] Tag the post with the H3 / MiniMax model this pack targets, and mention which checkpoint the sample sheet used.
 - [ ] If the sample uses a community checkpoint, credit it in the description and link its page.
-- [ ] Check the two repo links resolve (they do at v1.0.1) and that the workflow link still has `%20` for the spaces in the file name.
+- [ ] Check the three repo/release links resolve (they do at v1.1.0) and that the workflow links still have `%20` for the spaces and `+` for the RefMod variant.
 - [ ] Mention it needs ComfyUI with H3 core nodes (a recent build), and that a full sheet is minutes, not seconds, on a 24GB card at 1024px cells.
