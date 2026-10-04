@@ -251,8 +251,8 @@ def test_cell_parameters_land_on_the_reference_node():
     hero = next(node for node_id, node in nodes.items() if node_id.endswith("ref2va_hero"))
     assert hero["inputs"]["prompt"].startswith("a woman in her thirties")
     assert "Warm smile" in hero["inputs"]["prompt"]
-    # 9:16 cells by default: cell_size is the short edge
-    assert hero["inputs"]["width"] == 576
+    # 3:4 cells by default: cell_size is the short edge (the width here)
+    assert hero["inputs"]["width"] == 768
     assert hero["inputs"]["height"] == 1024
     assert hero["inputs"]["length"] == 5
     assert hero["inputs"]["ref_image_size"] == "match"

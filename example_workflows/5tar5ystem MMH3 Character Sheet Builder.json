@@ -278,7 +278,7 @@
         "contain",
         true,
         false,
-        "9:16",
+        "3:4",
         "per framing",
         "auto",
         true
@@ -306,7 +306,7 @@
         "sheet_fit": "contain",
         "keep_frames": true,
         "verbose_logging": false,
-        "cell_aspect": "9:16",
+        "cell_aspect": "3:4",
         "ref_scope": "per framing",
         "continuity": "auto",
         "export_video": true

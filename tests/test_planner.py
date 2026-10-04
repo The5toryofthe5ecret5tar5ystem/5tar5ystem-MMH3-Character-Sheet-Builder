@@ -63,8 +63,9 @@ def test_work_items_carry_the_cell_prompt_and_frames():
     assert items[0]["frames"] == 5
     assert items[1]["frames"] == 22  # the cell's own length wins over the default
     assert items[0]["ref_image_size"] == "match"
-    # 9:16 by default: cell_size is the SHORT edge, so people are not cropped
-    assert (items[0]["width"], items[0]["height"]) == (576, 1024)
+    # 3:4 by default: cell_size is the SHORT edge (the width here), so a standing
+    # figure fits head to toe with the arms still in frame.
+    assert (items[0]["width"], items[0]["height"]) == (768, 1024)
 
 
 def test_cell_aspect_shapes_the_cell_and_per_cell_aspect_wins():
@@ -102,8 +103,8 @@ def test_work_items_give_every_cell_its_own_seed():
 
 def test_cell_size_is_passed_through_to_the_render():
     items = pl.cell_work_items(_spec(), cell_size=1536)
-    # 9:16 means the short edge is the WIDTH, so a 1536 short edge is 864x1536
-    assert {item["width"] for item in items} == {864}
+    # 3:4 means the short edge is the WIDTH, so a 1536 short edge is 1152x1536
+    assert {item["width"] for item in items} == {1152}
     assert {item["height"] for item in items} == {1536}
 
 

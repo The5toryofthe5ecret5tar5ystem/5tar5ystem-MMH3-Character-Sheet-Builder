@@ -6,6 +6,16 @@ the payload contract are what "breaking" refers to, not the panel's layout.
 
 ## [Unreleased]
 
+### Changed
+
+* **Cell shape now defaults to 3:4, not 9:16** - in the node, in *Balanced (recommended)* and
+  in both *Full Character Sheet* presets. At the default 1024px short edge that is **768x1024**
+  instead of 576x1024: a standing figure still fits head to toe, but the arms and a little of the
+  surroundings stay in frame, where the phone-shaped cell was cropping them. `CELL_ASPECTS` lists
+  3:4 first, the *Expression sheet* preset inherits the default instead of declaring its own, and
+  the shipped example workflow was updated to match. Per-cell `aspect` still overrides it, so a
+  cell that wants 9:16 keeps 9:16.
+
 ### Added
 
 * **`H3 Sheet → RefMod`: export the sheet as a RefMod bundle with appearance *and* voice

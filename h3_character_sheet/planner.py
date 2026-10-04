@@ -66,8 +66,9 @@ def align_cell_size(value: Any, *, fallback: int = DEFAULT_CELL_SIZE) -> int:
 def cell_render_size(short_edge: int, aspect: str) -> tuple[int, int]:
     """Pixel size of one cell from its short edge and shape.
 
-    ``9:16`` with a 1024 short edge gives 576x1024: the whole figure fits and the
-    sides are not wasted, which is why 9:16 is the default rather than a square.
+    ``3:4`` with a 1024 short edge gives 768x1024: the whole figure fits head to toe and
+    the arms stay in frame, which is why 3:4 is the default rather than a square (wastes
+    the sides) or a phone-shaped 9:16 (crops them).
     """
     ratio = aspect_ratio(aspect, DEFAULT_CELL_ASPECT)
     if ratio <= 0:

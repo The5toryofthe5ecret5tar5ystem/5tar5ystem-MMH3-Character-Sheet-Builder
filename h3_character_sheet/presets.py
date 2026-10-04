@@ -81,7 +81,7 @@ _BALANCED_WIDGETS: dict[str, Any] = {
     "sampler_name": "res_multistep",
     "scheduler": "simple",
     "ref_image_size": "match",
-    "cell_aspect": "9:16",
+    "cell_aspect": "3:4",
     "ref_scope": "per framing",
     "continuity": "auto",
     "export_video": True,
@@ -244,7 +244,6 @@ PRESETS: tuple[SheetPreset, ...] = (
         sheet={"layout": "turnaround", "columns": 5, "aspect": "21:9", "shortEdge": 2048},
         widgets={
             **_BALANCED_WIDGETS,
-            "cell_aspect": "3:4",
             "sheet_layout": "turnaround",
             "sheet_columns": 5,
             "sheet_aspect": "21:9",
@@ -255,7 +254,7 @@ PRESETS: tuple[SheetPreset, ...] = (
             "poses": ["neutral"],
             "expressions": ["neutral", "smile", "smirk", "frown", "surprised"],
         },
-        deviates=("cell_aspect", "continuity", "sheet_layout", "sheet_columns",
+        deviates=("continuity", "sheet_layout", "sheet_columns",
                   "sheet_aspect", "sheet_short_edge"),
     ),
 )

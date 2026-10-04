@@ -456,8 +456,10 @@ class MiniMaxH3CharacterSheet(io.ComfyNode):
                     options=list(CELL_ASPECTS),
                     default=DEFAULT_CELL_ASPECT,
                     tooltip=(
-                        "Shape of one cell - cell_size is its SHORT edge. 9:16 (default) "
-                        "fits a standing person, 1:1 for square cells."
+                        "Shape of one cell - cell_size is its SHORT edge. 3:4 (default, "
+                        "768x1024 at a 1024 short edge) fits a standing figure with room "
+                        "for the arms; 9:16 is phone-shaped and crops them; 1:1 for square "
+                        "cells."
                     ),
                 ),
                 # Also appended last: the reference scope is a render policy, and

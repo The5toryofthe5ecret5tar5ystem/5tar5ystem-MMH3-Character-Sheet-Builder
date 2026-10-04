@@ -509,10 +509,12 @@ LAYOUTS = ("hero-left", "grid", "turnaround", "custom")
 #: the user chose, and no later rebuild may recompute it away.
 PICKS = ("auto", "last", "sharpest", "manual")
 
-#: Cell shapes offered by the node widget. People are vertical, so the default
-#: sheet is 9:16: a square cell wastes the sides and crops the figure.
-CELL_ASPECTS = ("9:16", "3:4", "2:3", "1:1", "4:3", "3:2", "16:9", "21:9")
-DEFAULT_CELL_ASPECT = "9:16"
+#: Cell shapes offered by the node widget. People are vertical, so the default is 3:4:
+#: at the default 1024 short edge that is 768x1024 - a standing figure fits head to toe
+#: with room for the arms, where a square wastes the sides and a phone-shaped 9:16
+#: crops them.
+CELL_ASPECTS = ("3:4", "9:16", "2:3", "1:1", "4:3", "3:2", "16:9", "21:9")
+DEFAULT_CELL_ASPECT = "3:4"
 
 #: How much of the reference set each cell receives. H3 conditions on every reference
 #: it is handed at once and has no per-reference weight, so a close-up that receives
@@ -1093,7 +1095,7 @@ def _parse_refs(raw: Any, warnings: list[str]) -> list[SheetRef]:
 
 
 def _parse_cell_aspect(render_raw: dict[str, Any], warnings: list[str]) -> str:
-    """Render shape of one cell (``"9:16"``/``"576x1024"``); square if unreadable."""
+    """Render shape of one cell (``"3:4"``/``"768x1024"``); the default if unreadable."""
     value = str(
         render_raw.get("cellAspect", render_raw.get("cell_aspect")) or DEFAULT_CELL_ASPECT
     ).strip()
