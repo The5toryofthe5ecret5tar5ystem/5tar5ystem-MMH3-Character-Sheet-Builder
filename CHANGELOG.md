@@ -4,7 +4,11 @@ All notable changes to **5tar5ystem MMH3 Character Sheet Builder** are recorded 
 follows [semantic versioning](https://semver.org/): the node type (`MiniMaxH3CharacterSheet`) and
 the payload contract are what "breaking" refers to, not the panel's layout.
 
-## [Unreleased]
+## [1.2.3] - 2026-10-04
+
+Chained turnarounds work as they always did, and the plan now names the one input that makes
+them work - a reference that shows the body. A profile cell also stops being told to look away
+and to hold eye contact in the same breath.
 
 ### Changed
 
