@@ -246,8 +246,9 @@ class H3SheetRefMod(io.ComfyNode):
                             "13 = ~0.54s at 24 fps). A video reference is the only thing "
                             "a sheet has that carries motion, and the most expensive "
                             "member per second - rows are latent frames x (h/2) x (w/2), "
-                            "so this and ref_resolution are the two dials. The report "
-                            "prints what it cost.",
+                            "and H3 packs 5 latent frames per 17 pixel frames, so it "
+                            "steps: 13 frames is 2 latent frames (896 rows at 512px), 22 "
+                            "is 7. The report prints what it cost.",
                 ),
                 io.Float.Input(
                     "video_start",

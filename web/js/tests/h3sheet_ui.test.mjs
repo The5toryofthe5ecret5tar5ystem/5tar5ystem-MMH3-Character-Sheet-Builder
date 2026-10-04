@@ -214,6 +214,19 @@ assert.ok(wiring.includes("stopPreviewKeeper(this)"),
     "and the timer goes with the node (onRemoved), or it keeps a detached node alive");
 assert.ok(wiring.includes("document.hidden"),
     "a hidden tab does not run the keeper");
+// The panel is only ever as wide as its DOM-widget wrapper, and this frontend can write a
+// SQUEEZED width onto it (measured: an 880px node's wrapper at 345px) - which narrows every
+// card in the panel, the Browse overlay included. Nothing inside the panel can win against a
+// width on the wrapper, so the repair has to be re-asserted where the frontend has just laid
+// its widgets out: the draw pass, the keeper for an offscreen node, and the fit.
+assert.ok(wiring.includes("enforceWidgetWidth(this)) scheduleFit(this);"),
+    "the draw pass puts a squeezed DOM-widget width back");
+assert.ok(wiring.includes("if (enforceWidgetWidth(node)) scheduleFit(node);"),
+    "and the keeper does it for a node that is not being drawn");
+assert.ok(wiring.includes("    enforceWidgetWidth(node);"),
+    "the node fit repairs it first, because a narrow panel measures taller content");
+assert.ok(wiring.includes("enforceWidgetWidth,\n} from \"./h3sheet_core.mjs?boot="),
+    "all of that uses the one implementation in the panel module");
 // Panes fill the node now, so the fit needs a ceiling and the panel watches its own size.
 assert.ok(wiring.includes("ceiling: fitCeiling()"),
     "the node fit is capped by the viewport, or a long Results list asks for a 3000px node");

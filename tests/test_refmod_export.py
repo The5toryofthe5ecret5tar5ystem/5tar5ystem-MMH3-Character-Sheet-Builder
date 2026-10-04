@@ -651,7 +651,8 @@ def test_a_sheet_without_reference_videos_exports_no_motion_member(tmp_path, vid
     result = rx.export_bundle(cells=stills(1), video_vae="v", name="c", pack=pack)
     assert [mod.name for mod in result.mods] == ["c_views"]
     assert not [call for call in calls["extract"] if call.get("refs_video")]
-    assert not any("video" in line for line in result.lines), result.lines
+    assert not any("reference video(s) as" in line for line in result.lines), result.lines
+    assert not any(line.startswith("video:") for line in result.lines), result.lines
 
 
 def test_the_reference_videos_become_one_motion_member(tmp_path, sheets_root, input_root,

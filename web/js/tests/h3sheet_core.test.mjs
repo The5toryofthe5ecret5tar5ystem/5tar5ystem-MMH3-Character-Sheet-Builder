@@ -2598,5 +2598,41 @@ ok.push("reorder / slot helpers behave");
     ok.push("a hand-picked frame sticks, and picking/rebuilding updates the pane in place");
 }
 
+// --- a squeezed DOM-widget wrapper is put back ---------------------------------
+// The frontend re-measures a DOM widget on selection and can write a squeezed inline width
+// onto its wrapper (measured live on this ComfyUI: an 880px node's wrapper came back at
+// 345px). Everything inside the panel then follows it, including the Browse overlay, which is
+// `position: absolute; inset: 0` of the panel and so is never wider than the squeeze.
+{
+    const wrapper = document.createElement("div");
+    wrapper.className = "dom-widget size-full";
+    const element = document.createElement("div");
+    element.className = "mmx-sheet";
+    wrapper.append(element);
+    document.body.append(wrapper);
+    const node = { size: [880, 700], graph: {}, _mmxSheet: { widget: { element } } };
+
+    assert.equal(core.WIDGET_INSET, 20, "a node's inset around its DOM widget (measured)");
+    wrapper.style.width = "345px";                      // the squeeze
+    assert.equal(core.enforceWidgetWidth(node), true, "a squeezed wrapper is repaired");
+    assert.equal(wrapper.style.width, "860px", "back to the node's width minus its inset");
+    assert.equal(wrapper.style.maxWidth, "860px", "and the cap that allowed the squeeze lifted");
+    assert.equal(core.enforceWidgetWidth(node), false,
+        "a second call has nothing to do - this runs every frame");
+
+    wrapper.style.width = "1200px";
+    assert.equal(core.enforceWidgetWidth(node), false,
+        "a wrapper wider than the node is not ours to shrink");
+    node.size = [365, 700];
+    assert.equal(core.enforceWidgetWidth(node), false,
+        "a panel exactly as narrow as its node is left alone");
+    assert.equal(wrapper.style.width, "1200px", "and nothing was written");
+
+    assert.equal(core.enforceWidgetWidth({ size: [880, 700], graph: {}, _mmxSheet: {} }), false,
+        "no widget element, no repair");
+    document.body.removeChild(wrapper);
+    ok.push("a squeezed DOM-widget wrapper is widened back to its node");
+}
+
 console.log("h3sheet_core: PASS");
 for (const line of ok) console.log(" -", line);

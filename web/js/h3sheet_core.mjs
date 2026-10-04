@@ -296,7 +296,7 @@ export const KNOB_COLUMNS = 3;
  * build makes that a glance instead of an investigation; a test keeps it in step with the
  * import, so bumping one without the other fails the suite rather than confusing a user.
  */
-export const PANEL_BUILD = "h3sheet_v56";
+export const PANEL_BUILD = "h3sheet_v57";
 
 /** The frontend's own widget/host names, straight from the shipped frontend bundle. */
 export const PREVIEW_HOST_CLASS = "comfy-img-preview";
@@ -914,6 +914,39 @@ export const MAX_TILE_ASPECT = 2.6;
 //: scrolls again - inside a node that is already as tall as the screen. The wiring prefers a
 //: viewport-derived ceiling and falls back to this one.
 export const PANEL_FIT = { headerTop: 86, rowGap: 20, rowHeight: 24, bottomPad: 20, maxHeight: 1200 };
+
+//: The node's own inset around its DOM widget: a 880px node hosts an 860px panel.
+//: Measured on the live frontend at several sizes, so it is exact - and it is the whole
+//: invariant `enforceWidgetWidth` restores.
+export const WIDGET_INSET = 20;
+
+/** Put the panel's DOM-widget wrapper back to the node's own width.
+ *
+ * This frontend re-measures a DOM widget on selection and can write a SQUEEZED inline width
+ * onto its wrapper (a 880px node's wrapper at ``width: 345px``), which compresses the whole
+ * panel - every card, and the Browse overlay with it, because that overlay is only ever as
+ * wide as the panel (``position: absolute; inset: 0``). The panel is not the thing that is
+ * wrong, so nothing inside it can fix this: the wrapper's own width has to be put back.
+ *
+ * Grow only: a wrapper wider than the node is left alone (that is the frontend's layout
+ * doing something deliberate), and the write happens only when the number is actually wrong,
+ * so calling it every frame costs one parseFloat.
+ */
+export function enforceWidgetWidth(node, inset = WIDGET_INSET) {
+    const element = node?._mmxSheet?.widget?.element;
+    if (!element || !node.graph) return false;
+    // The frontend can REPLACE the wrapper, so it is re-located every call instead of
+    // remembered; the element itself is the one thing that stays put.
+    const wrapper = element.closest?.(".dom-widget") || element.parentElement;
+    if (!wrapper) return false;
+    const want = Math.max(240, Math.round(Number(node.size?.[0]) || 0) - inset);
+    const current = Number.parseFloat(wrapper.style?.width || "") || 0;
+    const capped = Number.parseFloat(wrapper.style?.maxWidth || "") || 0;
+    if (current >= want && (!capped || capped >= want)) return false;
+    wrapper.style.width = `${want}px`;
+    wrapper.style.maxWidth = `${want}px`;
+    return true;
+}
 
 /** Height the node needs for this panel: header + panel + knob rows.
  *

@@ -21,6 +21,11 @@ the payload contract are what "breaking" refers to, not the panel's layout.
   appearance members are tagged. 0 turns the member off. `video_frames` and `video_start`
   are appended **last** and optional, so an already-saved workflow's widget values keep
   lining up.
+* **The report gives the motion member its rows and flags one that hit `max_tokens`** (their
+  extractor drops frames to fit). Motion is by far the costliest member per second, and the
+  cost steps rather than climbs because H3 packs 5 latent frames per 17 pixel frames: measured
+  on a 16:9 reference video, 13 frames at `ref_resolution` 512 is **896 rows** (2 latent
+  frames) and the same window at 1152 is 4,608.
 * **A reference video's soundtrack is now a voice source.** H3's own ref2va node pairs a
   reference video with its own audio slot (`ref_video_audios.ref_video_audio_N`), so the
   sound the sheet was conditioned on came from those files too - the voice ladder now walks
@@ -46,6 +51,17 @@ the payload contract are what "breaking" refers to, not the panel's layout.
 
 ### Fixed
 
+* **A squeezed panel is widened back to its node.** ComfyUI's frontend re-measures a DOM
+  widget on selection and can write a *squeezed* inline width onto its wrapper - measured live
+  on this build: an 880px node's wrapper came back at `width: 345px`, which compressed the
+  whole panel to about a third of the node and the **Browse overlay** with it (that overlay is
+  `position: absolute; inset: 0` of the panel, so it is never wider than the panel is). Nothing
+  inside the panel can win against a `width` on the wrapper, so the repair is on the wrapper:
+  `enforceWidgetWidth` re-asserts `node.size[0] - 20` (the invariant, measured at several
+  sizes) from the node's draw pass, from the preview keeper for a node that is not being drawn,
+  and from the height fit - which needs it first, because a narrow panel measures *taller*
+  content. It only ever grows the wrapper and only writes when the number is wrong, so a frame
+  costs one `parseFloat`.
 * **`H3 Sheet → RefMod` expands `%date:...%` and `%seed%` in its `name`, like the Builder.**
   A name typed as `hero-%date:hhmmss%` was written to disk with the placeholder still in it
   (`hero-%date:hhmmss%.safetensors`), because the export passed the widget straight to their

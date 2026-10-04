@@ -687,9 +687,11 @@ not a target.
 
 `video_frames` is the motion dial (`0` turns video members off): the window is consecutive
 frames, which is what carries movement - and the most expensive member per second, because
-rows are `latent frames x (h/2) x (w/2)`. 13 frames at `ref_resolution` 512 is ~580 rows; at
-1152 it is ~9,200, so lower `video_frames` or `ref_resolution` when a video reference is in
-the sheet. The report prints what it cost, and says so if the member hit `max_tokens`.
+rows are `latent frames x (h/2) x (w/2)`. Measured on a 16:9 reference video: **13 frames at
+`ref_resolution` 512 is 896 rows** (2 latent frames), and the same window at 1152 is 4,608.
+H3 packs 5 latent frames per 17 pixel frames, so the cost steps rather than climbs (13 frames
+= 2 latent frames, 22 = 7). The report prints what it cost, and says so if the member hit
+`max_tokens`.
 
 ```text
 models/refmods/<subfolder>/<name>.safetensors      # <subfolder> defaults to character_sheets

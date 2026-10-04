@@ -26,7 +26,8 @@ import {
     REF_GROUPS,
     PANEL_FIT,
     panelFitHeight,
-} from "./h3sheet_core.mjs?boot=h3sheet_v56";
+    enforceWidgetWidth,
+} from "./h3sheet_core.mjs?boot=h3sheet_v57";
 
 const CLASS = "MiniMaxH3CharacterSheet";
 const DOM_WIDGET = "h3_character_sheet_ui";
@@ -60,6 +61,10 @@ function fitNodeToPanel(node) {
     const element = widget?.element;
     if (!widget || !element) return;
     if (app.canvas?.resizing_node === node) return;   // never fight a user's drag
+    // The node's width is the panel's width, and the frontend can have squeezed the wrapper
+    // under it (see enforceWidgetWidth): a narrow panel measures TALLER content, so the height
+    // this function is about to compute would be wrong too. Put the width back first.
+    enforceWidgetWidth(node);
     const knobs = (node.widgets || []).filter((item) => item !== widget && item.hidden !== true);
     // ComfyUI's own output previews are DOM widgets too, and in `compact` mode the pack caps
     // their height - so the fit has to size the node for THAT, not for the height the
@@ -644,6 +649,9 @@ function startPreviewKeeper(node) {
     node._mmxPreviewKeeper = setInterval(() => {
         const part = node._mmxSheet;
         if (!part || document.hidden || !node.graph) return;
+        // The wrapper's width can be re-written by the frontend at any time, background tab or
+        // not, so the same keeper that watches the preview caps watches that too.
+        if (enforceWidgetWidth(node)) scheduleFit(node);
         const result = enforcePreviewCaps(node, part.previewMode || nodePreviews(part.state), { skip: [DOM_WIDGET, DATA_WIDGET] });
         // Something was late or got inflated: settle the node around the corrected previews.
         if (result.changed) scheduleFit(node);
@@ -680,6 +688,10 @@ function wrapNode(nodeType) {
         const result = onDrawBackground?.apply(this, arguments);
         const part = this._mmxSheet;
         if (part) {
+            // The draw pass runs after the frontend has finished laying its widgets out, which
+            // is when a squeezed wrapper width has to be corrected (a repair inside the panel
+            // cannot win against a `width` on the wrapper).
+            if (enforceWidgetWidth(this)) scheduleFit(this);
             const caps = enforcePreviewCaps(this, part.previewMode || nodePreviews(part.state), {
                 skip: [DOM_WIDGET, DATA_WIDGET],
             });
@@ -742,4 +754,4 @@ app.registerExtension({
     },
 });
 
-export { CLASS, DOM_WIDGET, DATA_WIDGET, BASE, mountPanel, listMedia, readState, toPayload };
+export { CLASS, DOM_WIDGET, DATA_WIDGET, BASE, mountPanel, listMedia, readState, toPayload, enforceWidgetWidth };
