@@ -44,6 +44,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
+from .name_tokens import expand_tokens, has_tokens
+
 log = logging.getLogger("H3-Character-Sheet.refmod")
 
 PACK_DIRNAME = "ComfyUI-MiniMaxH3Mod"
@@ -264,6 +266,56 @@ def sanitize_name(name: Any, fallback: str = "character") -> str:
     """Their ``_sanitize_name`` rule: no path separators in a mod name."""
     text = str(name or "").strip().replace("/", "_").replace("\\", "_")
     return text or fallback
+
+
+#: Characters a file name may not carry on every filesystem, and what to write instead.
+#: Only reachable through an expanded placeholder (``%date:HH:mm%`` asks for a colon), so it
+#: is applied to the expanded name and never to the member names, which keep their spaces.
+_UNSAFE_FILE_CHARS = str.maketrans({":": "-", "*": "_", "?": "_", '"': "'",
+                                    "<": "(", ">": ")", "|": "-"})
+
+
+def sheet_seed(folder: Path | str | None) -> int | None:
+    """The seed the sheet was rendered with, when its manifest recorded one.
+
+    The sheet node expands ``%seed%`` with the seed of its run, so a bundle can only honour
+    that placeholder if the run wrote it down - which the manifest does
+    (``spec.render.seed``). A negative value is a "not pinned" sentinel, and then there is
+    nothing honest to print.
+    """
+    if folder is None:
+        return None
+    spec = sheet_manifest(folder).get("spec")
+    render = spec.get("render") if isinstance(spec, dict) else None
+    seed = render.get("seed") if isinstance(render, dict) else None
+    if isinstance(seed, bool):  # a bool is an int in Python, and never a seed
+        return None
+    try:
+        value = int(seed)
+    except (TypeError, ValueError):
+        return None
+    return value if value >= 0 else None
+
+
+def export_name(name: Any, folder: Path | str | None = None, *, now: Any = None) -> str:
+    """The bundle's name with its placeholders expanded, exactly like the Builder's.
+
+    ``%date%`` / ``%date:hhmmss%`` / ``%seed%`` are the vocabulary this pack implements
+    (core savers write the tokens literally), and the Builder expands them once per run in
+    ``output_name``. The export has to do the same or a name typed as
+    ``hero-%date:hhmmss%`` lands on disk with the placeholder still in it, which reads as
+    "the export ignores my date code". ``%seed%`` needs the sheet's seed, which the
+    manifest of the folder being read supplies; without it the token stays literal rather
+    than being invented.
+
+    A name with no placeholder is returned unchanged - deliberately no auto stamp: this is
+    a file you name on purpose, and re-exporting over it on purpose.
+    """
+    text = str(name or "").strip()
+    if not has_tokens(text):
+        return text
+    expanded = expand_tokens(text, seed=sheet_seed(folder), now=now)
+    return expanded.translate(_UNSAFE_FILE_CHARS)
 
 
 def sheet_folder(value: Any, *, newest: bool = True) -> Path | None:
@@ -888,7 +940,12 @@ def export_bundle(
         pack = load_pack()
     if api is None:
         api = entry_points(pack)
-    mod_name = sanitize_name(name)
+    # The folder is resolved first: a tokenised name is expanded against the sheet this
+    # export reads (its manifest carries the seed), not against "now" alone.
+    folder = sheet_folder(sheet_dir)
+    mod_name = sanitize_name(export_name(name, folder))
+    if mod_name != str(name or "").strip():
+        log.info("RefMod export: name %r -> %r", str(name), mod_name)
 
     result = ExportResult()
     lines: list[str] = []
@@ -931,7 +988,6 @@ def export_bundle(
         members.append(member)
         lines.append(f"appearance: the composited sheet as '{mod_name}_sheet'")
 
-    folder = sheet_folder(sheet_dir)
     voice, voice_lines = voice_member(
         api,
         name=mod_name,
@@ -1020,6 +1076,7 @@ __all__ = [
     "concat_audio",
     "entry_points",
     "export_bundle",
+    "export_name",
     "load_pack",
     "loaded_pack",
     "member_rows",
@@ -1032,6 +1089,7 @@ __all__ = [
     "sheet_audio_references",
     "sheet_folder",
     "sheet_manifest",
+    "sheet_seed",
     "split_stills",
     "voice_member",
 ]

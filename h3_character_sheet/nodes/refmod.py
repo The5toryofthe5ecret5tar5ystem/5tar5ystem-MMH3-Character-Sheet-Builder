@@ -125,7 +125,11 @@ class H3SheetRefMod(io.ComfyNode):
                     "name",
                     default="character",
                     tooltip="RefMod name and file name. Members are named after it "
-                            "(<name>_views, <name>_sheet, <name>_voice...).",
+                            "(<name>_views, <name>_sheet, <name>_voice...). "
+                            "%date:hhmmss% and %seed% work here exactly as they do in "
+                            "the Builder's output_name (a tokenised name is expanded "
+                            "once per export; %seed% needs the sheet's manifest, so it "
+                            "comes from the folder it reads).",
                 ),
                 io.String.Input(
                     "subfolder",

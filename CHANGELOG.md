@@ -14,6 +14,24 @@ the payload contract are what "breaking" refers to, not the panel's layout.
   beside the square pictures and stretched the grid. `tileAspect` now answers 1:1 for audio, so
   pictures and audios share one footprint and only video keeps a wide box - and a measured
   thumbnail still wins over any default. Panel-only change: hard-refresh (Ctrl+Shift+R).
+* **A tile can no longer be narrower than 9:16.** The aspect clamp allowed a very tall photo
+  down to 0.38, which made a tile narrower than a phone portrait - and at that width the tile's
+  own chrome overlaps itself: the kind chip and the enable checkbox share the 4px top strip with
+  the hover buttons, which are 18px wide. The floor is now `9/16` (`MIN_TILE_ASPECT`), so a
+  taller-than-portrait reference letterboxes inside a portrait tile instead of squeezing the
+  buttons on top of each other.
+
+### Fixed
+
+* **`H3 Sheet → RefMod` expands `%date:...%` and `%seed%` in its `name`, like the Builder.**
+  A name typed as `hero-%date:hhmmss%` was written to disk with the placeholder still in it
+  (`hero-%date:hhmmss%.safetensors`), because the export passed the widget straight to their
+  `save_bundle`. It now goes through the same `expand_tokens` the sheet node uses on
+  `output_name`, once per export - and `%seed%` is expanded with the seed the sheet was
+  rendered with (read from the manifest of the folder being exported, since that is the only
+  place it is recorded). A name with no placeholder is untouched: no auto stamp, because a
+  bundle is a file you name on purpose. Characters a file name may not carry on every
+  filesystem (`%date:HH:mm%` asks for a colon) are transliterated rather than trusted.
 
 ## [1.2.0] - 2026-10-04
 

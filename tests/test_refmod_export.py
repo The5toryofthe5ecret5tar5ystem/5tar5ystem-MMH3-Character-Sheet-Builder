@@ -12,6 +12,7 @@ The one thing this cannot check is the VAE math: that belongs to their pack.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -532,6 +533,70 @@ def test_nothing_connected_names_what_to_connect(tmp_path):
     pack, _calls = fake_pack(tmp_path)
     with pytest.raises(rx.RefModExportError, match="nothing to export"):
         rx.export_bundle(video_vae="v", name="c", pack=pack)
+
+
+# -------------------------------------------------------------------- the name
+def test_a_date_token_in_the_name_is_expanded():
+    """The Builder expands ``output_name`` per run; the export has to expand its own ``name``.
+
+    Otherwise ``hero-%date:hhmmss%`` is written to disk with the placeholder still in it,
+    which is what a user reads as "the export ignores my date code".
+    """
+    when = datetime(2026, 10, 4, 15, 30, 12)
+    assert rx.export_name("elf_girl-%date:hhmmss%", None, now=when) == "elf_girl-153012"
+    assert rx.export_name("%date%", None, now=when) == "20261004_153012"
+    assert rx.export_name("take-%date:yyyy-MM-dd%", None, now=when) == "take-2026-10-04"
+
+
+def test_a_plain_name_is_left_exactly_as_typed():
+    # No auto stamp here (unlike the sheet folder): a bundle is a file you name on purpose,
+    # and re-export over on purpose.
+    assert rx.export_name("character") == "character"
+    assert rx.export_name("elf girl v2") == "elf girl v2"
+    assert rx.export_name("") == "" and rx.export_name(None) == ""
+
+
+def test_a_name_gets_no_characters_a_file_name_cannot_carry():
+    when = datetime(2026, 10, 4, 15, 30, 12)
+    assert rx.export_name("take-%date:HH:mm%", None, now=when) == "take-15-30"
+
+
+def test_a_seed_token_uses_the_seed_the_sheet_was_rendered_with(tmp_path, sheets_root):
+    folder = make_sheet_folder(sheets_root, "sheet_run", cells=["c1"], clips=[])
+    manifest = json.loads((folder / "sheet_run.json").read_text(encoding="utf-8"))
+    manifest["spec"] = {"render": {"seed": 12345}}
+    (folder / "sheet_run.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert rx.sheet_seed(folder) == 12345
+    assert rx.export_name("hero-%seed%", folder) == "hero-12345"
+
+
+def test_a_seed_token_without_a_manifest_stays_literal(tmp_path, sheets_root):
+    """An invented seed would be worse than a placeholder: the sheet's manifest is the only
+    place the run's seed is written down."""
+    folder = make_sheet_folder(sheets_root, "sheet_run", cells=["c1"], clips=[])
+    assert rx.sheet_seed(folder) is None
+    assert rx.sheet_seed(None) is None
+    assert rx.export_name("hero-%seed%", folder) == "hero-%seed%"
+
+
+def test_a_negative_seed_is_a_sentinel_not_a_seed(tmp_path, sheets_root):
+    folder = make_sheet_folder(sheets_root, "sheet_run", cells=["c1"], clips=[])
+    manifest = json.loads((folder / "sheet_run.json").read_text(encoding="utf-8"))
+    manifest["spec"] = {"render": {"seed": -1}}
+    (folder / "sheet_run.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert rx.sheet_seed(folder) is None
+    assert rx.export_name("hero-%seed%", folder) == "hero-%seed%"
+
+
+def test_the_export_writes_the_expanded_name(tmp_path):
+    pack, calls = fake_pack(tmp_path)
+    result = rx.export_bundle(cells=stills(1), video_vae="v",
+                              name="hero-%date:hhmmss%", pack=pack)
+    name = calls["paths"][0]["name"]
+    assert name.startswith("hero-") and "%" not in name
+    assert calls["bundle"][0]["name"] == name, "the bundle carries the expanded name"
+    assert [mod.name for mod in calls["bundle"][0]["mods"]] == [f"{name}_views"]
+    assert name in result.path
 
 
 # ------------------------------------------------------------------- the folder

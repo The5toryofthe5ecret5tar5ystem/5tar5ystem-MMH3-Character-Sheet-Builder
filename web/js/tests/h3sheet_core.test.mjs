@@ -310,6 +310,22 @@ assert.ok(Math.abs(dims(gridTiles()[0]).w / dims(gridTiles()[0]).h - 0.5625) < 0
     "and the tile takes the photo's own aspect (no black bars)");
 ok.push("tiles scale to fit the box and keep the media's aspect ratio");
 
+// --- a tile never gets narrow enough to eat its own chrome --------------------
+// The kind chip (18px) + gap + enable checkbox (13px) + 4px padding is ~43px of the top
+// strip, and the hover buttons are 18px in the top-right corner. A tile thinner than that
+// stacks them on top of each other, which is what a 1:3 photo used to cause (the clamp
+// allowed 0.38). Reported from a real panel: "squished buttons overlapping".
+const veryTall = gridTiles()[0].querySelector("img");
+Object.defineProperty(veryTall, "naturalWidth", { value: 600, configurable: true });
+Object.defineProperty(veryTall, "naturalHeight", { value: 3000, configurable: true });
+veryTall.dispatchEvent(new dom.window.Event("load"));
+await tick();
+const slim = dims(gridTiles()[0]);
+assert.ok(slim.w / slim.h >= core.MIN_TILE_ASPECT - 0.01,
+    `a 1:3 photo is clamped to 9:16, not obeyed (${slim.w}x${slim.h})`);
+assert.ok(slim.w >= 43, `and the tile still has room for its own top strip (${slim.w}px wide)`);
+ok.push("the narrowest tile is a 9:16 portrait, so its buttons keep their corners");
+
 // --- the layout helper itself: more tiles, smaller tiles ----------------------
 assert.equal(core.fitTileLayout([], {}).perRow, 0, "no tiles, no layout");
 const wide = core.fitTileLayout([1, 1], { width: 400, height: 160, gap: 6 });
@@ -326,8 +342,10 @@ assert.ok(wrapped.tileHeight <= 142, "and the row stays inside the box height");
 const tooMany = core.fitTileLayout([2.5, 1.78, 1, 1, 1], { width: 628, height: 142, gap: 6 });
 assert.ok(tooMany.rows * tooMany.tileHeight + (tooMany.rows - 1) * 6 <= 142 + 0.001,
     `every row fits the box height: ${JSON.stringify(tooMany)}`);
-assert.equal(core.clampAspect(0.05), 0.38, "extreme ratios are clamped");
-assert.equal(core.clampAspect(9), 2.6);
+assert.equal(core.clampAspect(0.05), core.MIN_TILE_ASPECT,
+    "a sliver of a photo is clamped to the widest of the extremes");
+assert.equal(core.MIN_TILE_ASPECT, 9 / 16, "and that extreme is a phone portrait, not thinner");
+assert.equal(core.clampAspect(9), core.MAX_TILE_ASPECT);
 assert.ok(Math.abs(core.clampAspect(0.5625) - 0.5625) < 0.001,
     "a 9:16 portrait is not squeezed into 2:3 (a wider box would put bars back)");
 assert.equal(core.clampAspect(NaN), null);

@@ -896,6 +896,13 @@ export const SORTED_KINDS = ["image", "video", "audio"];
 //: (see ``fitTileLayout``), so nothing is letterboxed and nothing scrolls.
 export const REF_SECTION = { height: 178, width: 640, gap: 6, roleHeight: 24, minTile: 44 };
 
+//: The narrowest a reference tile may get, as width / height: a phone portrait (9:16).
+//: Anything narrower squeezes the tile's own chrome (see `clampAspect`).
+//: The ceiling is a cinemascope clip (2.6:1); beyond that a single reference would eat
+//: the whole row.
+export const MIN_TILE_ASPECT = 9 / 16;
+export const MAX_TILE_ASPECT = 2.6;
+
 //: Node geometry measured on the live frontend: the DOM widget starts under the
 //: node header (`widget.y`, 86px), the knob rows follow it with a small gap, and the node
 //: keeps 20px below the panel of its own (measured: node height - widget.y - panel
@@ -1736,9 +1743,12 @@ export function refViewUrl(file) {
 export function clampAspect(ratio) {
     const value = Number(ratio);
     if (!Number.isFinite(value) || value <= 0) return null;
-    // Wide enough that a phone photo (9:16) or a cinemascope clip keeps its own
-    // shape: clamping it to 2:3 would put bars back in the tile.
-    return Math.min(2.6, Math.max(0.38, Math.round(value * 1000) / 1000));
+    // The floor is a phone portrait (9:16), not a sliver: a narrower tile has no room for
+    // its own chrome - the kind chip (18px) and the enable checkbox (13px) share the 4px
+    // top strip with the 18px hover buttons, and below ~46px they land on each other. A
+    // taller-than-portrait reference letterboxes inside a 9:16 tile instead (object-fit:
+    // contain), which is the shape the tile was always going to show it in.
+    return Math.min(MAX_TILE_ASPECT, Math.max(MIN_TILE_ASPECT, Math.round(value * 1000) / 1000));
 }
 
 
