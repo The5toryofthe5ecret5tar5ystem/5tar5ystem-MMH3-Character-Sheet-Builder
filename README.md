@@ -3,7 +3,7 @@
 **Repo**: [The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder](https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder) ·
 **License**: GPL-3.0 · **ComfyUI node**: `MiniMaxH3CharacterSheet` · **Installs as**: a
 custom-node folder (any name), typically `ComfyUI-H3-Character-Sheet`
-**Version**: 1.1.0 · [`CHANGELOG.md`](CHANGELOG.md) ·
+**Version**: 1.2.0 · [`CHANGELOG.md`](CHANGELOG.md) ·
 [releases](https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/releases) ·
 [`docs/civitai-post.md`](docs/civitai-post.md) is the short public writeup (features, model
 links, install steps)

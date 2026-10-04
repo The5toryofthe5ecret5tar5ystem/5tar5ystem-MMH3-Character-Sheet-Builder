@@ -4,7 +4,7 @@ All notable changes to **5tar5ystem MMH3 Character Sheet Builder** are recorded 
 follows [semantic versioning](https://semver.org/): the node type (`MiniMaxH3CharacterSheet`) and
 the payload contract are what "breaking" refers to, not the panel's layout.
 
-## [Unreleased]
+## [1.2.0] - 2026-10-04
 
 The voice member of a RefMod export now defaults to the voice the sheet was *built from*,
 and the report says how much of the model's attention each member actually gets - the two
