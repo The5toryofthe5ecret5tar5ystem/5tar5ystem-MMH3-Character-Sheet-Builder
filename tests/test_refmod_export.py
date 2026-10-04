@@ -47,8 +47,16 @@ def fake_pack(tmp_path):
             calls["extract"].append(kwargs)
             name = kwargs["name"]
             refs = len(kwargs.get("refs_image") or {})
-            mod = FakeMod(name=name, kind="video", latent_t=refs, source="stack",
-                          tokens=refs * 100)
+            video_refs = kwargs.get("refs_video") or {}
+            frames = sum(int(batch.shape[0]) for batch in video_refs.values())
+            if refs:
+                mod = FakeMod(name=name, kind="video", latent_t=refs, source="stack",
+                              tokens=refs * 100)
+            else:
+                # A video member: their extractor concatenates the encodes, so the member's
+                # row count is the frames it was handed (through the 4x causal encoder).
+                mod = FakeMod(name=name, kind="video", latent_t=max(1, frames // 4),
+                              source="video", tokens=max(100, frames * 25))
             return SimpleNamespace(result=([(mod, 1.0)], "details"))
 
     def make_audio_mod(vae, audio, name, max_seconds=30.0, max_tokens=5120,
@@ -97,6 +105,25 @@ VOICE = {"waveform": torch.zeros((1, 2, 32000), dtype=torch.float32), "sample_ra
 
 
 @pytest.fixture()
+def video_decode(monkeypatch):
+    """Decoding a reference video is ComfyUI's job - the suite hands over frames instead.
+
+    Records what each window was asked for, so the causal snap and the start offset are
+    pinned without a real container (the count that arrives here has already been snapped
+    by :func:`rx.load_video_window`'s caller).
+    """
+    asked: list[dict] = []
+
+    def fake(path, *, frames, start=0.0, short_edge=None):
+        asked.append({"path": Path(path).name, "frames": int(frames), "start": start,
+                      "short_edge": short_edge})
+        return torch.zeros((max(int(frames), 1), 8, 8, 3), dtype=torch.float32)
+
+    monkeypatch.setattr(rx, "load_video_window", fake)
+    return asked
+
+
+@pytest.fixture()
 def sheets_root(tmp_path, monkeypatch):
     """Point the store at a scratch output folder, like the grid tests do."""
     root = tmp_path / "minimax_sheets"
@@ -123,28 +150,33 @@ def make_sheet_folder(
     cells: list[str],
     clips: list[str],
     audios: list[str] | None = None,
+    videos: list[str] | None = None,
     input_root: Path | None = None,
 ) -> Path:
     """A sheet folder with the manifest and the clips the export reads.
 
-    ``audios`` writes ``spec.refs.audios`` the way the Builder's References tab does
-    and puts the files in the input folder - the reference audio the sheet was rendered
-    with, which is what the voice ladder offers first.
+    ``audios`` writes ``spec.refs.audios`` and ``videos`` writes ``spec.refs.videos``, the
+    way the Builder's References tab does, with the files in the input folder - the media
+    the sheet itself was rendered with. A video reference is the one that carries motion,
+    and H3 pairs it with its own soundtrack slot.
     """
     folder = root / name
     (folder / "clips").mkdir(parents=True, exist_ok=True)
-    manifest: dict[str, object] = {"cells": {cell: {"index": 0} for cell in cells}}
+    refs: dict[str, list[dict[str, object]]] = {}
     if audios:
-        manifest["spec"] = {
-            "refs": {
-                "audios": [
-                    {"audioFile": audio, "role": "voice", "enabled": True}
-                    for audio in audios
-                ]
-            }
-        }
-        for audio in audios:
-            target = (input_root if input_root is not None else folder) / audio
+        refs["audios"] = [
+            {"audioFile": audio, "role": "voice", "enabled": True} for audio in audios
+        ]
+    if videos:
+        refs["videos"] = [
+            {"videoFile": video, "role": "pose", "enabled": True} for video in videos
+        ]
+    manifest: dict[str, object] = {"cells": {cell: {"index": 0} for cell in cells}}
+    if refs:
+        manifest["spec"] = {"refs": refs}
+    for names in (audios, videos):
+        for media in names or []:
+            target = (input_root if input_root is not None else folder) / media
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(b"RIFF")
     (folder / f"{name}.json").write_text(json.dumps(manifest), encoding="utf-8")
@@ -597,6 +629,214 @@ def test_the_export_writes_the_expanded_name(tmp_path):
     assert calls["bundle"][0]["name"] == name, "the bundle carries the expanded name"
     assert [mod.name for mod in calls["bundle"][0]["mods"]] == [f"{name}_views"]
     assert name in result.path
+
+
+# ------------------------------------------------------------- the motion member
+def test_a_frame_count_is_snapped_to_h3s_causal_grid():
+    """Their extractor re-samples anything off the grid, which strews a window of motion.
+
+    4k+1 is the only shape H3's causal video VAE accepts (one leading keyframe, then
+    groups of four), so the count is snapped before the read.
+    """
+    assert rx.causal_frames(0) == 0 and rx.causal_frames(-3) == 0
+    assert rx.causal_frames(5) == 5 and rx.causal_frames(9) == 9 and rx.causal_frames(13) == 13
+    assert rx.causal_frames(16) == 13, "the default request lands on the grid"
+    assert rx.causal_frames(17) == 17 and rx.causal_frames(20) == 17
+    assert rx.causal_frames(3) == rx.MIN_VIDEO_FRAMES, "below their floor a clip is not a video"
+    assert rx.causal_frames("nonsense") == 0
+
+
+def test_a_sheet_without_reference_videos_exports_no_motion_member(tmp_path, video_decode):
+    pack, calls = fake_pack(tmp_path)
+    result = rx.export_bundle(cells=stills(1), video_vae="v", name="c", pack=pack)
+    assert [mod.name for mod in result.mods] == ["c_views"]
+    assert not [call for call in calls["extract"] if call.get("refs_video")]
+    assert not any("video" in line for line in result.lines), result.lines
+
+
+def test_the_reference_videos_become_one_motion_member(tmp_path, sheets_root, input_root,
+                                                       video_decode):
+    """Their ``refs_video`` autogrow takes frame batches, so a video ref is a window of frames."""
+    pack, calls = fake_pack(tmp_path)
+    folder = make_sheet_folder(sheets_root, "sheet_run", cells=["c1"], clips=[],
+                               videos=["walk.mp4", "turn.mp4"], input_root=input_root)
+    result = rx.export_bundle(cells=stills(2), video_vae="v", audio_vae="a",
+                              sheet_dir=str(folder), name="run", pack=pack)
+    assert [mod.name for mod in result.mods][:2] == ["run_views", "run_videos"]
+
+    video_call = next(call for call in calls["extract"] if call.get("refs_video"))
+    assert list(video_call["refs_video"]) == ["ref_video_1", "ref_video_2"]
+    assert video_call["latent_frames"] == 13, "16 frames snapped to the causal grid"
+    assert video_call["mode"] == "encode", "Full Reference is their encoder's real encode"
+    assert video_call["save"] is False
+    assert [ask["path"] for ask in video_decode] == ["walk.mp4", "turn.mp4"]
+    assert all(ask["frames"] == 13 for ask in video_decode)
+    assert all(ask["short_edge"] == 1024 for ask in video_decode), "shrunk before the encode"
+    assert any("2 reference video(s) as 'run_videos'" in line for line in result.lines)
+
+
+def test_the_motion_window_starts_where_the_widget_says(tmp_path, sheets_root, input_root,
+                                                        video_decode):
+    pack, _calls = fake_pack(tmp_path)
+    folder = make_sheet_folder(sheets_root, "sheet_run", cells=["c1"], clips=[],
+                               videos=["walk.mp4"], input_root=input_root)
+    rx.export_bundle(cells=stills(1), video_vae="v", sheet_dir=str(folder), name="run",
+                     video_frames=34, video_start=2.5, pack=pack)
+    assert video_decode[0]["frames"] == 33, "34 snapped down to the grid"
+    assert video_decode[0]["start"] == 2.5
+
+
+def test_video_frames_zero_says_what_it_skipped(tmp_path, sheets_root, input_root):
+    pack, calls = fake_pack(tmp_path)
+    folder = make_sheet_folder(sheets_root, "sheet_run", cells=["c1"], clips=[],
+                               videos=["walk.mp4"], input_root=input_root)
+    result = rx.export_bundle(cells=stills(1), video_vae="v", sheet_dir=str(folder),
+                              name="run", video_frames=0, pack=pack)
+    assert not [call for call in calls["extract"] if call.get("refs_video")]
+    assert any("1 reference video(s) not exported" in line for line in result.lines), (
+        "turning motion off is discoverable, not silent"
+    )
+
+
+def test_an_unreadable_reference_video_does_not_cost_the_bundle(tmp_path, sheets_root,
+                                                                input_root, monkeypatch):
+    pack, calls = fake_pack(tmp_path)
+    folder = make_sheet_folder(sheets_root, "sheet_run", cells=["c1"], clips=[],
+                               videos=["broken.mp4"], input_root=input_root)
+
+    def broken(path, **_kwargs):
+        raise rx.RefModExportError(f"{Path(path).name} gave 2 frame(s) - past the end?")
+
+    monkeypatch.setattr(rx, "load_video_window", broken)
+    result = rx.export_bundle(cells=stills(1), video_vae="v", sheet_dir=str(folder),
+                              name="run", pack=pack)
+    assert [mod.name for mod in result.mods] == ["run_views"]
+    assert any("broken.mp4 could not be read" in line for line in result.lines)
+
+
+def test_a_motion_member_that_hits_the_token_cap_says_so(tmp_path, sheets_root, input_root,
+                                                         video_decode):
+    """Rows are latent frames x (h/2) x (w/2), so a high ref_resolution eats the budget fast."""
+    pack, _calls = fake_pack(tmp_path)
+    folder = make_sheet_folder(sheets_root, "sheet_run", cells=["c1"], clips=[],
+                               videos=["walk.mp4"], input_root=input_root)
+    result = rx.export_bundle(cells=None, sheet=None, video_vae="v", sheet_dir=str(folder),
+                              name="run", max_tokens=300, pack=pack)
+    assert any("at the 'max_tokens' cap" in line for line in result.lines)
+
+
+def test_a_missing_reference_video_is_reported_not_guessed(tmp_path, sheets_root, input_root,
+                                                           video_decode):
+    pack, _calls = fake_pack(tmp_path)
+    folder = make_sheet_folder(sheets_root, "sheet_run", cells=["c1"], clips=[],
+                               videos=["gone.mp4"], input_root=input_root)
+    (input_root / "gone.mp4").unlink()
+    result = rx.export_bundle(cells=stills(1), video_vae="v", sheet_dir=str(folder),
+                              name="run", pack=pack)
+    assert [mod.name for mod in result.mods] == ["run_views"]
+    assert any("gone.mp4" in line and "not on disk" in line for line in result.lines)
+
+
+def test_the_reference_videos_soundtracks_are_a_voice_source(tmp_path, sheets_root,
+                                                             input_root, monkeypatch):
+    """H3 pairs a reference video with its own soundtrack, so the bundle can hear it too."""
+    pack, calls = fake_pack(tmp_path)
+    folder = make_sheet_folder(sheets_root, "sheet_run", cells=["c1"],
+                               clips=["c1_00001_.mp4"], videos=["talk.mp4"],
+                               input_root=input_root)
+    monkeypatch.setattr(rx, "clip_audio", lambda path: VOICE)
+    result = rx.export_bundle(cells=stills(1), video_vae="v", audio_vae="a",
+                              sheet_dir=str(folder), name="run", pack=pack)
+    assert calls["audio"][0]["name"] == "run_voice_videos"
+    assert any("the soundtrack of the reference video (talk.mp4)" in line
+               for line in result.lines)
+    assert any("not used" in line and "cell clip" in line for line in result.lines)
+
+
+def test_a_dedicated_audio_reference_still_beats_a_video_soundtrack(tmp_path, sheets_root,
+                                                                   input_root, monkeypatch):
+    pack, calls = fake_pack(tmp_path)
+    folder = make_sheet_folder(sheets_root, "sheet_run", cells=["c1"], clips=[],
+                               audios=["voice.wav"], videos=["talk.mp4"],
+                               input_root=input_root)
+    monkeypatch.setattr(rx, "clip_audio", lambda path: VOICE)
+    result = rx.export_bundle(cells=stills(1), video_vae="v", audio_vae="a",
+                              sheet_dir=str(folder), name="run", pack=pack)
+    assert calls["audio"][0]["name"] == "run_voice", (
+        "the tile the user dropped in is the deliberate voice choice"
+    )
+    assert any("reference video soundtrack(s)" in line for line in result.lines), (
+        "and the report says what the ladder passed over"
+    )
+
+
+def test_a_video_without_an_audio_track_is_skipped_by_the_ladder(tmp_path, sheets_root,
+                                                                input_root, monkeypatch):
+    pack, calls = fake_pack(tmp_path)
+    folder = make_sheet_folder(sheets_root, "sheet_run", cells=["c1"],
+                               clips=["c1_00001_.mp4"], videos=["silent.mp4", "talk.mp4"],
+                               input_root=input_root)
+
+    def picky(path):
+        if Path(path).name == "silent.mp4":
+            raise ValueError("no audio stream")
+        return VOICE
+
+    monkeypatch.setattr(rx, "clip_audio", picky)
+    result = rx.export_bundle(cells=stills(1), video_vae="v", audio_vae="a",
+                              sheet_dir=str(folder), name="run", pack=pack)
+    assert calls["audio"][0]["name"] == "run_voice_videos", (
+        "one silent clip does not disqualify the reference's sound"
+    )
+    assert "2 reference videos" in result.report
+
+
+# ---------------------------------------------------------------- reading a window
+class FakeVideo:
+    """Their ``VideoFromFile`` shape: a frame rate and components, no decoding at all."""
+
+    def __init__(self, frames, rate=24.0):
+        self._frames = frames
+        self._rate = rate
+
+    def get_frame_rate(self):
+        return self._rate
+
+    def get_components(self):
+        return SimpleNamespace(images=self._frames)
+
+
+def test_the_video_window_reads_only_the_frames_it_needs(monkeypatch):
+    """A 13-frame member must not decode a whole 15s reference: PyAV seeks and stops."""
+    batch = torch.zeros((40, 6, 8, 3), dtype=torch.float32)
+    asked: list[dict] = []
+
+    def fake_source(path, *, start=0.0, duration=0.0):
+        asked.append({"start": start, "duration": duration})
+        return FakeVideo(batch, rate=25.0)
+
+    monkeypatch.setattr(rx, "video_source", fake_source)
+    frames = rx.load_video_window("clip.mp4", frames=16)
+    assert frames.shape[0] == 13, "the causal snap happens before the read"
+    assert len(asked) == 2, "one metadata probe, then the window"
+    assert asked[1]["start"] == 0.0
+    assert abs(asked[1]["duration"] - 14 / 25.0) < 1e-9, (
+        "13 frames plus one of slack, at the container's own rate"
+    )
+
+
+def test_a_window_past_the_end_of_the_clip_is_an_error_not_a_still(monkeypatch):
+    monkeypatch.setattr(rx, "video_source",
+                        lambda path, **_kwargs: FakeVideo(torch.zeros((3, 6, 8, 3))))
+    with pytest.raises(rx.RefModExportError, match="needs 5"):
+        rx.load_video_window("clip.mp4", frames=16, start=99.0)
+
+
+def test_frames_are_shrunk_before_the_encode():
+    shrunk = rx.shrink_frames(torch.zeros((2, 1080, 1920, 3)), 512)
+    assert (int(shrunk.shape[1]), int(shrunk.shape[2])) == (512, 896)
+    same = rx.shrink_frames(torch.zeros((2, 216, 384, 3)), 512)
+    assert tuple(same.shape) == (2, 216, 384, 3), "never upscales what is already small"
 
 
 # ------------------------------------------------------------------- the folder

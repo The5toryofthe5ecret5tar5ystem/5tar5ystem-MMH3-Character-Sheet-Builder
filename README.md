@@ -672,16 +672,24 @@ rides H3's own reference path for a fraction of the tokens a real reference cost
 |---|---|---|
 | `<name>_views` | the Builder's `cells` output - the picked still of every cell, stacked (up to their 16-slot limit, sampled end to end) | `[1,24,T,H,W]` |
 | `<name>_sheet` | the Builder's `sheet` output - the composite, as its own member | `[1,24,1,H,W]` |
+| `<name>_videos` | each reference video in the Builder's References tab - a window of consecutive frames (`video_frames`, snapped to H3's causal grid, from `video_start`) | `[1,24,T,H,W]` |
 | `<name>_voice` | the sheet's **own reference audio** - the WAV in the Builder's References tab, recorded in the manifest | `[1,32,2,T]` |
+| `<name>_voice_videos` | the soundtracks of those reference videos, joined (H3 pairs a reference video with its own soundtrack) | `[1,32,2,T]` |
 | `<name>_voice_cells` | every exported cell clip joined into one waveform (the fallback when the manifest has no reference audio) | `[1,32,2,T]` |
 | `<name>_voice_cellN` | the audio track of cell *N*'s exported clip, forced with `voice_cell=n` | `[1,32,2,T]` |
 
-`voice_cell` is the ladder switch: `-1` (default) walks *reference audio -> cell clips
-joined -> a connected `AUDIO`*, `0` keeps the sheet out of it (a wired clip only) and
-`n` forces the nth cell's clip. The reference wins by default because it is the voice
-the sheet was built from - seconds long and clean, where a cell clip only holds the ~1s
-H3 generated for that one take. `voice_seconds` is a **ceiling** on what is encoded, not
-a target.
+`voice_cell` is the ladder switch: `-1` (default) walks *reference audio -> reference-video
+soundtracks -> cell clips joined -> a connected `AUDIO`*, `0` keeps the sheet out of it (a
+wired clip only) and `n` forces the nth cell's clip. The reference wins by default because it
+is the voice the sheet was built from - seconds long and clean, where a cell clip only holds
+the ~1s H3 generated for that one take. `voice_seconds` is a **ceiling** on what is encoded,
+not a target.
+
+`video_frames` is the motion dial (`0` turns video members off): the window is consecutive
+frames, which is what carries movement - and the most expensive member per second, because
+rows are `latent frames x (h/2) x (w/2)`. 13 frames at `ref_resolution` 512 is ~580 rows; at
+1152 it is ~9,200, so lower `video_frames` or `ref_resolution` when a video reference is in
+the sheet. The report prints what it cost, and says so if the member hit `max_tokens`.
 
 ```text
 models/refmods/<subfolder>/<name>.safetensors      # <subfolder> defaults to character_sheets

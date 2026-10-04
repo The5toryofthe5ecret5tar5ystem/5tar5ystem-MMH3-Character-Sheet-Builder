@@ -6,6 +6,29 @@ the payload contract are what "breaking" refers to, not the panel's layout.
 
 ## [Unreleased]
 
+### Added
+
+* **Reference videos become a motion member in the RefMod bundle.** A video is the only
+  thing in a sheet that carries *motion*, and until now the export ignored it completely:
+  it called their `Create H3 RefMod` with `refs_image` only, so a sheet built from
+  reference videos shipped as stills. `video_frames` (default 16) is how many
+  **consecutive** frames each reference video contributes as `<name>_videos`, taken from
+  `video_start`; the count is snapped to H3's causal grid (4k+1, so 16 -> 13 frames = a
+  ~0.5s window) *before* the read, because a count off the grid makes their extractor
+  re-sample the batch apart and a movement becomes a flipbook. Frames are decoded by
+  ComfyUI's own video code (`InputImpl.VideoFromFile`) reading only the window asked for,
+  shrunk to `ref_resolution` before the encode, and are tagged `pose_motion` whatever the
+  appearance members are tagged. 0 turns the member off. `video_frames` and `video_start`
+  are appended **last** and optional, so an already-saved workflow's widget values keep
+  lining up.
+* **A reference video's soundtrack is now a voice source.** H3's own ref2va node pairs a
+  reference video with its own audio slot (`ref_video_audios.ref_video_audio_N`), so the
+  sound the sheet was conditioned on came from those files too - the voice ladder now walks
+  *reference audio -> reference-video soundtracks -> cell clips -> connected audio* and
+  names the member after what it used (`<name>_voice_videos`). A video with no audio track
+  is skipped rather than treated as an error, and whatever the ladder passed over is named
+  in the report.
+
 ### Changed
 
 * **Audio reference tiles are square, not wide bars.** An audio reference has no shape of its

@@ -74,6 +74,19 @@ VOICE_SHARE_HINT = 0.02
 #: both spellings; naming ours explicitly keeps this working if they rename again).
 MODES = {"Full Reference": "encode", "Compressed Reference": "training"}
 
+#: H3's video VAE is causal: it compresses time in groups of 4 with one leading
+#: keyframe, so it only accepts pixel-frame counts of the form ``4k+1`` (5, 9, 13, 17...).
+#: Their extractor snaps a video reference to this grid, and so do we - a count that is
+#: already on the grid is passed through untouched, instead of being resampled.
+CAUSAL_GROUP = 4
+#: Fewest frames a video member can be: their extractor treats a single frame as a still
+#: (``is_video = frames > 1``) and core's ref2video refuses under ~0.2s.
+MIN_VIDEO_FRAMES = 5
+#: Frames of each reference video the export takes by default (snapped to the grid: 16 ->
+#: 13, which is ~0.54s at 24 fps). It is the one dial that decides what a motion member
+#: costs, and 0 turns video members off.
+DEFAULT_VIDEO_FRAMES = 16
+
 #: A voice member is an H3 audio-VAE encode, so it needs that VAE. Rather than fail an
 #: export whose appearance members are perfectly fine, the voice is skipped and the
 #: report says why - with the exact filename to load.
@@ -449,6 +462,58 @@ def sheet_audio_references(folder: Path | str | None) -> list[Path]:
     return sheet_audio_reference_rows(folder)[0]
 
 
+def sheet_video_reference_rows(folder: Path | str | None) -> tuple[list[Path], list[str]]:
+    """``(reference video files on disk, names the manifest lists but that are gone)``.
+
+    A video reference is the only reference that carries *motion* - and, in H3's own
+    ref2va node, its own soundtrack as an index-paired second slot
+    (``ref_video_audios.ref_video_audio_N``). Both come from the same file, which is why
+    one reader serves the motion member and the voice ladder.
+    """
+    if folder is None:
+        return [], []
+    spec = sheet_manifest(folder).get("spec")
+    refs = spec.get("refs") if isinstance(spec, dict) else None
+    entries = refs.get("videos") if isinstance(refs, dict) else None
+    found: list[Path] = []
+    missing: list[str] = []
+    for entry in entries if isinstance(entries, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("enabled") is False:
+            continue
+        name = str(entry.get("videoFile") or "").strip()
+        if not name:
+            continue
+        path = resolve_reference_file(name, folder)
+        if path is None:
+            missing.append(Path(name).name)
+        elif path not in found:
+            found.append(path)
+    return found, missing
+
+
+def sheet_video_references(folder: Path | str | None) -> list[Path]:
+    """The reference videos of a sheet that are on disk (see the rows helper)."""
+    return sheet_video_reference_rows(folder)[0]
+
+
+def causal_frames(count: Any) -> int:
+    """Snap a frame count to H3's causal grid (``4k+1``), never below the video floor.
+
+    Their extractor re-samples any count that is *not* on the grid, which would break the
+    frames apart instead of keeping a consecutive window, so the snap happens here first.
+    """
+    try:
+        value = int(count)
+    except (TypeError, ValueError):
+        return 0
+    if value <= 0:
+        return 0
+    snapped = ((max(value, MIN_VIDEO_FRAMES) - 1) // CAUSAL_GROUP) * CAUSAL_GROUP + 1
+    return max(MIN_VIDEO_FRAMES, snapped)
+
+
 def cell_ids(folder: Path) -> list[str]:
     """Cell ids of a sheet folder, in sheet order (manifest, then picks, then clips)."""
     folder = Path(folder)
@@ -571,6 +636,105 @@ def concat_audio(
     return {"waveform": joined, "sample_rate": int(sample_rate)}
 
 
+def video_soundtracks(videos: Sequence[Path], *, max_seconds: float | None = None) -> Any:
+    """The soundtracks of reference videos, joined - silently skipping silent files.
+
+    A reference video does not have to carry audio (a silent b-roll clip is normal), and in
+    H3's own ref2va node its soundtrack is an index-paired second slot
+    (``ref_video_audios.ref_video_audio_N``), so this is the exact material the sheet was
+    conditioned on. Files with no audio stream are dropped rather than failing the member:
+    what the ladder wants is whatever sound the sheet's videos do carry.
+    """
+    tracks: list[Any] = []
+    for path in videos:
+        try:
+            tracks.append(clip_audio(path))
+        except Exception:  # noqa: BLE001 - "this file has no audio track" is an answer
+            continue
+    return concat_audio(tracks, max_seconds=max_seconds)
+
+
+def video_source(path: Path | str, *, start: float = 0.0, duration: float = 0.0) -> Any:
+    """ComfyUI's own ``VideoFromFile`` - the object its ``Load Video`` node builds.
+
+    Handing a *window* to it (``start`` + ``duration``) is what keeps a 13-frame member
+    from decoding a whole 15s reference at 1080p: PyAV seeks to the window and stops at its
+    end, so nothing else is ever materialised.
+    """
+    from comfy_api.latest import InputImpl  # noqa: PLC0415 - ComfyUI only
+
+    return InputImpl.VideoFromFile(str(path), start_time=float(start),
+                                   duration=float(duration))
+
+
+def video_frame_rate(source: Any, default: float = 24.0) -> float:
+    """The container's average frame rate (metadata only - no frames decoded)."""
+    try:
+        rate = float(source.get_frame_rate())
+    except Exception:  # noqa: BLE001 - an odd container is not worth failing over
+        return default
+    return rate if rate > 0 else default
+
+
+def shrink_frames(images: Any, short_edge: int) -> Any:
+    """Downscale a frame batch to ``short_edge`` (never up), before it is handed over.
+
+    Their extractor resizes to ``ref_resolution`` anyway, so this changes nothing about the
+    result - it only stops a 4K reference video from being held at full size (float32)
+    while several of them wait their turn in the encode loop.
+    """
+    try:
+        height, width = int(images.shape[1]), int(images.shape[2])
+    except (AttributeError, IndexError, TypeError, ValueError):
+        return images
+    current = min(height, width)
+    target = int(short_edge)
+    if target <= 0 or current <= target:
+        return images
+    scale = target / current
+    width_to = max(32, round(width * scale / 32) * 32)
+    height_to = max(32, round(height * scale / 32) * 32)
+    import comfy.utils  # noqa: PLC0415 - ComfyUI only
+
+    samples = comfy.utils.common_upscale(images.movedim(-1, 1), width_to, height_to,
+                                        "lanczos", "disabled")
+    return samples.movedim(1, -1)
+
+
+def load_video_window(
+    path: Path | str,
+    *,
+    frames: int,
+    start: float = 0.0,
+    short_edge: int | None = None,
+) -> Any:
+    """A consecutive window of a reference video, as the frame batch their encoder wants.
+
+    ``frames`` is snapped to H3's causal grid *before* the read, because the point of a
+    video member is a real moment of motion: a count off the grid makes their extractor
+    re-sample the batch apart, which turns one movement into a flipbook. The window is read
+    from ``start`` for one frame longer than asked, so a container that disagrees about
+    which frame lands inside it cannot leave the member short.
+    """
+    wanted = causal_frames(frames)
+    if not wanted:
+        raise RefModExportError("a video member needs at least 5 frames.")
+    offset = max(0.0, float(start or 0.0))
+    rate = video_frame_rate(video_source(path, start=offset))
+    components = video_source(path, start=offset,
+                              duration=(wanted + 1) / rate).get_components()
+    images = getattr(components, "images", None)
+    if images is None or not hasattr(images, "shape") or not len(images.shape):
+        raise RefModExportError(f"{Path(path).name} decoded to no frames.")
+    images = images[:wanted]
+    if int(images.shape[0]) < MIN_VIDEO_FRAMES:
+        raise RefModExportError(
+            f"{Path(path).name} gave {int(images.shape[0])} frame(s) at {offset:.2f}s - a "
+            f"video reference needs {MIN_VIDEO_FRAMES} (past the end of the clip?)"
+        )
+    return shrink_frames(images, short_edge) if short_edge else images
+
+
 def split_stills(batch: Any, limit: int = MAX_VISUAL_REFS) -> list[Any]:
     """An IMAGE batch -> single-still slices, evenly sampled down to ``limit``."""
     if batch is None:
@@ -637,6 +801,59 @@ def build_visual_mod(
         refs_image=refs,
         vae=vae,
         ref_resolution=int(ref_resolution),
+        identity=int(identity),
+        max_tokens=int(max_tokens),
+        budget_policy="truncate",
+        concept_type=str(concept_type),
+        description=str(description or ""),
+        save=False,
+        extraction_preset="manual",
+    )
+    return _first_mod(output, name)
+
+
+def build_video_mod(
+    api: _Api,
+    *,
+    name: str,
+    videos: Sequence[Any],
+    vae: Any,
+    frames: int = DEFAULT_VIDEO_FRAMES,
+    mode: str = "Full Reference",
+    ref_resolution: int = 1024,
+    max_tokens: int = 5120,
+    identity: int = 0,
+    concept_type: str = "pose_motion",
+    description: str = "",
+) -> Any:
+    """One motion member: the sheet's reference videos, encoded by their extractor.
+
+    Their ``refs_video`` autogrow takes IMAGE batches - "a multi-frame batch = a video ref
+    with motion", up to 8 - so a video reference is handed over as the frames it is. All of
+    them land in ONE member (their extractor concatenates the encodes along time and
+    cover-crops every source to the first one's canvas, exactly as its own node does), which
+    keeps the motion dialable as a unit on their loader.
+
+    ``frames`` is already the causal count the caller read; it is passed as
+    ``latent_frames`` so their extractor does not re-sample a window that is on the grid.
+    The member is tagged ``pose_motion`` (their vocabulary for a reference that carries
+    movement) whatever the appearance members are tagged - it is metadata, and this member
+    is motion by construction.
+    """
+    if not videos:
+        raise RefModExportError("a video member needs at least one reference video.")
+    if vae is None:
+        raise RefModExportError(
+            "connect the MiniMax H3 video VAE - a video member is a VAE encode."
+        )
+    refs = {f"ref_video_{index + 1}": batch for index, batch in enumerate(videos)}
+    output = api.extract.execute(
+        name=name,
+        mode=MODES.get(str(mode), str(mode)),
+        refs_video=refs,
+        vae=vae,
+        ref_resolution=int(ref_resolution),
+        latent_frames=int(causal_frames(frames) or DEFAULT_VIDEO_FRAMES),
         identity=int(identity),
         max_tokens=int(max_tokens),
         budget_policy="truncate",
@@ -732,6 +949,12 @@ def _clip_label(clips: Sequence[Path]) -> str:
     return f"the audio of {len(clips)} exported cell clip(s), joined"
 
 
+def _video_track_label(videos: Sequence[Path]) -> str:
+    if len(videos) == 1:
+        return f"the soundtrack of the reference video ({videos[0].name})"
+    return f"the soundtracks of {len(videos)} reference videos, joined"
+
+
 def voice_member(
     api: _Api,
     *,
@@ -748,19 +971,24 @@ def voice_member(
 
     ``voice_cell`` is the whole ladder switch:
 
-    * ``-1`` (auto) - the sheet's own reference audio, else every exported cell clip
-      joined into one waveform, else the connected ``audio``;
+    * ``-1`` (auto) - the sheet's own reference audio, else the soundtracks of its
+      reference videos, else every exported cell clip joined into one waveform, else the
+      connected ``audio``;
     * ``0`` - no sheet audio: the connected ``audio`` only;
     * ``n`` - the generated audio of the nth exported cell clip, forced.
 
     Auto starts with the reference audio because that is the voice the sheet itself was
     built from - the file dropped into the Builder's References tab: clean, and usually
     seconds long - whereas a cell clip only holds the ~1s H3 generated for that one
-    take. Length is what matters: a reference is worth the rows it occupies in the
-    packed sequence (see :func:`share_hint`), and 0.95s is 0.5% of it.
+    take. The soundtracks of the sheet's reference videos come next: they are the other
+    voice material the *sheet* was conditioned on (H3 pairs a reference video with its own
+    soundtrack), and they are usually seconds long too. Length is what matters: a
+    reference is worth the rows it occupies in the packed sequence (see :func:`share_hint`),
+    and 0.95s is 0.5% of it.
     """
     wanted = int(voice_cell)
     refs, missing = sheet_audio_reference_rows(folder)
+    videos, missing_videos = sheet_video_reference_rows(folder)
     clips = cell_clips(folder)
     ladder: list[tuple[str, str, str, Callable[[], Any]]] = []  # (name, label, key, read)
 
@@ -775,6 +1003,12 @@ def voice_member(
             "voice: the sheet's reference audio "
             f"'{', '.join(sorted(set(missing)))}' is not on disk (ComfyUI's input "
             "folder) - the ladder cannot use it"
+        )
+    if missing_videos and not videos:
+        notes.append(
+            "voice: the sheet's reference video "
+            f"'{', '.join(sorted(set(missing_videos)))}' is not on disk (ComfyUI's "
+            "input folder) - neither its sound nor its motion can be used"
         )
 
     if wanted > 0:
@@ -791,6 +1025,10 @@ def voice_member(
         if refs:
             ladder.append((f"{name}_voice", _reference_label(refs), "refs",
                            (lambda paths=list(refs): joined(paths))))
+        if videos:
+            ladder.append((f"{name}_voice_videos", _video_track_label(videos), "videos",
+                           (lambda paths=list(videos):
+                            video_soundtracks(paths, max_seconds=max_seconds))))
         if clips:
             ladder.append((f"{name}_voice_cells", _clip_label(clips), "clips",
                            (lambda paths=list(clips): joined(paths))))
@@ -814,6 +1052,8 @@ def voice_member(
                     + (f" ({folder.name}.json)" if folder is not None else
                        " - point 'sheet_dir' at the sheet folder")
                 )
+            if not videos and not missing_videos:
+                lines.append("voice: no reference video in the sheet's manifest")
             if not clips:
                 lines.append("voice: " + _no_clips_note(folder))
             if audio is None:
@@ -852,6 +1092,8 @@ def voice_member(
             spare = []
             if key != "refs" and refs:
                 spare.append("the sheet's reference audio")
+            if key != "videos" and videos:
+                spare.append(f"its {len(videos)} reference video soundtrack(s)")
             if key != "clips" and clips:
                 spare.append(f"its {len(clips)} exported cell clip(s)")
             if key != "audio" and audio is not None:
@@ -859,8 +1101,8 @@ def voice_member(
             if spare:
                 lines.append(
                     f"voice: not used - {', '.join(spare)} ('auto' walks reference audio "
-                    "-> cell clips -> connected audio; 'voice_cell' forces one: 0 = the "
-                    "connected audio, n = the nth cell)"
+                    "-> video soundtracks -> cell clips -> connected audio; 'voice_cell' "
+                    "forces one: 0 = the connected audio, n = the nth cell)"
                 )
         return mod, lines
     return None, lines
@@ -904,6 +1146,100 @@ def share_hint(members: Sequence[dict[str, Any]], total: int) -> list[str]:
     ]
 
 
+# ---------------------------------------------------------------- the motion
+
+
+def video_member(
+    api: _Api,
+    *,
+    name: str,
+    folder: Path | None = None,
+    frames: int = DEFAULT_VIDEO_FRAMES,
+    start: float = 0.0,
+    vae: Any = None,
+    mode: str = "Full Reference",
+    ref_resolution: int = 1024,
+    max_tokens: int = 5120,
+    identity: int = 0,
+    description: str = "",
+) -> tuple[Any | None, list[str]]:
+    """The bundle's motion member: the sheet's reference videos, as consecutive frames.
+
+    A video reference is the only thing in a sheet that carries *motion* - and by far the
+    most expensive member per second, because rows are ``latent frames x (h/2) x (w/2)``.
+    The two dials are therefore the window (``frames``, snapped to H3's causal grid; 0
+    turns the member off) and ``ref_resolution``. One member holds every video reference
+    (their extractor concatenates the encodes along time), so it stays one thing to dial on
+    their loader.
+
+    The frames come from ComfyUI's own video decode; a build that lacks it (an older
+    ``comfy_api``) reports the read failure per file and exports the other members anyway,
+    which is the same deal as a sheet whose video went missing.
+    """
+    wanted = causal_frames(frames)
+    videos, missing = sheet_video_reference_rows(folder)
+    if not wanted:
+        if videos:
+            return None, [
+                f"video: {len(videos)} reference video(s) not exported - 'video_frames' is "
+                "0 (set it to ~16 for a ~0.5s motion member)"
+            ]
+        return None, []
+    if not videos:
+        if missing:
+            return None, [
+                "video: no reference video on disk "
+                f"('{', '.join(sorted(set(missing)))}') - neither its motion nor its "
+                "soundtrack can be exported"
+            ]
+        return None, []
+
+    batches: list[Any] = []
+    notes: list[str] = []
+    for path in videos:
+        try:
+            batches.append(load_video_window(path, frames=wanted, start=start,
+                                            short_edge=ref_resolution))
+        except Exception as exc:  # noqa: BLE001 - one unreadable clip is not the export's
+            notes.append(f"video: {path.name} could not be read "
+                         f"({type(exc).__name__}: {exc})")
+    if not batches:
+        return None, notes or ["video: no reference video could be read"]
+
+    try:
+        member = build_video_mod(
+            api, name=f"{name}_videos", videos=batches, vae=vae, frames=wanted, mode=mode,
+            ref_resolution=ref_resolution, max_tokens=max_tokens, identity=identity,
+            description=description,
+        )
+    except Exception as exc:  # noqa: BLE001 - their per-frame budget check is the real case
+        notes.append(f"video: the motion member could not be built "
+                     f"({type(exc).__name__}: {exc})")
+        return None, notes
+
+    rows = int(getattr(member, "token_count", 0) or 0)
+    lines = list(notes)
+    start_seconds = max(0.0, float(start or 0.0))
+    lines.append(
+        f"appearance: {len(batches)} reference video(s) as '{name}_videos' "
+        f"({wanted} consecutive frames each from {start_seconds:.2f}s"
+        + (f", {rows} rows" if rows else "") + ")"
+    )
+    shapes = {(int(batch.shape[2]), int(batch.shape[1])) for batch in batches}
+    if len(shapes) > 1:
+        lines.append(
+            "appearance: the reference videos differ in shape - their extractor cover-crops "
+            "each one to the first's canvas (export them apart if that matters)"
+        )
+    if max_tokens and rows and rows >= int(max_tokens):
+        lines.append(
+            f"appearance: the motion member is at the 'max_tokens' cap ({rows}) - their "
+            "extractor drops frames to fit, so lower 'video_frames' or 'ref_resolution' "
+            "for the motion you meant"
+        )
+    return member, lines
+
+
 def export_bundle(
     *,
     cells: Any = None,
@@ -924,6 +1260,8 @@ def export_bundle(
     voice_max_seconds: float = 30.0,
     voice_max_tokens: int = 5120,
     voice_description: str = "",
+    video_frames: int = DEFAULT_VIDEO_FRAMES,
+    video_start: float = 0.0,
     save: bool = True,
     pack: Any = None,
     api: _Api | None = None,
@@ -932,9 +1270,12 @@ def export_bundle(
 
     ``cells`` / ``sheet`` are the Builder node's IMAGE outputs and ``audio`` an optional
     wired AUDIO. ``voice_cell`` picks the voice source: ``-1`` walks the ladder (the
-    sheet's own reference audio, else its exported cell clips joined, else ``audio``),
-    ``0`` keeps the sheet out of it (``audio`` only) and ``n`` forces the nth cell's
-    clip. ``pack`` / ``api`` are injection points for tests; see :func:`voice_member`.
+    sheet's own reference audio, else its reference videos' soundtracks, else its exported
+    cell clips joined, else ``audio``), ``0`` keeps the sheet out of it (``audio`` only) and
+    ``n`` forces the nth cell's clip. ``video_frames`` is how many consecutive frames of
+    each reference video become the motion member (``0`` turns it off; it is snapped to
+    H3's causal grid) and ``video_start`` where in the clip that window begins.
+    ``pack`` / ``api`` are injection points for tests; see :func:`voice_member`.
     """
     if pack is None and api is None:
         pack = load_pack()
@@ -987,6 +1328,23 @@ def export_bundle(
         )
         members.append(member)
         lines.append(f"appearance: the composited sheet as '{mod_name}_sheet'")
+
+    video, video_lines = video_member(
+        api,
+        name=mod_name,
+        folder=folder,
+        frames=video_frames,
+        start=video_start,
+        vae=video_vae,
+        mode=mode,
+        ref_resolution=ref_resolution,
+        max_tokens=max_tokens,
+        identity=identity,
+        description=description,
+    )
+    if video is not None:
+        members.append(video)
+    lines.extend(video_lines)
 
     voice, voice_lines = voice_member(
         api,
@@ -1057,8 +1415,11 @@ def member_rows(mods: Iterable[Any]) -> list[dict[str, Any]]:
 
 
 __all__ = [
+    "CAUSAL_GROUP",
+    "DEFAULT_VIDEO_FRAMES",
     "H3_AUDIO_RATE",
     "MAX_VISUAL_REFS",
+    "MIN_VIDEO_FRAMES",
     "MODES",
     "PACK_TITLE",
     "PACK_URL",
@@ -1068,8 +1429,10 @@ __all__ = [
     "RefModExportError",
     "RefModPackMissing",
     "audio_parts",
+    "build_video_mod",
     "build_visual_mod",
     "build_voice_mod",
+    "causal_frames",
     "cell_clips",
     "cell_ids",
     "clip_audio",
@@ -1078,6 +1441,7 @@ __all__ = [
     "export_bundle",
     "export_name",
     "load_pack",
+    "load_video_window",
     "loaded_pack",
     "member_rows",
     "pack_dir",
@@ -1090,6 +1454,13 @@ __all__ = [
     "sheet_folder",
     "sheet_manifest",
     "sheet_seed",
+    "sheet_video_reference_rows",
+    "sheet_video_references",
+    "shrink_frames",
     "split_stills",
+    "video_frame_rate",
+    "video_member",
+    "video_soundtracks",
+    "video_source",
     "voice_member",
 ]

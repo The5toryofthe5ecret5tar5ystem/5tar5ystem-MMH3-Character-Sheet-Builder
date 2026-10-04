@@ -385,12 +385,19 @@ SECTIONS: tuple[HelpSection, ...] = (
             "sheet's name (`character_sheet`, or the `%date%` pattern you used) into it.",
             "**Voice**: *voice_cell* is a ladder - `-1` (default) takes the voice from the "
             "sheet's **own reference audio** (the WAV in the Builder's References tab, "
-            "recorded in the manifest), else every exported cell clip joined into one "
+            "recorded in the manifest), else the **soundtracks of its reference videos** "
+            "(H3 pairs a reference video with its own soundtrack, so that is the other "
+            "voice the sheet heard), else every exported cell clip joined into one "
             "waveform, else a connected *AUDIO*; `0` keeps the sheet out of it (*AUDIO* "
-            "only) and `n` forces the nth cell's clip. The reference wins by default "
-            "because it is seconds long and clean, where a cell clip is the ~1s H3 "
-            "generated for that take. *voice_seconds* is a ceiling on what is encoded, "
-            "not a target.",
+            "only) and `n` forces the nth cell's clip. *voice_seconds* is a ceiling on "
+            "what is encoded, not a target.",
+            "**Reference videos become a motion member.** *video_frames* frames of each "
+            "video in the References tab go into the bundle as `<name>_videos`, taken as "
+            "a window of **consecutive** frames (from *video_start*) because that is what "
+            "carries movement - stills never can. It is also the most expensive member "
+            "per second: rows are latent frames x (h/2) x (w/2), so 13 frames at "
+            "*ref_resolution* 512 is ~580 rows and at 1152 it is ~9,200. 0 turns it off; "
+            "the report prints the cost and flags a member that hit *max_tokens*.",
             "**A thin voice is the usual reason a bundle 'does nothing'.** A reference is "
             "worth the rows it occupies, and everything in a bundle is packed into one "
             "sequence the model attends over (the video being generated adds thousands of "

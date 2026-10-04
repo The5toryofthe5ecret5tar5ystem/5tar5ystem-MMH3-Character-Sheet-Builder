@@ -6,11 +6,11 @@
 The character sheet is a multi-view identity board, which is exactly what a RefMod
 wants: their own ``elf_girl`` mod is four stills of one person stacked
 (``source=stack``). This node turns the Builder's picked cells and the composited
-sheet into members of one version-5 bundle and adds a voice member whose source is the
-sheet's own reference audio (the WAV in the Builder's References tab, recorded in the
-manifest), else its exported cell clips joined, else a connected AUDIO - and saves it
-to ``models/refmods/<subfolder>/<name>.safetensors``, where ``Load H3 RefMods`` lists
-it.
+sheet into members of one version-5 bundle, adds the sheet's **reference videos** as a
+motion member (a window of consecutive frames each) and a voice member whose source is
+the sheet's own reference audio, else its videos' soundtracks, else its exported cell
+clips joined, else a connected AUDIO - and saves it to
+``models/refmods/<subfolder>/<name>.safetensors``, where ``Load H3 RefMods`` lists it.
 
 A reference is worth the rows it occupies in the packed sequence the model attends
 over, so the report prints each member's share and says which ``copies`` count would
@@ -27,6 +27,7 @@ from typing import Any
 from comfy_api.latest import io
 
 from ..refmod_export import (
+    DEFAULT_VIDEO_FRAMES,
     MODES,
     VOICE_AUTO,
     RefModExportError,
@@ -60,9 +61,10 @@ class H3SheetRefMod(io.ComfyNode):
             description=(
                 "Export a character sheet as a ComfyUI-MiniMaxH3Mod (RefMod) bundle: "
                 "the picked cell stills as a stacked appearance member, the composited "
-                "sheet as a second one, and a voice member from the sheet's own "
-                "reference audio, its exported clips, or a connected audio. One file, "
-                "written to models/refmods/<subfolder>/<name>.safetensors. Needs the "
+                "sheet as a second one, the sheet's reference videos as a motion member, "
+                "and a voice member from the sheet's own reference audio, its videos' "
+                "soundtracks, its exported clips, or a connected audio. One file, written "
+                "to models/refmods/<subfolder>/<name>.safetensors. Needs the "
                 "ComfyUI-MiniMaxH3Mod pack for the encoders."
             ),
             is_output_node=True,
@@ -102,9 +104,9 @@ class H3SheetRefMod(io.ComfyNode):
                             "(core Load Audio, a video's own track via GetVideoComponents, "
                             "a TTS node...). Any audio, mono or stereo, resampled to H3's "
                             "32 kHz. It is the voice ladder's LAST choice - the sheet's "
-                            "own reference audio or its cell clips win unless "
-                            "'voice_cell' is 0. Needs audio_vae; without it this member "
-                            "is skipped and the report says so.",
+                            "own reference audio and its reference videos' soundtracks "
+                            "win unless 'voice_cell' is 0. Needs audio_vae; without it "
+                            "this member is skipped and the report says so.",
                 ),
                 io.String.Input(
                     "sheet_dir",
@@ -202,11 +204,11 @@ class H3SheetRefMod(io.ComfyNode):
                     max=64,
                     tooltip="-1 = walk the voice ladder: the sheet's own reference audio "
                             "(the file in the Builder's References tab) if the manifest "
-                            "has one, else every exported cell clip joined, else the "
-                            "connected audio. 0 = no sheet audio, the connected audio "
-                            "only. n = force the generated audio of the nth cell "
-                            "(~1s - the voice you heard in the panel, but a tiny "
-                            "reference).",
+                            "has one, else the soundtracks of its reference videos, else "
+                            "every exported cell clip joined, else the connected audio. "
+                            "0 = no sheet audio, the connected audio only. n = force the "
+                            "generated audio of the nth cell (~1s - the voice you heard "
+                            "in the panel, but a tiny reference).",
                 ),
                 io.Float.Input(
                     "voice_seconds",
@@ -227,6 +229,36 @@ class H3SheetRefMod(io.ComfyNode):
                     label_off="don't save",
                     tooltip="Write the bundle into models/refmods/<subfolder>/. Off leaves "
                             "the mods on the 'mods' output for their Apply node.",
+                ),
+                # Appended last, and optional: the widget array of an already-saved workflow
+                # keeps lining up with the widgets it was saved with, and both of these fall
+                # back to their defaults for a sheet that has no reference videos.
+                io.Int.Input(
+                    "video_frames",
+                    default=DEFAULT_VIDEO_FRAMES,
+                    min=0,
+                    max=200,
+                    step=1,
+                    optional=True,
+                    tooltip="Frames of each reference video that become the motion member "
+                            "(0 = none). The window is consecutive frames, taken from "
+                            "'video_start', snapped to H3's causal grid (4k+1, so 16 -> "
+                            "13 = ~0.54s at 24 fps). A video reference is the only thing "
+                            "a sheet has that carries motion, and the most expensive "
+                            "member per second - rows are latent frames x (h/2) x (w/2), "
+                            "so this and ref_resolution are the two dials. The report "
+                            "prints what it cost.",
+                ),
+                io.Float.Input(
+                    "video_start",
+                    default=0.0,
+                    min=0.0,
+                    max=3600.0,
+                    step=0.1,
+                    optional=True,
+                    tooltip="Seconds into each reference video where the motion window "
+                            "starts. 0 is the beginning of the clip - the same place "
+                            "H3's own ref2va path takes its frames from.",
                 ),
             ],
             outputs=[
@@ -260,6 +292,8 @@ class H3SheetRefMod(io.ComfyNode):
         voice_cell: int = VOICE_AUTO,
         voice_seconds: float = 30.0,
         save: bool = True,
+        video_frames: int = DEFAULT_VIDEO_FRAMES,
+        video_start: float = 0.0,
     ) -> io.NodeOutput:
         # A first line that tells the truth about the optional dependency: this is the
         # exact sentence the user needs when their export refuses to run.
@@ -282,6 +316,8 @@ class H3SheetRefMod(io.ComfyNode):
                 description=description,
                 voice_cell=voice_cell,
                 voice_max_seconds=voice_seconds,
+                video_frames=video_frames,
+                video_start=video_start,
                 save=save,
             )
         except RefModPackMissing as exc:
