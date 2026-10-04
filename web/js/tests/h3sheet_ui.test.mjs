@@ -219,13 +219,27 @@ assert.ok(wiring.includes("document.hidden"),
 // card in the panel, the Browse overlay included. Nothing inside the panel can win against a
 // width on the wrapper, so the repair has to be re-asserted where the frontend has just laid
 // its widgets out: the draw pass, the keeper for an offscreen node, and the fit.
-assert.ok(wiring.includes("enforceWidgetWidth(this)) scheduleFit(this);"),
+assert.ok(wiring.includes("enforceWidgetWidth(this);"),
     "the draw pass puts a squeezed DOM-widget width back");
-assert.ok(wiring.includes("if (enforceWidgetWidth(node)) scheduleFit(node);"),
+assert.ok(wiring.includes("        enforceWidgetWidth(node);\n"),
     "and the keeper does it for a node that is not being drawn");
 assert.ok(wiring.includes("    enforceWidgetWidth(node);"),
     "the node fit repairs it first, because a narrow panel measures taller content");
-assert.ok(wiring.includes("enforceWidgetWidth,\n} from \"./h3sheet_core.mjs?boot="),
+// ...but the repair must NOT ask for a height fit. The repair changes the panel's WIDTH, and the
+// panel is still laid out for the squeezed one (it re-renders debounced, 180ms), so a fit taken
+// here measures the squeezed content - which is how the node ended up resizing its height on
+// every frame the frontend rewrote the wrapper. The panel's own resize observer re-lays it out
+// and `layoutChanged` brings the node to that height instead.
+assert.ok(!wiring.includes("enforceWidgetWidth(this)) scheduleFit(this)"),
+    "the draw pass repairs the width WITHOUT fitting the node to the squeezed layout");
+assert.ok(!wiring.includes("if (enforceWidgetWidth(node)) scheduleFit(node);"),
+    "and so does the keeper");
+assert.ok(wiring.includes("if (!panelWidthMatches(node)) return;"),
+    "the fit skips a pass whose panel is not at its node's width: only that measurement is "
+    + "the node's own height");
+assert.ok(wiring.includes("panelWidthMatches,\n} from \"./h3sheet_core.mjs?boot="),
+    "the guard comes from the panel module, next to the repair it guards");
+assert.ok(wiring.includes("    enforceWidgetWidth,\n"),
     "all of that uses the one implementation in the panel module");
 // Panes fill the node now, so the fit needs a ceiling and the panel watches its own size.
 assert.ok(wiring.includes("ceiling: fitCeiling()"),

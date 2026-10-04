@@ -4,6 +4,20 @@ All notable changes to **5tar5ystem MMH3 Character Sheet Builder** are recorded 
 follows [semantic versioning](https://semver.org/): the node type (`MiniMaxH3CharacterSheet`) and
 the payload contract are what "breaking" refers to, not the panel's layout.
 
+## [Unreleased]
+
+### Fixed
+
+* **The panel width repair no longer moves the node's height.** Repairing a squeezed wrapper
+  (1.2.1) asked for a height fit immediately afterwards, but the panel is still laid out for the
+  squeezed width at that moment (it re-lays out on a debounce), so the fit measured the *narrow*
+  content, set the node to that height, and the panel's own resize observer then asked for a
+  different one - a two-state loop that kept resizing the node while the frontend rewrote the
+  wrapper. The repair is now a width-only correction: the panel re-lays itself out for the width
+  it gets back and brings the node to that height through `layoutChanged`, and the fit refuses to
+  measure at all unless the wrapper is at least as wide as the node (`panelWidthMatches`), so a
+  squeezed measurement can never become a node height.
+
 ## [1.2.1] - 2026-10-04
 
 Reference videos reach the RefMod bundle (as motion and as sound), the export expands date and

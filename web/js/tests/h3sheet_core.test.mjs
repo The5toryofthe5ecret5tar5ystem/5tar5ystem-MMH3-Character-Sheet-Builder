@@ -2630,7 +2630,29 @@ ok.push("reorder / slot helpers behave");
 
     assert.equal(core.enforceWidgetWidth({ size: [880, 700], graph: {}, _mmxSheet: {} }), false,
         "no widget element, no repair");
+
+    // The fit measures the panel's CONTENT, and the same content wraps into more rows in a
+    // narrow panel - so a height taken while the wrapper is squeezed is not this node's height.
+    // Setting it is what made the node grow and shrink while the frontend rewrote the wrapper,
+    // so the fit asks this before it measures.
+    assert.equal(core.panelWidthFor(node), 345, "the width the panel may occupy");
+    assert.equal(core.panelWidthMatches(node), true,
+        "a wrapper wider than the node cannot inflate the content - trustworthy");
+    wrapper.style.width = "1200px";
+    assert.equal(core.panelWidthMatches(node), true, "still trustworthy, and not ours to shrink");
+    wrapper.style.width = "345px";
+    assert.equal(core.panelWidthMatches(node), true, "exactly its node's panel width is the good case");
+    wrapper.style.width = "300px";
+    assert.equal(core.panelWidthMatches(node), false, "a squeezed panel is not measured");
+    assert.equal(core.enforceWidgetWidth(node), true, "...and the repair is still what fixes it");
+    assert.equal(core.panelWidthMatches(node), true, "after the repair the measurement is this width");
+    wrapper.style.width = "";
+    assert.equal(core.panelWidthMatches(node), true,
+        "no inline width at all: the wrapper follows the node by itself");
+    delete wrapper.style.width;
     document.body.removeChild(wrapper);
+    assert.equal(core.panelWidthMatches({ size: [880, 700], graph: {}, _mmxSheet: {} }), true,
+        "nothing to measure, nothing to distrust");
     ok.push("a squeezed DOM-widget wrapper is widened back to its node");
 }
 

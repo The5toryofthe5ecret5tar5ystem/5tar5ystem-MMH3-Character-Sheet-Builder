@@ -296,7 +296,7 @@ export const KNOB_COLUMNS = 3;
  * build makes that a glance instead of an investigation; a test keeps it in step with the
  * import, so bumping one without the other fails the suite rather than confusing a user.
  */
-export const PANEL_BUILD = "h3sheet_v57";
+export const PANEL_BUILD = "h3sheet_v58";
 
 /** The frontend's own widget/host names, straight from the shipped frontend bundle. */
 export const PREVIEW_HOST_CLASS = "comfy-img-preview";
@@ -939,13 +939,40 @@ export function enforceWidgetWidth(node, inset = WIDGET_INSET) {
     // remembered; the element itself is the one thing that stays put.
     const wrapper = element.closest?.(".dom-widget") || element.parentElement;
     if (!wrapper) return false;
-    const want = Math.max(240, Math.round(Number(node.size?.[0]) || 0) - inset);
+    const want = panelWidthFor(node, inset);
     const current = Number.parseFloat(wrapper.style?.width || "") || 0;
     const capped = Number.parseFloat(wrapper.style?.maxWidth || "") || 0;
     if (current >= want && (!capped || capped >= want)) return false;
     wrapper.style.width = `${want}px`;
     wrapper.style.maxWidth = `${want}px`;
     return true;
+}
+
+/** The width the panel may occupy: the node's own width less its inset. */
+export function panelWidthFor(node, inset = WIDGET_INSET) {
+    return Math.max(240, Math.round(Number(node?.size?.[0]) || 0) - inset);
+}
+
+/** Was the panel laid out for its node's width, or is this a squeezed measurement?
+ *
+ * The fit measures the panel's CONTENT, and a squeezed panel wraps the same content into
+ * more rows - so a height taken while the wrapper is narrow is not a height this node has.
+ * Measuring one and setting it is what makes a node grow, shrink and grow again while the
+ * frontend re-writes the wrapper, so the fit asks this first and skips the pass instead.
+ *
+ * One-sided on purpose: a wrapper WIDER than the node is the frontend's own business (the
+ * fit leaves those alone) and it cannot inflate the content, so it is not untrustworthy.
+ * No inline width at all means the wrapper follows the node by itself - also trustworthy.
+ */
+export function panelWidthMatches(node, inset = WIDGET_INSET) {
+    const element = node?._mmxSheet?.widget?.element;
+    if (!element || !node.graph) return true;
+    const wrapper = element.closest?.(".dom-widget") || element.parentElement;
+    const inline = wrapper?.style?.width || "";
+    if (!wrapper || !inline) return true;
+    const current = Number.parseFloat(inline) || 0;
+    if (current <= 0) return true;
+    return current >= panelWidthFor(node, inset) - 8;
 }
 
 /** Height the node needs for this panel: header + panel + knob rows.

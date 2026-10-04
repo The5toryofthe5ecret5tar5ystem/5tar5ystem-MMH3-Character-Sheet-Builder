@@ -27,7 +27,8 @@ import {
     PANEL_FIT,
     panelFitHeight,
     enforceWidgetWidth,
-} from "./h3sheet_core.mjs?boot=h3sheet_v57";
+    panelWidthMatches,
+} from "./h3sheet_core.mjs?boot=h3sheet_v58";
 
 const CLASS = "MiniMaxH3CharacterSheet";
 const DOM_WIDGET = "h3_character_sheet_ui";
@@ -65,6 +66,12 @@ function fitNodeToPanel(node) {
     // under it (see enforceWidgetWidth): a narrow panel measures TALLER content, so the height
     // this function is about to compute would be wrong too. Put the width back first.
     enforceWidgetWidth(node);
+    // ...and if it is STILL narrow (the frontend wrote its width again since), this pass has
+    // nothing trustworthy to measure: the content height belongs to a panel that is not this
+    // node's. Fitting it is what made the node grow and shrink while the frontend rewrote the
+    // wrapper - the panel's own resize observer re-lays it out once the width is back and asks
+    // for the fit again (see layoutChanged), so skipping here costs one pass, not the height.
+    if (!panelWidthMatches(node)) return;
     const knobs = (node.widgets || []).filter((item) => item !== widget && item.hidden !== true);
     // ComfyUI's own output previews are DOM widgets too, and in `compact` mode the pack caps
     // their height - so the fit has to size the node for THAT, not for the height the
@@ -650,8 +657,12 @@ function startPreviewKeeper(node) {
         const part = node._mmxSheet;
         if (!part || document.hidden || !node.graph) return;
         // The wrapper's width can be re-written by the frontend at any time, background tab or
-        // not, so the same keeper that watches the preview caps watches that too.
-        if (enforceWidgetWidth(node)) scheduleFit(node);
+        // not, so the same keeper that watches the preview caps watches that too. The repair is
+        // NOT followed by a fit: the panel re-lays itself out for the width it gets back (its
+        // own resize observer) and asks for the fit then, with a measurement that belongs to
+        // this width - fitting from the repair itself measured the squeezed layout and moved
+        // the node height on every frame the frontend rewrote the wrapper.
+        enforceWidgetWidth(node);
         const result = enforcePreviewCaps(node, part.previewMode || nodePreviews(part.state), { skip: [DOM_WIDGET, DATA_WIDGET] });
         // Something was late or got inflated: settle the node around the corrected previews.
         if (result.changed) scheduleFit(node);
@@ -690,8 +701,12 @@ function wrapNode(nodeType) {
         if (part) {
             // The draw pass runs after the frontend has finished laying its widgets out, which
             // is when a squeezed wrapper width has to be corrected (a repair inside the panel
-            // cannot win against a `width` on the wrapper).
-            if (enforceWidgetWidth(this)) scheduleFit(this);
+            // cannot win against a `width` on the wrapper). No fit is asked for here on purpose:
+            // the repair changes the panel's width, the panel's own resize observer re-lays it
+            // out and `layoutChanged` brings the node back to that height. Fitting immediately
+            // measured the layout the panel still had from the squeezed width, which is how the
+            // node ended up resizing its height every frame.
+            enforceWidgetWidth(this);
             const caps = enforcePreviewCaps(this, part.previewMode || nodePreviews(part.state), {
                 skip: [DOM_WIDGET, DATA_WIDGET],
             });
