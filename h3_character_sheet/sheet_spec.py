@@ -560,9 +560,10 @@ DEFAULT_REF_SCOPE = "per framing"
 #: instead of restarting - the same trick the Motion Director uses to hold a room,
 #: a light and a framing across segments.
 #:
-#: ``auto`` chains only where the camera distance already matches (see
-#: :data:`FRAMING_DISTANCES`): a run of full-body views turns the subject without the
-#: model fighting a zoom, and the framing changes in a sheet stay crisp. ``on`` chains
+#: ``auto`` chains only where the camera distance AND the view already match (see
+#: :func:`continuation_keeps_scale_and_angle`): a run of the same view (front -> a-pose,
+#: face -> face-smirk) continues, while the angle changes in a sheet - a turnaround -
+#: stay independent, because the hand-over carries the previous angle too. ``on`` chains
 #: everything, including across a framing change - which the model resolves by keeping
 #: the framing it was handed, so use it for a genuinely continuous move.
 CONTINUITY_MODES = ("off", "auto", "on")

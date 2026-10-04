@@ -3858,8 +3858,9 @@ export function buildSheetInterface({ state, hooks = {} }) {
             + "previous cell at the start of the next one, so a run of cells continues "
             + "instead of restarting. Those frames of each cell re-render the previous "
             + "tail, and the picked frame stays after them. 'Auto' only chains cells that "
-            + "share a camera distance (full body -> full body), because the hand-over "
-            + "carries the previous framing. Per cell override below.";
+            + "share a camera distance AND a view - a hand-over carries the previous "
+            + "angle as well as its framing, so a front -> profile -> back turnaround "
+            + "renders each view on its own. Per cell override below.";
         continuityRow.append(
             element("span", { textContent: "Latent continuation", className: "mmx-muted" },
                 { flex: "0 0 96px" }),

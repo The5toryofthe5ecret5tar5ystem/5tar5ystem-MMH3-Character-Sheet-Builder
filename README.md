@@ -792,11 +792,13 @@ MiniMaxH3AddGuide(positive=conditioning, latent=AV latent, vae=video_vae,
   after them is the new pose. Sampling cost is unchanged; the only addition is one
   video-VAE encode of 5 frames per continuing cell.
 * **Three modes.** `off` renders every cell from its own noise. `auto` chains only
-  cells whose **camera distance already matches** (`face` close, `portrait` medium,
-  `front` / `profile` / `back` full), so a full-body turn continues while the
-  framing changes in a sheet stay crisp. `on` chains everything, including across a
-  framing change - and says so in the report, because the hand-over carries the
-  previous camera distance: a chest-up cell continuing a face close-up stays a
+  cells that already match in **camera distance and angle** (`face` close, `portrait`
+  medium, `front` / `profile` / `back` full), so a run of the same view (front -> a-pose,
+  face -> face-smirk) continues while a turnaround - front -> profile -> back - stays
+  independent: the hand-over carries the previous **angle** as well as its scale, and a
+  chained turnaround came back as frontal cells (measured). `on` chains everything,
+  including across a framing change - and says so in the report, because the hand-over
+  carries the previous camera distance: a chest-up cell continuing a face close-up stays a
   close-up, and a full body continuing a chest-up cell lands mid-zoom with the feet
   cut off. **`auto` is the mode to use on a normal sheet.**
 * **The first cell never continues** (nothing precedes it), and a cell whose own
