@@ -1,6 +1,6 @@
 [project]
 name = "5tar5ystem-mmh3-character-sheet-builder"
-version = "1.2.1"
+version = "1.2.2"
 description = "5tar5ystem MMH3 Character Sheet Builder - Standalone MiniMax H3 character sheet builder: references with roles, a matrix of views / poses / expressions, and a composited sheet you can feed back into ref2va."
 readme = "README.md"
 license = { text = "GPL-3.0-only" }

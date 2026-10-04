@@ -4,7 +4,10 @@ All notable changes to **5tar5ystem MMH3 Character Sheet Builder** are recorded 
 follows [semantic versioning](https://semver.org/): the node type (`MiniMaxH3CharacterSheet`) and
 the payload contract are what "breaking" refers to, not the panel's layout.
 
-## [Unreleased]
+## [1.2.2] - 2026-10-04
+
+A sheet node keeps the size you give it: the automatic height fit is gone, so neither a page
+refresh nor a tab switch can move the node any more.
 
 ### Changed
 
