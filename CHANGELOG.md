@@ -21,6 +21,11 @@ the payload contract are what "breaking" refers to, not the panel's layout.
   chains everything, for a genuinely continuous move. One rule
   (`sheet_spec.continuation_keeps_scale_and_angle`) is shared by the graph builder, the frame
   picker and the report.
+* **The turnaround preset no longer promises chaining it cannot deliver.** Its label was
+  "Turnaround (chained full body)" and its hint said continuation "holds the room, the light and
+  the scale while the subject turns" - which is the assumption the measurement above disproves.
+  It now sets continuation `off` (each view is rendered from its own noise, so the subject is in
+  the requested view from frame 1) and says why.
 * **An expression that asks for eye contact is no longer used where the framing says there is
   none.** The smile option reads "Warm smile, eyes engaged."; on a `profile` cell that landed
   directly after the frame text's "gaze away from the camera, no eye contact with the viewer" -

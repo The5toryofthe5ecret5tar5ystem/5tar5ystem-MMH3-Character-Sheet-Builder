@@ -213,13 +213,16 @@ PRESETS: tuple[SheetPreset, ...] = (
     ),
     SheetPreset(
         id="turnaround",
-        label="Turnaround (chained full body)",
+        label="Turnaround (each view on its own)",
         hint=(
-            "Front -> profile -> back in one row. All three share a camera distance, so "
-            "continuation holds the room, the light and the scale while the subject turns - "
-            "watch the clips rather than the picked frames to judge it."
+            "Front -> profile -> back in one row, each cell rendered from its own noise so "
+            "the subject is IN the requested view from the first frame. Continuation is off "
+            "on purpose: a hand-over carries the previous cell's ANGLE as well as its scale, "
+            "so chaining front -> profile -> back gave three frontal cells (measured). "
+            "Continuation is what the Balanced/Fidelity presets use for runs of the same "
+            "view; per cell, 'on' still chains a genuine continuous move."
         ),
-        render={"continuity": "auto", "exportVideo": True, "framesPerCell": 22},
+        render={"continuity": "off", "exportVideo": True, "framesPerCell": 22},
         sheet={"layout": "turnaround", "columns": 3, "aspect": "21:9", "shortEdge": 2048},
         widgets={
             **_BALANCED_WIDGETS,

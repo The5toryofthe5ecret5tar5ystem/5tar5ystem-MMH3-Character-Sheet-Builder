@@ -167,7 +167,7 @@ bar prints that as *"Changes: Continuity, …"* rather than changing settings si
 | **Full Character Sheet - Fidelity** | The same five cells and the same neutral tan backdrop at print resolution: 2048px cells on a 3840px sheet. **~378 s for the same five cells** and a very large PNG - for a sheet that will be enlarged or cut out. |
 | **Fast look (no chains, no clips)** | 768px cells at H3's 5-frame minimum, every cell independent, nothing encoded - to find the framing, not to keep the result. |
 | **Max identity fidelity** | The 2048px reference pipeline (several times slower) with independent cells, 2048px cells on a 3840px sheet. |
-| **Turnaround (chained full body)** | Front -> profile -> back in one row; all three share a camera distance, so continuation holds the room, light and scale while the subject turns. |
+| **Turnaround (each view on its own)** | Front -> profile -> back in one row, each cell rendered from its own noise so the subject is in the requested view from the first frame. A hand-over carries the previous cell's *angle* as well as its scale, so a chained front -> profile -> back came back as three frontal cells - this preset keeps continuation off for that reason. |
 | **Expression sheet (chained face)** | Five face close-ups in one row: identical framing, so the chain carries the light and the head position while only the expression changes. |
 
 **Every preset samples at 8 steps** (and so does a fresh node). The community TURBO H3
