@@ -4,7 +4,12 @@ All notable changes to **5tar5ystem MMH3 Character Sheet Builder** are recorded 
 follows [semantic versioning](https://semver.org/): the node type (`MiniMaxH3CharacterSheet`) and
 the payload contract are what "breaking" refers to, not the panel's layout.
 
-## [Unreleased]
+## [1.0.1] - 2026-10-03
+
+A polish release: the panel's Help tab stopped telling you about someone else's disk, the
+Settings tab was laid out deliberately instead of by accident, the project and the repository
+were renamed to **Builder**, and the README gained screenshots and measured render times. No
+change to the node type, the pack folder or the payload - a saved workflow loads as it did.
 
 ### Changed
 
@@ -107,4 +112,5 @@ ComfyUI **core H3 nodes** - no other custom node pack required.
 * The standalone frontend tests are importable on a checkout that cannot install `node_modules`
   (jsdom is injected through `globalThis.__JSDOM__`).
 
+[1.0.1]: https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/releases/tag/v1.0.1
 [1.0.0]: https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/releases/tag/v1.0.0

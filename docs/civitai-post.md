@@ -1,4 +1,4 @@
-# Civitai post - 5tar5ystem MMH3 Character Sheet Builder (v1.0.0)
+# Civitai post - 5tar5ystem MMH3 Character Sheet Builder (v1.0.1)
 
 Copy from the line below into the Civitai article/description, then attach the images from
 `images/` in the repo (they are the ones the README shows).
@@ -24,9 +24,9 @@ Built for ComfyUI's MiniMax H3. Renders on **ComfyUI core H3 nodes** - this pack
 nothing else.
 
 **Node pack (GitHub):** https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder
-**Release page (v1.0.0):** https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/releases/tag/v1.0.0
+**Release page (v1.0.1):** https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/releases/tag/v1.0.1
 **Ready-made workflow** (drag it onto the canvas): https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/blob/main/example_workflows/5tar5ystem%20MMH3%20Character%20Sheet%20Builder.json
-**Workflow, direct download** (no GitHub account needed): https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/releases/download/v1.0.0/5tar5ystem.MMH3.Character.Sheet.Builder.json
+**Workflow, direct download** (no GitHub account needed): https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/releases/download/v1.0.1/5tar5ystem.MMH3.Character.Sheet.Builder.json
 **Full manual:** the README in the repo (every knob, every option) - in-node too: the node's **Help** tab carries the same guide and checks your model files for you (✓/✗ with the exact folder to drop each one in).
 
 ## What it does
@@ -113,5 +113,5 @@ Built by **5tar5ystem**. Feedback, sheets you made with it, and issues are welco
 - [ ] Gallery: finished sheet (cover) → panel with references + roles → LIVE strip mid-render → Results tab.
 - [ ] Tag the post with the H3 / MiniMax model this pack targets, and mention which checkpoint the sample sheet used.
 - [ ] If the sample uses a community checkpoint, credit it in the description and link its page.
-- [ ] Check the two repo links resolve (they do at v1.0.0) and that the workflow link still has `%20` for the spaces in the file name.
+- [ ] Check the two repo links resolve (they do at v1.0.1) and that the workflow link still has `%20` for the spaces in the file name.
 - [ ] Mention it needs ComfyUI with H3 core nodes (a recent build), and that a full sheet is minutes, not seconds, on a 24GB card at 1024px cells.
