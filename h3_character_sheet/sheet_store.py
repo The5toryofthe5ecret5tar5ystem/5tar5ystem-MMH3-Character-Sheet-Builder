@@ -599,15 +599,13 @@ class SheetStore:
                 explicit = stored.get("index")
             else:
                 explicit = cell.pick_index
-            buffers = [_load_rgb(path) for path in frames]
-            buffers = [buffer for buffer in buffers if buffer is not None]
-            if not buffers:
-                arrays.append(None)
-                missing.append(cell.id)
-                resolved[cell.id] = {"mode": mode, "index": None}
-                continue
+            # Only read what the pick needs. The index comes first - arithmetic for every mode
+            # except 'sharpest', which ranks SMALL copies - and then just that one frame is
+            # decoded at full size. Reading the whole clip to use one frame of it is what made a
+            # click take seconds (measured: 2.4s of a 3.0s re-compose was decoding 110 frames).
+            count = len(frames)
             index = pick_frame_index(
-                buffers,
+                frames,
                 mode=mode,
                 explicit=explicit,
                 skip=int(guides.get(cell.id, 0) or 0),
@@ -615,24 +613,46 @@ class SheetStore:
                 # 'sharpest' picks the previous cell's pose (measured: the turn lands at
                 # frame 8 of 22 while the sharpest frames are 0-7).
                 settle=(
-                    continuity_settle(len(buffers), guides[cell.id])
+                    continuity_settle(count, guides[cell.id])
                     if guides.get(cell.id)
                     else 0
                 ),
+                load=lambda position: _load_rgb_small(frames[position]),
             )
-            picked = buffers[index]
+            picked = None
+            for candidate in range(int(index), -1, -1):
+                # A frame that cannot be read moves the pick back to the last readable one
+                # rather than failing the whole cell.
+                picked = _load_rgb(frames[candidate])
+                if picked is not None:
+                    index = candidate
+                    break
+            if picked is None:
+                arrays.append(None)
+                missing.append(cell.id)
+                resolved[cell.id] = {"mode": mode, "index": None}
+                continue
             arrays.append(picked)
             resolved[cell.id] = {
                 "mode": mode,
                 "index": int(index),
-                "frames": len(frames),
+                "frames": count,
                 # Records a hand-pick so the NEXT re-composite keeps it (see above): the frame
                 # is the user's, not the rule's, until they choose a rule for this cell again.
                 **({"manual": True} if manual else {}),
                 **({"continuity": int(guides[cell.id])} if guides.get(cell.id) else {}),
             }
             if save_cells:
-                self.save_cell_pick(cell.id, picked)
+                # Write the cell still only when it would say something new: a rebuild that
+                # moved one cell's pick must not re-encode the other four from scratch.
+                still = self.cell_pick_path(cell.id)
+                try:
+                    newest_frame = max(path.stat().st_mtime for path in frames)
+                    still_stale = (not still.is_file()) or still.stat().st_mtime < newest_frame
+                except OSError:
+                    still_stale = True
+                if still_stale or stored.get("index") != int(index) or stored.get("mode") != mode:
+                    self.save_cell_pick(cell.id, picked)
 
         sheet = compose_from_arrays(arrays, parsed.layout, cells=cells, captions=captions)
         self.ensure()
@@ -664,6 +684,28 @@ def _load_rgb(path: Path) -> np.ndarray | None:
     try:
         with Image.open(path) as image:
             return np.asarray(image.convert("RGB"), dtype=np.uint8)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("sheet: could not read %s (%s)", path, exc)
+        return None
+
+
+#: Longest side of the copies used to RANK frames (``sharpest``). ``frame_sharpness``
+#: downscales to 256px internally anyway, so decoding a 1024px frame at full size to score it
+#: buys nothing and costs the whole clip: a 5-cell sheet spent 2.4s of a 3.0s rebuild reading
+#: 110 frames that only 5 of were then used.
+RANK_SIDE = 256
+
+
+def _load_rgb_small(path: Path, side: int = RANK_SIDE) -> np.ndarray | None:
+    """A cheap decimated copy of one frame, for ranking only (never composited)."""
+    try:
+        with Image.open(path) as image:
+            image.draft("RGB", (side, side))     # JPEG reads less; PNG ignores it
+            frame = image.convert("RGB")
+            factor = max(1, min(frame.size) // side)
+            if factor > 1:
+                frame = frame.reduce(factor)       # C-level box decimation
+            return np.asarray(frame, dtype=np.uint8)
     except Exception as exc:  # noqa: BLE001
         log.warning("sheet: could not read %s (%s)", path, exc)
         return None

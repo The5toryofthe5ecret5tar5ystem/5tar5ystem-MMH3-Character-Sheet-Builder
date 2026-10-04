@@ -24,6 +24,13 @@ the payload contract are what "breaking" refers to, not the panel's layout.
   preview is fetched with a cache-buster, so a recomposite inside the same second is visible
   instead of looking like nothing happened. (The export of a run is still one file, replaced on
   each rebuild - a new one per run.)
+* **Clicking a frame is ~3.6x faster, and marks the click immediately.** Every rebuild decoded
+  **all** the frames on disk (5 cells x 22 = 110 images) and then used five of them: measured on a
+  5-cell sheet, 2.4s of a 3.0s re-compose was decoding. The pick index is now arithmetic unless the
+  mode ranks (`sharpest` ranks *small* decimated copies), only the picked frame is read at full
+  size, and a cell's still is rewritten only when it would change. The same sheet now re-composes
+  in **1.06s** (was 3.04s) and a click lands in **0.84s** (was 3.01s) - and the thumbnail is marked
+  and the row says `picking frame 10…` before the answer arrives, so the click is never in doubt.
 
 ## [1.0.1] - 2026-10-03
 

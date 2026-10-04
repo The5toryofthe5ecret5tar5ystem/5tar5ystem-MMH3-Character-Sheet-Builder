@@ -220,6 +220,43 @@ def test_every_rebuild_writes_the_next_dated_file(store):
     assert fresh_read.sheet_file == store.sheet_path.name
 
 
+def test_a_manual_pick_reads_only_the_frame_it_uses(store, monkeypatch):
+    """The picker must not read a whole clip to use one frame of it.
+
+    Measured on a real sheet: 2.4s of a 3.0s re-compose was decoding 110 frames (5 cells x 22)
+    that the composite then used five of - which is why clicking a frame took seconds to show. The
+    index is now arithmetic unless the mode ranks, and only the picked frame is read at full size.
+    """
+    read: list[str] = []
+    small: list[str] = []
+    real_load = store_mod._load_rgb
+    real_small = store_mod._load_rgb_small
+
+    def counting_load(path):
+        read.append(path.name)
+        return real_load(path)
+
+    def counting_small(path, side=store_mod.RANK_SIDE):
+        small.append(path.name)
+        return real_small(path, side)
+
+    monkeypatch.setattr(store_mod, "_load_rgb", counting_load)
+    monkeypatch.setattr(store_mod, "_load_rgb_small", counting_small)
+    store.save_cell_frames("c1", _frames(22))
+    store.save_cell_frames("c2", _frames(22))
+
+    store.rebuild_sheet(_payload(), {"c1": {"mode": "manual", "index": 7}}, new_export=True)
+    assert len(read) == 2, f"one frame per cell, not 44: {len(read)} full reads"
+    assert small == [], "a hand-pick ranks nothing, so nothing is even read for ranking"
+
+    # 'sharpest' has to look at the frames - but at small copies, and only its pick in full.
+    read.clear()
+    small.clear()
+    store.rebuild_sheet(_payload(), {"c1": {"mode": "sharpest"}}, new_export=True)
+    assert len(small) >= 22, f"the ranked cell's frames are read as small copies: {len(small)}"
+    assert len(read) <= 2, f"and only the picks are read at full size: {len(read)}"
+
+
 def test_the_render_keeps_one_file_for_the_run(store):
     """Without ``new_export`` a compose edits the sheet that is there (the run's export)."""
     store.save_cell_frames("c1", _frames(3))

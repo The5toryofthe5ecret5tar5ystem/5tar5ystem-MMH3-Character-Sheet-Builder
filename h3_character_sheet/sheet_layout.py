@@ -286,6 +286,7 @@ def pick_frame_index(
     allow_sharpest: bool = True,
     skip: int = 0,
     settle: int = 0,
+    load: Any = None,
 ) -> int:
     """Index of the frame a cell should use.
 
@@ -305,6 +306,12 @@ def pick_frame_index(
     the one the previous cell already had). Ranking the whole clip therefore picks the
     old pose. An explicit index is still honoured (it is the user's own choice) and at
     least one frame always stays a candidate.
+
+    ``frames`` may be anything - paths, for instance - as long as ``load(index)`` returns the
+    array for one of them. Only ``sharpest`` needs to SEE the frames, and the caller can hand in
+    a loader that reads small copies for the ranking: decoding a whole 22-frame cell to pick one
+    frame out of it is what made a rebuild take seconds (measured: 2.4s of a 3.0s re-compose).
+    Every other mode is arithmetic, so nothing is read at all.
     """
     count = len(frames)
     if count <= 0:
@@ -325,7 +332,10 @@ def pick_frame_index(
     if chosen == "last":
         return count - 1
     if chosen == "sharpest" and allow_sharpest:
-        scores = [frame_sharpness(frame) for frame in frames]
+        def frame_at(position: int) -> Any:
+            return load(position) if callable(load) else frames[position]
+
+        scores = [frame_sharpness(frame_at(position)) for position in range(count)]
         return int(max(range(start, count), key=lambda index: scores[index]))
     return count - 1
 

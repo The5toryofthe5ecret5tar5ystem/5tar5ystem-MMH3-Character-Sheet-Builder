@@ -4295,6 +4295,12 @@ export function buildSheetInterface({ state, hooks = {} }) {
                     thumb.replaceWith(note);
                 });
                 thumb.addEventListener("click", async () => {
+                    // The composite happens on the server (compose + PNG), so mark the click NOW:
+                    // waiting for the answer made a click look ignored for a second or more.
+                    // The label is a promise the response then keeps or takes back.
+                    const previousLabel = parts.pickSpan.textContent;
+                    for (const [otherIndex, other] of parts.thumbs) markThumb(other, otherIndex === index);
+                    parts.pickSpan.textContent = `picking frame ${index}…`;
                     notify(`picking ${cell.id} frame ${index}…`);
                     try {
                         const answer = await hooks.pickFrame?.(cell.id, index);
@@ -4312,6 +4318,9 @@ export function buildSheetInterface({ state, hooks = {} }) {
                         notify(`${cell.id} → frame ${index}`
                             + (listing?.sheetFile ? ` · sheet updated: ${listing.sheetFile}` : ""));
                     } catch (error) {
+                        // Put the row back the way the server still sees it.
+                        parts.pickSpan.textContent = previousLabel;
+                        applyPickToRow(cell);
                         notify(`pick failed: ${error.message}`);
                     }
                 });
