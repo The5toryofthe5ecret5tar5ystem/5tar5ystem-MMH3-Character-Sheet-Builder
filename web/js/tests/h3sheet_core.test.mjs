@@ -290,6 +290,11 @@ assert.equal(dims(pic).h, dims(video).h, "every tile shares one height");
 assert.equal(dims(video).h, dims(audio).h, "including the audio chip");
 assert.ok(Math.abs(dims(video).w / dims(video).h - 16 / 9) < 0.06, `the video tile keeps its wide shape (${dims(video).w}x${dims(video).h})`);
 assert.ok(dims(video).w > dims(pic).w, "so it is wider than a square picture tile");
+// The audio tile is a square too: an H3 audio reference has no shape of its own, and a wide
+// letterbox with one note glyph in it read as a different kind of object in the same grid.
+assert.ok(Math.abs(dims(audio).w - dims(audio).h) <= 1,
+    `an audio tile is square, not a wide bar (${dims(audio).w}x${dims(audio).h})`);
+assert.equal(dims(audio).w, dims(pic).w, "the same footprint as a picture tile");
 const used = [pic, video, audio].reduce((sum, el) => sum + dims(el).w, 0);
 assert.ok(used <= core.REF_SECTION.width, `the row fits the fixed box: ${used} <= ${core.REF_SECTION.width}`);
 assert.ok(dims(pic).h <= core.REF_SECTION.height, "and the tiles fit its height");
@@ -327,6 +332,19 @@ assert.ok(Math.abs(core.clampAspect(0.5625) - 0.5625) < 0.001,
     "a 9:16 portrait is not squeezed into 2:3 (a wider box would put bars back)");
 assert.equal(core.clampAspect(NaN), null);
 ok.push("fitTileLayout keeps every tile inside the box");
+
+// --- each kind's default box shape -------------------------------------------
+// Pictures and audio are square; only video keeps a wide box. The audio tile used to be
+// 5:2, which read as a different kind of object in the same grid (and left the note glyph
+// floating in an empty letterbox).
+assert.equal(core.tileAspect({ kind: "image" }), 1, "a picture tile is square");
+assert.equal(core.tileAspect({ kind: "audio" }), 1, "an audio tile is square, not a wide bar");
+assert.equal(core.tileAspect({ kind: "video" }), 16 / 9, "a video keeps 16:9 until it is measured");
+assert.equal(core.tileAspect({ kind: "audio" }, "voice.wav", new Map([["voice.wav", 2.5]])), 2.5,
+    "a measured shape still wins over the kind's default");
+assert.equal(core.tileAspect({ kind: "audio" }), core.tileAspect({ kind: "image" }),
+    "audio and pictures share the grid's shape");
+ok.push("tileAspect: pictures and audio are square, video is 16:9");
 
 // --- the caps still hold, and the Add Media tile only goes when all are full --
 fire(addTiles[0], "drop", fileTransfer(Array.from({ length: 12 }, (_, i) => ({ name: `extra${i}.png`, type: "image/png" }))));

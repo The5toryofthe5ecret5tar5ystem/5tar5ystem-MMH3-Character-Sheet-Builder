@@ -1008,12 +1008,19 @@ export function fitTileLayout(aspects, options = {}) {
     return best;
 }
 
-/** The aspect a tile should take: the media's own shape, clamped to sane extremes. */
+/** The aspect a tile should take: the media's own shape, clamped to sane extremes.
+ *
+ * A picture and an audio reference are both square. The audio tile used to be 5:2 - a wide
+ * letterbox with one note glyph floating in the middle of it - which read as a different
+ * kind of object next to the square pictures, stretched the grid, and put the filename in a
+ * strip that was mostly empty. Only video keeps a wide box, because only video has a shape
+ * of its own to keep (and it is the media's, not ours: a measured thumbnail always wins).
+ */
 export function tileAspect(group, file, aspects) {
     const known = aspects?.get?.(file);
     const ratio = clampAspect(known);
     if (ratio) return ratio;
-    return group?.kind === "video" ? 16 / 9 : group?.kind === "audio" ? 5 / 2 : 1;
+    return group?.kind === "video" ? 16 / 9 : 1;
 }
 
 // --------------------------------------------------------------------------- //

@@ -4,6 +4,17 @@ All notable changes to **5tar5ystem MMH3 Character Sheet Builder** are recorded 
 follows [semantic versioning](https://semver.org/): the node type (`MiniMaxH3CharacterSheet`) and
 the payload contract are what "breaking" refers to, not the panel's layout.
 
+## [Unreleased]
+
+### Changed
+
+* **Audio reference tiles are square, not wide bars.** An audio reference has no shape of its
+  own, so its tile took a 5:2 letterbox: a wide rectangle with one note glyph floating in the
+  middle and the filename in a mostly empty strip, which read as a different kind of object
+  beside the square pictures and stretched the grid. `tileAspect` now answers 1:1 for audio, so
+  pictures and audios share one footprint and only video keeps a wide box - and a measured
+  thumbnail still wins over any default. Panel-only change: hard-refresh (Ctrl+Shift+R).
+
 ## [1.2.0] - 2026-10-04
 
 The voice member of a RefMod export now defaults to the voice the sheet was *built from*,
