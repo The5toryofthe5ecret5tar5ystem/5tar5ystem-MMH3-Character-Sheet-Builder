@@ -503,7 +503,11 @@ _POSE_BY_KEY = {option.key: option for option in POSES}
 _EXPRESSION_BY_KEY = {option.key: option for option in EXPRESSIONS}
 
 LAYOUTS = ("hero-left", "grid", "turnaround", "custom")
-PICKS = ("auto", "last", "sharpest")
+#: How a cell's frame is chosen. ``auto``/``last``/``sharpest`` are RULES - they are recomputed
+#: on every compose, which is how a changed rule reaches a sheet that is already on disk.
+#: ``manual`` is the opposite: it is what a click on a thumbnail records, it carries the frame
+#: the user chose, and no later rebuild may recompute it away.
+PICKS = ("auto", "last", "sharpest", "manual")
 
 #: Cell shapes offered by the node widget. People are vertical, so the default
 #: sheet is 9:16: a square cell wastes the sides and crops the figure.

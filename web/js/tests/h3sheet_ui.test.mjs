@@ -17,6 +17,7 @@ const core = read("web/js/h3sheet_core.mjs");
 const routes = read("h3_character_sheet/sheet_routes.py");
 const sheet = read("h3_character_sheet/nodes/sheet.py");
 const spec = read("h3_character_sheet/sheet_spec.py");
+const store_src = read("h3_character_sheet/sheet_store.py");
 const grid = read("h3_character_sheet/nodes/grid.py");
 const init = read("h3_character_sheet/__init__.py");
 
@@ -77,6 +78,17 @@ assert.ok(wiring.includes('action: "compose"') && /execution_success/.test(wirin
     "and the sheet is recomposed from disk when the one-cell run finishes");
 assert.ok(/delete payload\.render\.onlyCells/.test(wiring),
     "the scope is dropped again, so the next normal Run renders the whole sheet");
+
+// --- clicking a frame is a decision ------------------------------------------
+// The store keeps a hand-pick (it is recorded as `manual` and no later rebuild may recompute
+// it), so the wiring has to send the mode that says so. It used to send `last` with an index,
+// which resolved correctly once and then decayed back to the rule on the next rebuild.
+assert.ok(/action: "pick", cell: cellId, mode: "manual", index/.test(wiring),
+    "a click must ask for the manual mode, not a rule that happens to carry an index");
+assert.ok(spec.includes('PICKS = ("auto", "last", "sharpest", "manual")'),
+    "the mode has to exist in the spec, or the backend normalises the click away");
+assert.ok(store_src.includes('stored.get("manual")'),
+    "and the store must honour a stored hand-pick on later rebuilds");
 
 // --- mounted inside the node, interface first, no popup ------------------------
 assert.ok(wiring.includes("addDOMWidget("), "the panel must mount as a DOM widget");

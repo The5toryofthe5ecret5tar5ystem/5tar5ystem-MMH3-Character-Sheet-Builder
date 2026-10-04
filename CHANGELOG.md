@@ -4,6 +4,27 @@ All notable changes to **5tar5ystem MMH3 Character Sheet Builder** are recorded 
 follows [semantic versioning](https://semver.org/): the node type (`MiniMaxH3CharacterSheet`) and
 the payload contract are what "breaking" refers to, not the panel's layout.
 
+## [Unreleased]
+
+### Fixed
+
+* **A hand-picked frame no longer reverts to the rule.** Clicking a thumbnail in Results records a
+  *manual* pick (`picks.json` with `manual: true`), and any later rebuild - another cell's click, or
+  the Rebuild sheet button - used to drop that flag, so the next compose recomputed the cell from
+  its `auto` / `last` / `sharpest` rule and the chosen frame was silently replaced. The mode is now
+  a real one (`PICKS` gained `manual`), the store keeps a stored hand-pick authoritative, and the
+  row says so: `picked frame 9 (chosen by hand)`. Choosing a rule for that cell still replaces it.
+* **The Results tab no longer rebuilds itself on every click.** A pick, a rebuild, a poll or a tab
+  switch used to re-create the whole pane - a few hundred `<img>` nodes, all re-fetched, with the
+  scroll position thrown away, which read as the page "refreshing" and acting laggy. The pane now
+  updates in place (one border, one label, the sheet image), and only redraws when the frames on
+  disk actually changed.
+* **A rebuild says what it wrote.** The status line names the file
+  (`sheet rebuilt from the frames on disk → character_sheet-20261003-192805.png`), and the sheet
+  preview is fetched with a cache-buster, so a recomposite inside the same second is visible
+  instead of looking like nothing happened. (The export of a run is still one file, replaced on
+  each rebuild - a new one per run.)
+
 ## [1.0.1] - 2026-10-03
 
 A polish release: the panel's Help tab stopped telling you about someone else's disk, the

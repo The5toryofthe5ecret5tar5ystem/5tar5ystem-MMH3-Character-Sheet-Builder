@@ -152,6 +152,45 @@ def test_manifest_and_report_round_trip(store):
     assert store._read_report() == "Sheet: 2 cells"
 
 
+def test_a_hand_pick_survives_every_later_rebuild(store):
+    """A click on a frame is a decision; only the cell that was clicked may be recomputed.
+
+    The rule modes (``auto`` / ``last`` / ``sharpest``) are recomputed on every compose - that
+    is deliberate, it is how a fixed rule reaches a sheet that was already on disk. A *hand*
+    pick is the opposite: it has to be recorded as such and stay recorded, or the next rebuild
+    of ANY cell (or a plain "Rebuild sheet") silently replaces the frame the user chose. That
+    is exactly what was reported: pick frame 9, press Rebuild, pick a frame in another cell -
+    and cell 1 is back on the rule.
+    """
+    store.save_cell_frames("c1", _frames(5))
+    store.save_cell_frames("c2", _frames(5))
+    store.rebuild_sheet(_payload())                                            # both on the rule
+    store.rebuild_sheet(_payload(), {"c1": {"mode": "manual", "index": 1}})
+    stored = json.loads(store.picks_path.read_text(encoding="utf-8"))
+    assert stored["c1"]["index"] == 1
+    assert stored["c1"].get("manual") is True, "the store has to remember it was a choice"
+
+    # Picking another cell, then a plain rebuild: neither may move c1.
+    store.rebuild_sheet(_payload(), {"c2": {"mode": "manual", "index": 2}})
+    assert json.loads(store.picks_path.read_text(encoding="utf-8"))["c1"]["index"] == 1
+    result = store.rebuild_sheet(_payload())
+    assert result["cells"]["c1"]["index"] == 1, "the hand-picked frame must survive"
+    assert result["cells"]["c1"]["mode"] == "manual", "and the listing has to say why"
+    assert store.scan()["cells"][0]["pickIndex"] == 1
+
+
+def test_a_rule_pick_is_still_recomputed_on_an_existing_sheet(store):
+    """The other half of the contract: changing the mode must reach a finished sheet."""
+    store.save_cell_frames("c1", _frames(5, sharp_at=0))
+    store.save_cell_frames("c2", _frames(2))
+    store.rebuild_sheet(_payload(), {"c1": {"mode": "manual", "index": 4}})
+    assert store.scan()["cells"][0]["pickIndex"] == 4
+    result = store.rebuild_sheet(_payload(), {"c1": {"mode": "sharpest"}})
+    assert result["cells"]["c1"]["index"] == 0, "choosing a rule replaces the hand-pick"
+    assert result["cells"]["c1"]["mode"] == "sharpest"
+    assert json.loads(store.picks_path.read_text(encoding="utf-8"))["c1"].get("manual") is not True
+
+
 # --------------------------------------------------------------------------- #
 # scan
 # --------------------------------------------------------------------------- #

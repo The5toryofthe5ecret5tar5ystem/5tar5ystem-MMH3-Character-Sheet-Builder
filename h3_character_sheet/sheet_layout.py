@@ -291,7 +291,8 @@ def pick_frame_index(
 
     ``auto`` keeps the pack's reference-generator convention (the chunk's last
     frame is the settled pose), ``sharpest`` ranks by :func:`frame_sharpness`,
-    and an explicit index always wins when it is inside the chunk.
+    and an explicit index always wins when it is inside the chunk - which is also what
+    makes ``manual`` (the mode a click records) exact rather than a hint.
 
     ``skip`` drops leading frames from consideration. With latent continuation the
     first frames of a cell are a re-render of the previous cell's tail, so they are
@@ -317,6 +318,10 @@ def pick_frame_index(
     if int(settle or 0) > 0 and count > int(settle):
         start = max(start, count - int(settle))
     start = max(0, min(start, count - 1))
+    if chosen == "manual":
+        # ``manual`` without an index has nothing to say (the panel always sends the index
+        # with it): settle like ``auto`` rather than inventing a frame.
+        return count - 1
     if chosen == "last":
         return count - 1
     if chosen == "sharpest" and allow_sharpest:

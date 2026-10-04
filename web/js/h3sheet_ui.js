@@ -26,7 +26,7 @@ import {
     REF_GROUPS,
     PANEL_FIT,
     panelFitHeight,
-} from "./h3sheet_core.mjs?boot=h3sheet_v54";
+} from "./h3sheet_core.mjs?boot=h3sheet_v55";
 
 const CLASS = "MiniMaxH3CharacterSheet";
 const DOM_WIDGET = "h3_character_sheet_ui";
@@ -382,7 +382,9 @@ function mountPanel(node) {
         listMedia,
         listResults: () => listSheet(node),
         pickFrame: (cellId, index) => sheetAction(node, {
-            action: "pick", cell: cellId, mode: "last", index,
+            // ``manual`` is the mode a click records: it carries the frame the user chose, and
+            // the store keeps it until a rule is chosen for that cell again (see rebuild_sheet).
+            action: "pick", cell: cellId, mode: "manual", index,
             spec: currentPayload(node, state),
         }),
         compose: () => sheetAction(node, { action: "compose", spec: currentPayload(node, state) }),

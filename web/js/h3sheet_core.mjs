@@ -78,7 +78,16 @@ export const EXPRESSIONS = [
     ["pleasure", "Pleasure"],
     ["orgasm", "Orgasm"],
 ];
-export const PICKS = ["auto", "last", "sharpest"];
+export const PICKS = ["auto", "last", "sharpest", "manual"];
+
+//: What the pick selector calls each mode. ``manual`` is what a click on a thumbnail records:
+//: it is shown as the cell's mode afterwards, so a hand-picked frame is never a mystery.
+export const PICK_LABELS = {
+    auto: "auto (settled)",
+    last: "last frame",
+    sharpest: "sharpest frame",
+    manual: "chosen by hand",
+};
 
 //: What the model is told to put behind the figure. Mirrors BACKGROUNDS in
 //: h3_character_sheet/sheet_spec.py (the wiring test compares the two). Every preset is a
@@ -287,7 +296,7 @@ export const KNOB_COLUMNS = 3;
  * build makes that a glance instead of an investigation; a test keeps it in step with the
  * import, so bumping one without the other fails the suite rather than confusing a user.
  */
-export const PANEL_BUILD = "h3sheet_v54";
+export const PANEL_BUILD = "h3sheet_v55";
 
 /** The frontend's own widget/host names, straight from the shipped frontend bundle. */
 export const PREVIEW_HOST_CLASS = "comfy-img-preview";
@@ -1807,9 +1816,12 @@ export function buildSheetInterface({ state, hooks = {} }) {
         addButton,
         button("Rebuild sheet", async () => {
             try {
-                await hooks.compose?.();
-                notify("sheet rebuilt from the frames on disk (no re-render).");
-                await refreshResults();
+                const answer = await hooks.compose?.();
+                const sheet = answer?.sheet || null;
+                notify(sheet?.sheetFile
+                    ? `sheet rebuilt from the frames on disk → ${sheet.sheetFile} (no re-render)`
+                    : "sheet rebuilt from the frames on disk (no re-render).");
+                await refreshResults(sheet);
             } catch (error) {
                 notify(`rebuild failed: ${error.message}`);
             }
@@ -3983,7 +3995,7 @@ export function buildSheetInterface({ state, hooks = {} }) {
                 selectBox(VIEWS, cell.view || "front", (value) => { cell.view = value; persist(); }),
                 selectBox(POSES, cell.pose || "neutral", (value) => { cell.pose = value; persist(); }),
                 selectBox(EXPRESSIONS, cell.expression || "neutral", (value) => { cell.expression = value; persist(); }),
-                selectBox(PICKS.map((key) => [key, key]), cell.pick || "auto", (value) => { cell.pick = value; persist(); }),
+                selectBox(PICKS.map((key) => [key, PICK_LABELS[key] || key]), cell.pick || "auto", (value) => { cell.pick = value; persist(); }),
                 frames, seed, continuityBadge, extra, move(-1), move(1), remove,
             );
             // Filled by refreshPlan(): the references this cell is actually wired with.
@@ -4081,11 +4093,65 @@ export function buildSheetInterface({ state, hooks = {} }) {
 
     // ------------------------------------------------------------ results
     let lastSheet = null;
-    function renderResults(sheet) {
+    // What the pane is showing right now, so a pick or a rebuild can update it in place.
+    const resultRows = new Map();    // cell id -> {row, pickSpan, thumbs: Map(index -> img)}
+    let resultSignature = "";
+    let resultHead = null;           // {image, link, counts}
+    let resultBumps = 0;
+
+    /** The "picked frame N (mode)" sentence - and honest about a hand-picked frame. */
+    function pickText(cell) {
+        const mode = String(cell?.pickMode || "auto");
+        return `picked frame ${cell?.pickIndex ?? "-"} (${PICK_LABELS[mode] || mode})`;
+    }
+
+    /** Mark exactly one thumbnail in a row as the picked one. */
+    function markThumb(thumb, picked) {
+        thumb.style.border = picked
+            ? "2px solid var(--mmx-accent)"
+            : "1px solid var(--mmx-line)";
+    }
+
+    /** A URL the browser cannot answer from its cache (a rebuild inside the same second). */
+    function cacheBust(url) {
+        if (!url) return url;
+        resultBumps += 1;
+        return `${url}${url.includes("?") ? "&" : "?"}_r=${resultBumps}`;
+    }
+
+    function countsText(shown) {
+        return `${shown?.counts?.rendered ?? 0}/${shown?.counts?.cells ?? 0} cell(s) rendered · `
+            + `${shown?.counts?.frames ?? 0} frame(s) on disk · ${shown?.dir || ""}`;
+    }
+
+    /** The sheet itself and the counts line: what a rebuild changes without moving a row. */
+    function updateSheetHead(shown) {
+        if (!resultHead) return;
+        if (resultHead.image && shown.sheetUrl) {
+            resultHead.image.src = cacheBust(viewUrl(shown.sheetUrl));
+            resultHead.image.title = `${shown.sheetFile || "sheet"} - click to open it full size`;
+        }
+        if (resultHead.link && shown.sheetUrl) resultHead.link.href = viewUrl(shown.sheetUrl);
+        if (resultHead.counts) resultHead.counts.textContent = countsText(shown);
+    }
+
+    /** One row's pick label and border - the only things a pick changes. */
+    function applyPickToRow(cell) {
+        const parts = resultRows.get(cell?.id);
+        if (!parts) return;
+        parts.pickSpan.textContent = pickText(cell);
+        for (const [index, thumb] of parts.thumbs) markThumb(thumb, index === cell.pickIndex);
+    }
+    function renderResults(sheet, { light = false } = {}) {
         if (sheet !== undefined) lastSheet = sheet;
-        results.replaceChildren();
         const shown = lastSheet;
         if (!shown || !Array.isArray(shown.cells) || !shown.cells.length) {
+            // Nothing to show. Always repainted, light or not: this is the state Clear sheet
+            // leaves behind, and a stale list of thumbnails would be worse than a redraw.
+            results.replaceChildren();
+            resultRows.clear();
+            resultSignature = "";
+            resultHead = null;
             results.append(element("div", {
                 textContent: "Nothing rendered yet — queue the prompt to render the cells.",
                 className: "mmx-muted",
@@ -4093,6 +4159,21 @@ export function buildSheetInterface({ state, hooks = {} }) {
             refreshTabs();
             return;
         }
+        const signature = `${shown.sheetFile || ""}#`
+            + shown.cells.map((cell) => `${cell.id}:${cell.frameCount}`).join("|");
+        if (light && resultHead && signature === resultSignature) {
+            // Same cells, same frames on disk: a pick or a rebuild only moves one border, one
+            // label and the sheet image. Rebuilding the pane instead re-created every thumbnail
+            // (hundreds of <img> nodes), re-fetched them all and threw away the scroll position.
+            updateSheetHead(shown);
+            for (const cell of shown.cells) applyPickToRow(cell);
+            refreshTabs();
+            return;
+        }
+        results.replaceChildren();
+        resultRows.clear();
+        resultSignature = signature;
+        resultHead = null;
         if (shown.sheetUrl) {
             const size = panelPreview(state);
             const height = PANEL_PREVIEW_HEIGHTS[size] || 0;
@@ -4109,6 +4190,7 @@ export function buildSheetInterface({ state, hooks = {} }) {
                 }, { display: "block", marginBottom: "4px" });
                 link.append(image);
                 results.append(link);
+                resultHead = { image, link, counts: null };
                 // The newest cell clip, playable in place: with `panel` preview mode this is the
                 // only preview the node has, and a <video> beats a link you have to leave for.
                 const withClip = (shown.cells || []).find((cell) => cell.clipUrl);
@@ -4130,19 +4212,29 @@ export function buildSheetInterface({ state, hooks = {} }) {
                 }, { marginBottom: "4px" }));
             }
         }
-        results.append(element("div", {
-            textContent: `${shown.counts?.rendered ?? 0}/${shown.counts?.cells ?? 0} cell(s) rendered · `
-                + `${shown.counts?.frames ?? 0} frame(s) on disk · ${shown.dir || ""}`,
+        const countsLine = element("div", {
+            textContent: countsText(shown),
             className: "mmx-muted",
-        }, { marginBottom: "4px" }));
+        }, { marginBottom: "4px" });
+        results.append(countsLine);
+        if (resultHead) resultHead.counts = countsLine;
 
         for (const cell of shown.cells) {
             const row = element("div", { className: "mmx-sheet-result-row" }, { marginBottom: "3px" });
-            const caption = element("div", {
-                textContent: `${cell.id} · ${cell.view || "?"}/${cell.pose || "?"}/${cell.expression || "?"} · `
-                    + `picked ${cell.pickIndex ?? "-"} (${cell.pickMode || "auto"})`,
-                className: "mmx-muted",
+            const caption = element("div", { className: "mmx-muted" });
+            const pickSpan = element("span", {
+                textContent: pickText(cell),
+                title: "Which frame of this cell's clip the sheet uses. Click a thumbnail to decide it "
+                    + "by hand - that choice stays until you pick a rule for this cell again.",
             });
+            caption.append(
+                element("span", {
+                    textContent: `${cell.id} · ${cell.view || "?"}/${cell.pose || "?"}/${cell.expression || "?"} · `,
+                }),
+                pickSpan,
+            );
+            const parts = { row, pickSpan, thumbs: new Map() };
+            resultRows.set(cell.id, parts);
             // The clip this cell generated (frames + its own audio). The sheet shows the
             // picked frame; this is the take it came from.
             const clipUrl = cell.clipUrl ? viewUrl(cell.clipUrl) : "";
@@ -4185,9 +4277,11 @@ export function buildSheetInterface({ state, hooks = {} }) {
                     title: `frame ${index} — click to use it`,
                 }, {
                     width: "54px", height: "54px", objectFit: "cover", cursor: "pointer",
-                    border: index === cell.pickIndex ? "2px solid var(--mmx-accent)" : "1px solid var(--mmx-line)",
+                    border: "1px solid var(--mmx-line)",
                     borderRadius: "4px",
                 });
+                parts.thumbs.set(index, thumb);
+                markThumb(thumb, index === cell.pickIndex);
                 thumb.addEventListener("error", () => {
                     // The file is gone or unreadable: say it instead of showing the
                     // browser's broken-image glyph.
@@ -4202,9 +4296,20 @@ export function buildSheetInterface({ state, hooks = {} }) {
                 thumb.addEventListener("click", async () => {
                     notify(`picking ${cell.id} frame ${index}…`);
                     try {
-                        await hooks.pickFrame?.(cell.id, index);
-                        notify(`${cell.id} → frame ${index}`);
-                        await refreshResults();
+                        const answer = await hooks.pickFrame?.(cell.id, index);
+                        const listing = answer?.sheet || null;
+                        // A click is a decision, so record it on the node's own payload as well:
+                        // the store keeps the frame, the payload keeps the mode, and the next
+                        // queue renders the sheet the panel is showing.
+                        const stateCell = (state.cells || []).find((item) => item.id === cell.id);
+                        if (stateCell) {
+                            stateCell.pick = "manual";
+                            persist();
+                        }
+                        // Only this row moves (plus the sheet image, which is served fresh).
+                        if (listing) renderResults(listing, { light: true });
+                        notify(`${cell.id} → frame ${index}`
+                            + (listing?.sheetFile ? ` · sheet updated: ${listing.sheetFile}` : ""));
                     } catch (error) {
                         notify(`pick failed: ${error.message}`);
                     }
@@ -4220,12 +4325,22 @@ export function buildSheetInterface({ state, hooks = {} }) {
         refreshTabs();
     }
 
-    async function refreshResults() {
-        try {
-            const sheet = await hooks.listResults?.();
-            renderResults(sheet ?? null);
-        } catch (error) {
-            notify(`results unavailable: ${error.message}`);
+    async function refreshResults(sheet) {
+        // Every refresh goes through the in-place path: the pane is only actually rebuilt when
+        // the frames on disk changed (`renderResults` compares a signature). A poll while the
+        // tab is idle, a tab switch or a rebuild therefore costs a text assignment and a border,
+        // not a few hundred re-created <img> nodes - which is what made the tab flicker, jump
+        // and re-fetch every thumbnail.
+        if (sheet === undefined) {
+            try {
+                sheet = await hooks.listResults?.();
+            } catch (error) {
+                notify(`results unavailable: ${error.message}`);
+                return lastSheet;
+            }
+            renderResults(sheet ?? null, { light: true });
+        } else {
+            renderResults(sheet, { light: true });
         }
         return lastSheet;
     }

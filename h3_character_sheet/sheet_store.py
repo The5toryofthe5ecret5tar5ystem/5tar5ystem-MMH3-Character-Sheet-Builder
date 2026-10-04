@@ -544,7 +544,27 @@ class SheetStore:
             hand = hand if isinstance(hand, dict) else {}
             stored = stored_picks.get(cell.id)
             stored = stored if isinstance(stored, dict) else {}
-            pick = hand or stored
+            # Two kinds of pick, and they must not be confused:
+            #  * a RULE (auto / last / sharpest) is recomputed on every compose, which is how a
+            #    changed rule reaches a sheet that is already on disk;
+            #  * a HAND pick (a click on a thumbnail) is a decision. It is stored with
+            #    ``manual: True`` and stays until the user changes that cell's mode. Dropping the
+            #    flag on the next rebuild - of another cell, or a plain "Rebuild sheet" - is what
+            #    made a chosen frame snap back to the rule.
+            hand_index = hand.get("index") if "index" in hand else None
+            hand_mode = str(hand.get("mode") or "").strip().lower()
+            if hand_index is not None:
+                pick = {"mode": hand_mode or "manual", "index": hand_index}
+                manual = True
+            elif hand_mode and hand_mode != "manual":
+                pick = {"mode": hand_mode}
+                manual = False
+            elif stored.get("manual") and stored.get("index") is not None:
+                pick = {"mode": "manual", "index": stored.get("index")}
+                manual = True
+            else:
+                pick = stored
+                manual = False
             frames = self.frame_files(cell.id)
             if not frames:
                 arrays.append(None)
@@ -552,10 +572,11 @@ class SheetStore:
                 resolved[cell.id] = {"mode": str(pick.get("mode") or cell.pick), "index": None}
                 continue
             mode = str(pick.get("mode") or cell.pick or "auto")
-            # Only a hand-pick (a request that carries an index) is authoritative; a stored
-            # automatic index is recomputed so a fixed rule reaches existing sheets.
-            if "index" in hand:
-                explicit = hand.get("index")
+            if manual:
+                explicit = pick.get("index")
+            elif hand_mode and hand_mode != "manual":
+                # A rule was chosen for this cell: it decides, and the old hand-pick is gone.
+                explicit = cell.pick_index
             elif stored.get("manual"):
                 explicit = stored.get("index")
             else:
@@ -587,8 +608,9 @@ class SheetStore:
                 "mode": mode,
                 "index": int(index),
                 "frames": len(frames),
-                # Records a hand-pick so the NEXT re-composite keeps it (see above).
-                **({"manual": True} if "index" in hand else {}),
+                # Records a hand-pick so the NEXT re-composite keeps it (see above): the frame
+                # is the user's, not the rule's, until they choose a rule for this cell again.
+                **({"manual": True} if manual else {}),
                 **({"continuity": int(guides[cell.id])} if guides.get(cell.id) else {}),
             }
             if save_cells:

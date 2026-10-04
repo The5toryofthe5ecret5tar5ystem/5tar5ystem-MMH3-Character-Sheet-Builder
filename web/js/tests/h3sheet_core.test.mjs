@@ -2467,5 +2467,100 @@ ok.push("reorder / slot helpers behave");
     ok.push("Results: each cell has its own new-seed button");
 }
 
+// --- picking a frame: a decision, not a redraw --------------------------------
+// Reported from a real sheet: pick frame 9 in one cell, click a frame in another cell, and
+// the first cell is back on its rule - and the whole Results pane re-built itself (hundreds
+// of <img> nodes re-created and re-fetched) on every click, which read as the page
+// "refreshing" and losing the row being worked on.
+{
+    const frame = (index) => ({
+        file: `f${String(index).padStart(4, "0")}.png`,
+        url: `/view?filename=f${index}.png&type=output`,
+    });
+    const listing = (pickIndex, pickMode) => ({
+        sheetUrl: "/view?filename=sheet.png&type=output&c=1",
+        sheetFile: "character_sheet-20261003-192805.png",
+        dir: "/output/minimax_sheets/character_sheet",
+        counts: { rendered: 2, cells: 2, frames: 44 },
+        cells: [
+            { id: "hero", view: "face", pose: "neutral", expression: "neutral", frameCount: 22,
+              pickIndex, pickMode, frames: Array.from({ length: 22 }, (_, i) => frame(i)) },
+            { id: "a-pose", view: "front", pose: "neutral", expression: "neutral", frameCount: 22,
+              pickIndex: 21, pickMode: "auto", frames: Array.from({ length: 22 }, (_, i) => frame(i)) },
+        ],
+    });
+    const sent = [];
+    const state = core.readState("");
+    state.cells = [{ id: "hero" }, { id: "a-pose" }];
+    const panel = core.buildSheetInterface({
+        state,
+        hooks: {
+            status: () => {}, assetUrl: (url) => url,
+            pickFrame: async (cellId, index) => {
+                sent.push([cellId, index]);
+                // What the server answers: this cell is now a hand-pick, and the sheet was
+                // recomposed from the frames on disk.
+                return { ok: true, action: "pick", sheet: listing(index, "manual") };
+            },
+            listResults: async () => listing(21, "last"),
+        },
+    });
+    panel.renderResults(listing(21, "last"));
+    await tick();
+
+    const rows = [...panel.results.querySelectorAll(".mmx-sheet-result-row")];
+    assert.equal(rows.length, 2, "one row per cell");
+    assert.ok(rows[0].textContent.includes("picked frame 21 (last frame)"), "the rule is named plainly");
+    const thumbsBefore = [...panel.results.querySelectorAll(".mmx-sheet-result-row img")];
+    const sheetBefore = panel.results.querySelector("img.mmx-sheet-preview");
+    const ticked = thumbsBefore.find((img) => img.style.border.includes("accent"));
+    assert.ok(ticked, "the picked frame is the marked one");
+
+    click(thumbsBefore[9]);                       // frame 9 of the first cell
+    await tick();
+    await tick();
+
+    assert.deepEqual(sent, [["hero", 9]], "the click asks the backend for that cell and frame");
+    assert.ok(rows[0].textContent.includes("picked frame 9 (chosen by hand)"),
+        "and the row says the frame is a hand-pick, not a rule");
+    const thumbsAfter = [...panel.results.querySelectorAll(".mmx-sheet-result-row img")];
+    assert.deepEqual(thumbsAfter, thumbsBefore, "the pane is updated in place, not re-created");
+    assert.equal(panel.results.querySelector("img.mmx-sheet-preview"), sheetBefore,
+        "the sheet element survives too - only its src is refreshed");
+    assert.ok(sheetBefore.src.includes("_r="), "with a cache-buster, so a same-second rebuild shows");
+    assert.equal(thumbsAfter.find((img) => img.style.border.includes("accent")), thumbsBefore[9],
+        "the mark follows the new frame");
+    assert.equal(panel.results.querySelectorAll(".mmx-sheet-result-row")[1].textContent
+        .includes("picked frame 21 (auto (settled))"), true,
+    "the other cell keeps its own pick and says so");
+    assert.equal(state.cells[0].pick, "manual",
+        "the decision also lands in the node's payload, so the next queue renders it");
+
+    // A rebuild keeps the same pane and names the file it wrote.
+    const said = [];
+    const rebuilt = core.buildSheetInterface({
+        state: core.readState(""),
+        hooks: {
+            status: (text) => said.push(String(text)),
+            assetUrl: (url) => url,
+            compose: async () => ({ ok: true, sheet: listing(9, "manual") }),
+            listResults: async () => listing(9, "manual"),
+        },
+    });
+    rebuilt.renderResults(listing(9, "manual"));
+    await tick();
+    const firstThumbs = [...rebuilt.results.querySelectorAll(".mmx-sheet-result-row img")];
+    click([...rebuilt.container.querySelectorAll("button")].find((b) => b.textContent === "Rebuild sheet"));
+    await tick();
+    await tick();
+    assert.ok(said.some((line) => line.includes("character_sheet-20261003-192805.png")),
+        `the status must name the file it wrote: ${said.join(" | ")}`);
+    assert.deepEqual([...rebuilt.results.querySelectorAll(".mmx-sheet-result-row img")], firstThumbs,
+        "and a rebuild does not re-create the frame strips either");
+    panel.dispose();
+    rebuilt.dispose();
+    ok.push("a hand-picked frame sticks, and picking/rebuilding updates the pane in place");
+}
+
 console.log("h3sheet_core: PASS");
 for (const line of ok) console.log(" -", line);
