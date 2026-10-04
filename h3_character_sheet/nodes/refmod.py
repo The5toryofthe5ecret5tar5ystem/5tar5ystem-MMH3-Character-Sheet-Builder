@@ -102,12 +102,16 @@ class H3SheetRefMod(io.ComfyNode):
                 ),
                 io.String.Input(
                     "sheet_dir",
+                    display_name="sheet folder or name",
                     default="",
                     optional=True,
-                    tooltip="The Builder's 'sheet_dir' output, or the sheet name you "
-                            "typed in 'output_name' (%date% tokens resolve to the newest "
-                            "matching run). Used to take the voice from a cell's own "
-                            "exported clip.",
+                    tooltip="Where to read the sheet's own exported clips from. This is a "
+                            "text box on the node, not a socket: drag the Character Sheet "
+                            "Builder's 'sheet_dir' output onto the dot on its left to wire "
+                            "it (or right-click it -> 'Convert widget to input'), or just "
+                            "type the sheet's name as it was rendered here "
+                            "(the Builder's output_name; a %date% name resolves to the "
+                            "newest matching run).",
                 ),
                 io.String.Input(
                     "name",

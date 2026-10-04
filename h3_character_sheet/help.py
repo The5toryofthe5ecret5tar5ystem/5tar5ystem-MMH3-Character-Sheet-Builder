@@ -374,6 +374,10 @@ SECTIONS: tuple[HelpSection, ...] = (
             "video_vae the sheet node uses, *sheet_dir* (the Builder's fourth output) so a "
             "cell's own clip can supply the voice, and the audio_vae if you want a voice "
             "at all.",
+            "*sheet_dir* is a text box on the node rather than a socket, because a name "
+            "works there too: drag the Builder's *sheet_dir* output onto the dot on its "
+            "left (or right-click it -> *Convert widget to input*) to wire it, or type the "
+            "sheet's name (`character_sheet`, or the `%date%` pattern you used) into it.",
             "**Voice**: connect any *AUDIO* (a reference tile, a clip you like) and/or let "
             "*voice_cell* take the audio H3 generated with a cell - `-1` is the first cell "
             "that exported a clip, `0` is no cell voice, `n` is that cell. Both can be "
