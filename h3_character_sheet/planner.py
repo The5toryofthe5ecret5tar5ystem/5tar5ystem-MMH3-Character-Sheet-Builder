@@ -37,9 +37,9 @@ from .sheet_spec import (
     build_cell_prompt,
     cell_matrix,
     cell_references,
+    continuation_keeps_scale_and_angle,
     continuity_plan,
     describe_background,
-    framing_distance,
 )
 
 #: H3 latents are 16px per token in each axis and the canvas is aligned to 32.
@@ -261,15 +261,15 @@ def work_summary(spec: SheetSpec, items: list[dict[str, Any]]) -> list[str]:
     for position, item in enumerate(items):
         if position == 0 or int(item.get("continuity") or 0) > 0:
             continue
-        mine = framing_distance(item.get("view"))
-        theirs = framing_distance(items[position - 1].get("view"))
-        if mine and theirs and mine != theirs:
+        mine = item.get("view")
+        theirs = items[position - 1].get("view")
+        if not continuation_keeps_scale_and_angle(theirs, mine):
             breaks.append(f"{item['id']} ({theirs} -> {mine})")
     if breaks:
         lines.append(
             "Continuation: kept independent at a framing change: "
             + ", ".join(breaks)
-            + " - the hand-over would carry the previous camera distance."
+            + " - the hand-over carries the previous camera distance AND its angle."
         )
     if spec.render.export_video:
         lines.append(

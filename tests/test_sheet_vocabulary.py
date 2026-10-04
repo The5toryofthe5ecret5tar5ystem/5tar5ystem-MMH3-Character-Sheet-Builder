@@ -131,11 +131,40 @@ def test_a_framing_with_no_face_in_it_never_gets_an_expression():
 
 def test_a_side_framing_says_the_expression_reads_in_profile():
     spec, cell = _cell("profile", expression="smile")
-    assert "Visible in profile only." in ss.build_cell_prompt(spec, cell)
+    prompt = ss.build_cell_prompt(spec, cell)
+    assert "Visible in profile only." in prompt
+    assert "Warm smile." in prompt
+    assert "eyes engaged" not in prompt, (
+        "a side view already says 'no eye contact with the viewer': an expression that "
+        "asks for eye contact there is a contradiction the model resolves by turning the "
+        "subject back to the lens (measured: the profile cell rendered frontal)"
+    )
     spec2, cell2 = _cell("face-profile", expression="smile")
-    prompt = ss.build_cell_prompt(spec2, cell2)
-    assert "Warm smile, eyes engaged." in prompt
-    assert "Visible in profile only." not in prompt, "a head profile shows the whole face side"
+    prompt2 = ss.build_cell_prompt(spec2, cell2)
+    assert "Warm smile, eyes engaged." in prompt2, (
+        "a head profile shows the whole face side, and does not say 'no eye contact'"
+    )
+    assert "Visible in profile only." not in prompt2, "a head profile shows the whole face side"
+
+
+def test_the_aside_is_only_used_where_the_view_text_forbids_eye_contact():
+    """Data-driven: the rule reads the view's own text, so the two cannot drift apart."""
+    assert "profile" in ss.NO_EYE_CONTACT_VIEWS
+    assert "back" in ss.NO_EYE_CONTACT_VIEWS
+    assert "face" not in ss.NO_EYE_CONTACT_VIEWS
+    assert "front" not in ss.NO_EYE_CONTACT_VIEWS
+    smile = ss.EXPRESSIONS[ss.EXPRESSION_KEYS.index("smile")]
+    assert smile.aside and "eyes engaged" not in smile.aside
+    assert ss.expression_reads_in_view(smile, "profile") == smile.aside
+    assert ss.expression_reads_in_view(smile, "face") == smile.prompt
+
+
+def test_a_face_framing_keeps_the_eye_contact_the_expression_asks_for():
+    """The aside is for the framings that cannot hold eye contact, not a general softening."""
+    spec, cell = _cell("face", expression="smile")
+    assert "Warm smile, eyes engaged." in ss.build_cell_prompt(spec, cell)
+    spec3, cell3 = _cell("front", expression="smile")
+    assert "Warm smile, eyes engaged." in ss.build_cell_prompt(spec3, cell3)
 
 
 def test_a_body_framing_with_a_non_neutral_pose_says_so():

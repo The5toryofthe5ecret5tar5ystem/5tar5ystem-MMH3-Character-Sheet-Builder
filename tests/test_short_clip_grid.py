@@ -89,8 +89,9 @@ def test_a_fully_snapped_sheet_is_still_a_valid_plan():
     })
     assert [cell.frames for cell in spec.cells] == [5, 22, 22, 22, 22]
     plan = ss.continuity_plan(spec)
-    # face -> portrait and portrait -> front are framing changes under 'auto'; the
-    # full-body run (front -> profile -> back) chains.
-    assert plan == {"face": 0, "portrait": 0, "front": 0, "profile": 5, "back": 5}
+    # face -> portrait and portrait -> front are framing changes under 'auto', and so is
+    # front -> profile -> back (same distance, different ANGLE: the hand-over carries the
+    # previous orientation, so a turnaround must not chain).
+    assert plan == {"face": 0, "portrait": 0, "front": 0, "profile": 0, "back": 0}
     items = pl.cell_work_items(spec)
     assert [item["frames"] for item in items] == [5, 22, 22, 22, 22]

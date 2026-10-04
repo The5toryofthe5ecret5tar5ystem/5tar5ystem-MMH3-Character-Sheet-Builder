@@ -177,28 +177,63 @@ def test_framing_distance_knows_the_three_camera_distances():
     assert ss.framing_distance("nonsense") == "", "an unknown view never matches another"
 
 
-def test_auto_chains_only_where_the_camera_distance_already_matches():
-    """A full-body turn continues; a framing change is rendered on its own.
+def test_auto_chains_only_where_the_camera_distance_AND_the_view_match():
+    """A framing change is rendered on its own - and so is an ANGLE change.
 
     The hand-over carries the previous cell's scale, so chaining a full body after a
-    chest-up cell lands mid-zoom - the feet cut off. That is the reported bug.
+    chest-up cell lands mid-zoom - the feet cut off. It also carries the previous cell's
+    POSTURE: chaining a profile cell after a frontal one renders frontal again, because
+    the five handed-over frames outweigh a prompt that asks the subject to turn. Measured
+    on a 5-cell turnaround (face / portrait / front / profile / back) with a frontal
+    reference: with the angle chained, every full-body cell came back facing the camera.
     """
     spec = _sheet("face", "portrait", "front", "profile", "back")
     plan = ss.continuity_plan(spec)
-    assert [plan[cell.id] for cell in spec.cells] == [0, 0, 0, 5, 5]
+    assert [plan[cell.id] for cell in spec.cells] == [0, 0, 0, 0, 0], (
+        "a 90-degree walk of views is five independent cells, not one continuous move"
+    )
 
 
-def test_auto_chains_a_run_of_the_same_view_and_breaks_at_the_next_change():
-    spec = _sheet("front", "profile", "back", "face")
+def test_auto_still_chains_the_same_view_with_a_different_pose_or_expression():
+    """That is what the hand-over is for: same camera, same angle, new state."""
+    spec = _sheet("front", "front", "front")
+    spec.cells[1].pose = "a-pose"
+    spec.cells[2].expression = "smile"
     plan = ss.continuity_plan(spec)
-    assert [plan[cell.id] for cell in spec.cells] == [0, 5, 5, 0]
+    assert [plan[cell.id] for cell in spec.cells] == [0, 5, 5]
+
+
+def test_auto_breaks_at_the_next_view_change():
+    spec = _sheet("front", "front", "profile", "back", "three-quarter")
+    plan = ss.continuity_plan(spec)
+    assert [plan[cell.id] for cell in spec.cells] == [0, 5, 0, 0, 0]
+
+
+def test_the_shared_rule_is_what_the_graph_and_the_report_use():
+    """One rule, so "why is this cell not continuing?" cannot disagree with the wiring."""
+    assert ss.continuation_keeps_scale_and_angle("front", "front") is True
+    assert ss.continuation_keeps_scale_and_angle("front", "profile") is False
+    assert ss.continuation_keeps_scale_and_angle("profile", "back") is False
+    assert ss.continuation_keeps_scale_and_angle("face", "portrait") is False
+    assert ss.continuation_keeps_scale_and_angle("front", "nonsense") is False
 
 
 def test_a_cell_can_force_auto_inside_an_otherwise_independent_sheet():
-    spec = _sheet("face", "portrait", "front", "profile", mode="off",
-                  **{"c4-profile": {"continuity": "auto"}})
+    """Per-cell 'auto' still has to satisfy the rule (same camera AND same view)."""
+    spec = _sheet("face", "front", "front", mode="off",
+                  **{"c2-front": {"continuity": "auto"},
+                     "c3-front": {"continuity": "auto"}})
     plan = ss.continuity_plan(spec)
-    assert [plan[cell.id] for cell in spec.cells] == [0, 0, 0, 5]
+    assert [plan[cell.id] for cell in spec.cells] == [0, 0, 5], (
+        "c2 breaks (face -> front is a framing change), c3 continues (front -> front)"
+    )
+
+
+def test_a_cell_cannot_force_auto_across_a_view_change():
+    spec = _sheet("front", "profile", mode="off",
+                  **{"c2-profile": {"continuity": "auto"}})
+    plan = ss.continuity_plan(spec)
+    assert [plan[cell.id] for cell in spec.cells] == [0, 0]
 
 
 def test_forcing_continuation_across_a_framing_change_is_reported():
@@ -222,9 +257,19 @@ def test_the_summary_explains_an_auto_break():
     lines = pl.work_summary(spec, pl.cell_work_items(spec))
     joined = "\n".join(lines)
     assert "kept independent at a framing change" in joined
-    assert "c4-profile" not in joined.split("kept independent")[1].split("\n")[0], (
-        "a cell that DID continue (same framing) is not listed as a break"
+    assert "c4-profile" in joined.split("kept independent")[1].split("\n")[0], (
+        "an angle change is a break too - the reason the profile cell used to stay frontal"
     )
+    assert not any("continues 5f" in line for line in lines), (
+        "nothing continues in a 90-degree walk of views"
+    )
+
+
+def test_the_summary_still_reports_a_real_continuation():
+    """Same view, new pose: the report has to say which cell carries a hand-over."""
+    spec = _sheet("front", "front")
+    spec.cells[1].pose = "a-pose"
+    lines = pl.work_summary(spec, pl.cell_work_items(spec))
     assert any("continues 5f" in line for line in lines)
 
 

@@ -4,6 +4,32 @@ All notable changes to **5tar5ystem MMH3 Character Sheet Builder** are recorded 
 follows [semantic versioning](https://semver.org/): the node type (`MiniMaxH3CharacterSheet`) and
 the payload contract are what "breaking" refers to, not the panel's layout.
 
+## [Unreleased]
+
+### Fixed
+
+* **Continuation no longer chains a cell after a DIFFERENT angle.** `auto` used to chain any
+  two cells with the same camera distance, on the reasoning that the hand-over only carries
+  scale - but it carries the previous cell's **posture** too: H3 resolves a hand-over by
+  continuing what it was handed, so five frames of a frontal clip outweigh a prompt that asks
+  the subject to turn. Measured on a 5-cell turnaround (face / portrait / front / profile /
+  back) at `continuity: auto`: every full-body cell came back facing the camera, and the
+  profile and back prompts ("90 degrees, side", "from behind") were ignored. `auto` now needs
+  the same camera distance **and the same view**, so a 90-degree walk is five independent
+  renders - which is what the turnaround presets ask for - while same-view cells with a new
+  pose or expression (`front` -> `a-pose`, `front` -> `front-smile`) still chain. `on` still
+  chains everything, for a genuinely continuous move. One rule
+  (`sheet_spec.continuation_keeps_scale_and_angle`) is shared by the graph builder, the frame
+  picker and the report.
+* **An expression that asks for eye contact is no longer used where the framing says there is
+  none.** The smile option reads "Warm smile, eyes engaged."; on a `profile` cell that landed
+  directly after the frame text's "gaze away from the camera, no eye contact with the viewer" -
+  a contradiction the model resolved by turning the body back to the lens. Expressions now
+  carry an `aside` (the same expression without the gaze clause, e.g. "Warm smile.") and it is
+  used exactly for the views whose own text forbids eye contact (`NO_EYE_CONTACT_VIEWS`, read
+  from the view table so the two cannot drift apart). Face, portrait and frontal cells keep the
+  full text.
+
 ## [1.2.2] - 2026-10-04
 
 A sheet node keeps the size you give it: the automatic height fit is gone, so neither a page

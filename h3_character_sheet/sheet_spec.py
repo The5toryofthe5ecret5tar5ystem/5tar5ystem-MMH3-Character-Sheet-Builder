@@ -86,11 +86,19 @@ def align_h3_frames(value: Any, *, fallback: int = DEFAULT_CELL_FRAMES) -> int:
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class SheetOption:
-    """One selectable view / pose / expression."""
+    """One selectable view / pose / expression.
+
+    ``aside`` is the same expression with its eye contact removed, used by the framings
+    that cannot show any (:data:`PROFILE_FRAMINGS`). "Warm smile, eyes engaged." is right
+    for a face close-up and wrong in a side view, where the composition already says
+    "no eye contact with the viewer" - an instruction to look into the lens there is a
+    contradiction the model resolves by turning the whole body back to the camera.
+    """
 
     key: str
     label: str
     prompt: str
+    aside: str = ""
 
 
 #: What each view asks the camera for, in SHOT-SIZE words. The framing line is the
@@ -274,6 +282,28 @@ PROFILE_FRAMINGS: tuple[str, ...] = ("profile", "face-profile")
 #: Framings nobody can see a face in - an expression there would be a lie.
 NO_FACE_FRAMINGS: tuple[str, ...] = ("back", "three-quarter-back", "head-back", "hands", "legs")
 
+#: The framings whose own frame text says the subject is NOT looking at the viewer (a
+#: side view, a back view). Read from :data:`VIEWS` so the two can never drift apart: an
+#: expression that asks for eye contact in one of these is a contradiction, and the model
+#: resolves a contradiction by turning the body back to the camera.
+NO_EYE_CONTACT_VIEWS: tuple[str, ...] = tuple(
+    option.key for option in VIEWS if "no eye contact" in option.prompt.lower()
+)
+
+
+def expression_reads_in_view(option: SheetOption, view: Any) -> str:
+    """The expression text as ``view`` can read it.
+
+    "Warm smile, eyes engaged." belongs on a face close-up and contradicts a profile, whose
+    own text already says "gaze away from the camera, no eye contact with the viewer".
+    Where there is no eye contact to hold, the option's :attr:`SheetOption.aside` is used
+    instead (measured: with the gaze clause in place, a profile cell came back facing the
+    camera).
+    """
+    if str(view or "").strip().lower() in NO_EYE_CONTACT_VIEWS:
+        return option.aside or option.prompt
+    return option.prompt
+
 #: Which axis "Build cells" expands a view along: ``pose`` for whole-body framings (one
 #: cell per ticked pose), ``expression`` where the face is the subject (one cell per
 #: ticked expression), ``single`` for the detail crops - a crop of the hands does not
@@ -368,7 +398,7 @@ POSES: tuple[SheetOption, ...] = (
 
 EXPRESSIONS: tuple[SheetOption, ...] = (
     SheetOption("neutral", "Neutral", "Neutral expression, mouth closed, relaxed brow."),
-    SheetOption("smile", "Smile", "Warm smile, eyes engaged."),
+    SheetOption("smile", "Smile", "Warm smile, eyes engaged.", aside="Warm smile."),
     SheetOption("smirk", "Smirk", "Small one-sided smirk."),
     SheetOption("frown", "Frown", "Frowning, brows drawn down."),
     SheetOption("anger", "Anger", "Angry expression, hard stare, jaw set."),
@@ -1976,6 +2006,24 @@ def framing_distance(view: Any) -> str:
     return FRAMING_DISTANCES.get(str(view or "").strip().lower(), "")
 
 
+def continuation_keeps_scale_and_angle(previous_view: Any, view: Any) -> bool:
+    """May ``auto`` hand a cell over from a cell with ``previous_view``?
+
+    The hand-over carries the previous cell's **scale and posture**, not just its zoom:
+    the model continues what it is given. So ``auto`` needs the same camera distance (or
+    the new cell lands mid-zoom, feet cropped) AND the same view (or the new cell keeps
+    the angle it was handed - a profile chained after a frontal cell renders frontal).
+
+    This is the single rule, so the graph builder, the frame picker and the report cannot
+    disagree about it; ``on`` bypasses it on purpose.
+    """
+    previous = framing_distance(previous_view)
+    mine = framing_distance(view)
+    if not previous or not mine or previous != mine:
+        return False
+    return str(previous_view or "").strip().lower() == str(view or "").strip().lower()
+
+
 def continuity_plan(
     spec: SheetSpec,
     *,
@@ -1992,10 +2040,17 @@ def continuity_plan(
     * A cell continues when its own ``continuity`` says ``on``, or when it says
       ``inherit`` and the sheet's render setting is ``on``. ``off`` beats the sheet.
     * ``auto`` - from the cell or the sheet - continues only when the previous enabled
-      cell has the SAME camera distance (:func:`framing_distance`). The hand-over carries
-      the previous cell's scale, so chaining a chest-up cell after a face close-up just
-      keeps the close-up, and chaining a full body after a chest-up cell lands
-      mid-zoom with the feet cut off. Same distance, different angle is where it shines.
+      cell has the SAME camera distance (:func:`framing_distance`) **and the same view**.
+      The hand-over carries the previous cell's scale, so chaining a chest-up cell after a
+      face close-up just keeps the close-up, and chaining a full body after a chest-up cell
+      lands mid-zoom with the feet cut off - that is the distance half. The other half is
+      the ANGLE, and it was measured the hard way: chaining a profile cell after a frontal
+      one renders frontal again. H3 resolves a hand-over by keeping what it was handed, so
+      the five frames of the previous cell win over a prompt that asks the subject to turn,
+      and a 90-degree walk of views comes back as five frontal cells. Same view, different
+      pose or expression (front -> a-pose, front -> front-smile) is what ``auto`` is for.
+      Use ``on`` when a genuine continuous turn is wanted, which still chains everything and
+      says so in the report.
     * ``on`` continues regardless, and says so when it crosses a framing change.
     * The hand-over is :data:`CONTINUITY_FRAMES` frames of the previous cell's render.
     * A cell whose *own* length is not larger than the hand-over cannot continue: the
@@ -2022,9 +2077,9 @@ def continuity_plan(
             if warnings is not None:
                 warnings.append(note)
         if wants and mode == "auto" and position > 0:
-            mine = framing_distance(cell.view)
-            theirs = framing_distance(previous_cell.view) if previous_cell else ""
-            if not mine or mine != theirs:
+            if previous_cell is None or not continuation_keeps_scale_and_angle(
+                previous_cell.view, cell.view
+            ):
                 wants = False
         if wants and mode == "on" and position > 0 and previous_cell is not None:
             mine = framing_distance(cell.view)
@@ -2241,8 +2296,10 @@ def build_cell_prompt(spec: SheetSpec, cell: SheetCell, *, refs: list[SheetRef] 
         # A whole-body framing still takes an expression - it steers the face - and a
         # profile only reads one from the side. A framing with no face in it gets
         # nothing: "smiling" in a hands crop just invents a face at the edge of frame.
+        # A framing whose own text says there is no eye contact gets the expression
+        # without its gaze clause (see expression_reads_in_view).
         scope = " Visible in profile only." if cell.view in PROFILE_FRAMINGS else ""
-        body.append(f"{cell.expression_option.prompt}{scope}")
+        body.append(f"{expression_reads_in_view(cell.expression_option, cell.view)}{scope}")
 
     ref_keep = [
         ref.tag
@@ -2347,6 +2404,8 @@ __all__ = [
     "DEFAULT_SHORT_EDGE",
     "EXPRESSIONS",
     "EXPRESSION_KEYS",
+    "NO_EYE_CONTACT_VIEWS",
+    "expression_reads_in_view",
     "H3_FRAME_BASE",
     "H3_FRAME_STRIDE",
     "LAYOUTS",
@@ -2377,6 +2436,7 @@ __all__ = [
     "build_cell_prompt",
     "cell_matrix",
     "cell_references",
+    "continuity_keeps_scale_and_angle",
     "continuity_plan",
     "continuity_settle",
     "describe_background",
