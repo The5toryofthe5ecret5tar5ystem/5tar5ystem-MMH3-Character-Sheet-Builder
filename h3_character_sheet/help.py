@@ -364,7 +364,9 @@ SECTIONS: tuple[HelpSection, ...] = (
             "A sheet is a multi-view identity board, and that is what a RefMod wants: a "
             "latent that rides H3's own reference path for a fraction of the tokens. "
             "**H3 Sheet → RefMod** writes one bundle holding the picked cells stacked as "
-            "appearance, the composited sheet as a second member, and a voice member."
+            "appearance, the composited sheet as a second member, and a voice member - "
+            "the sheet's **own reference audio**, so the voice in the bundle is the voice "
+            "the character was built from."
         ),
         bullets=(
             "**Ready-made**: `example_workflows/5tar5ystem MMH3 Character Sheet Builder + "
@@ -374,17 +376,30 @@ SECTIONS: tuple[HelpSection, ...] = (
             "*Load H3 RefMods* and *Apply H3 RefMod* live there. Without it the node stops "
             "with the sentence that says where to clone it; nothing else in this pack cares.",
             "**Wire it**: the Builder's *cells* and *sheet* outputs into the node, the same "
-            "video_vae the sheet node uses, *sheet_dir* (the Builder's fourth output) so a "
-            "cell's own clip can supply the voice, and the audio_vae if you want a voice "
-            "at all.",
+            "video_vae the sheet node uses, *sheet_dir* (the Builder's fourth output) so the "
+            "sheet's own reference audio and cell clips can supply the voice, and the "
+            "audio_vae if you want a voice at all.",
             "*sheet_dir* is a text box on the node rather than a socket, because a name "
             "works there too: drag the Builder's *sheet_dir* output onto the dot on its "
             "left (or right-click it -> *Convert widget to input*) to wire it, or type the "
             "sheet's name (`character_sheet`, or the `%date%` pattern you used) into it.",
-            "**Voice**: connect any *AUDIO* (a reference tile, a clip you like) and/or let "
-            "*voice_cell* take the audio H3 generated with a cell - `-1` is the first cell "
-            "that exported a clip, `0` is no cell voice, `n` is that cell. Both can be "
-            "members at once.",
+            "**Voice**: *voice_cell* is a ladder - `-1` (default) takes the voice from the "
+            "sheet's **own reference audio** (the WAV in the Builder's References tab, "
+            "recorded in the manifest), else every exported cell clip joined into one "
+            "waveform, else a connected *AUDIO*; `0` keeps the sheet out of it (*AUDIO* "
+            "only) and `n` forces the nth cell's clip. The reference wins by default "
+            "because it is seconds long and clean, where a cell clip is the ~1s H3 "
+            "generated for that take. *voice_seconds* is a ceiling on what is encoded, "
+            "not a target.",
+            "**A thin voice is the usual reason a bundle 'does nothing'.** A reference is "
+            "worth the rows it occupies, and everything in a bundle is packed into one "
+            "sequence the model attends over (the video being generated adds thousands of "
+            "rows on top): a 0.95s voice is ~0.5% of that, small enough that an A/B of "
+            "*voice 1.0* against *voice 0.0* looks like noise. The report prints each "
+            "member's share of the bundle and, when the voice is thin, the *copies* count "
+            "on *Load H3 RefMods* that would put it on the map (about 2% is where a "
+            "reference starts to compete). A longer reference clip beats every other "
+            "knob.",
             "**Full Reference** (default) stores the real encode at *ref_resolution*, so a "
             "face survives - that is the mode a character sheet is for. **Compressed "
             "Reference** pools it to a tiny grid: nearly free to inject, and it carries "

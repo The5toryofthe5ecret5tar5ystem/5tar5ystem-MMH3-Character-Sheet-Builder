@@ -103,13 +103,50 @@ def sheets_root(tmp_path, monkeypatch):
     return root
 
 
-def make_sheet_folder(root: Path, name: str, cells: list[str], clips: list[str]) -> Path:
-    """A sheet folder with the manifest and the clips the export reads."""
+@pytest.fixture()
+def input_root(tmp_path, monkeypatch):
+    """ComfyUI's ``input`` folder, where a manifest's reference file name resolves.
+
+    ``LoadAudio`` reads references from the input folder, so that is where the export
+    looks first; the test pretends ``tmp_path/input`` is it instead of importing core.
+    """
+    folder = tmp_path / "input"
+    folder.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(rx, "_reference_roots", lambda _folder=None: [folder])
+    return folder
+
+
+def make_sheet_folder(
+    root: Path,
+    name: str,
+    cells: list[str],
+    clips: list[str],
+    audios: list[str] | None = None,
+    input_root: Path | None = None,
+) -> Path:
+    """A sheet folder with the manifest and the clips the export reads.
+
+    ``audios`` writes ``spec.refs.audios`` the way the Builder's References tab does
+    and puts the files in the input folder - the reference audio the sheet was rendered
+    with, which is what the voice ladder offers first.
+    """
     folder = root / name
     (folder / "clips").mkdir(parents=True, exist_ok=True)
-    (folder / f"{name}.json").write_text(
-        json.dumps({"cells": {cell: {"index": 0} for cell in cells}}), encoding="utf-8"
-    )
+    manifest: dict[str, object] = {"cells": {cell: {"index": 0} for cell in cells}}
+    if audios:
+        manifest["spec"] = {
+            "refs": {
+                "audios": [
+                    {"audioFile": audio, "role": "voice", "enabled": True}
+                    for audio in audios
+                ]
+            }
+        }
+        for audio in audios:
+            target = (input_root if input_root is not None else folder) / audio
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"RIFF")
+    (folder / f"{name}.json").write_text(json.dumps(manifest), encoding="utf-8")
     for clip in clips:
         (folder / "clips" / clip).write_bytes(b"not really an mp4")
     return folder
@@ -198,7 +235,57 @@ def test_saving_can_be_switched_off(tmp_path):
 
 
 # ------------------------------------------------------------------------- voices
-def test_the_voice_can_come_from_a_cell_clip(tmp_path, sheets_root, monkeypatch):
+def test_the_voice_comes_from_the_sheets_own_reference_audio(
+    tmp_path, sheets_root, input_root, monkeypatch
+):
+    """The reference audio is the point: it is the voice the sheet was built from.
+
+    A cell clip only holds the ~1s H3 generated for that take, so the ladder takes the
+    reference file the manifest recorded (the Builder's References tab), and it is read
+    from the input folder the way ``LoadAudio`` would.
+    """
+    pack, calls = fake_pack(tmp_path)
+    folder = make_sheet_folder(
+        sheets_root, "sheet_run", cells=["c1", "c2"],
+        clips=["c1_00001_.mp4", "c2_00001_.mp4"],
+        audios=["flaffy voice 01.wav"], input_root=input_root,
+    )
+    loaded: list[str] = []
+
+    def fake_clip_audio(path):
+        loaded.append(Path(path).name)
+        return VOICE
+
+    monkeypatch.setattr(rx, "clip_audio", fake_clip_audio)
+
+    result = rx.export_bundle(cells=stills(2), video_vae="v", audio_vae="a", audio=VOICE,
+                              sheet_dir=str(folder), name="run", pack=pack)
+    assert loaded == ["flaffy voice 01.wav"], "the clips are not read once a reference wins"
+    assert calls["audio"][0]["name"] == "run_voice"
+    assert any("the sheet's reference audio (flaffy voice 01.wav)" in line
+               for line in result.lines)
+    assert any("not used" in line and "cell clip" in line for line in result.lines), (
+        "the report says what the ladder passed over, so 'voice_cell' is discoverable"
+    )
+
+
+def test_every_reference_audio_file_is_joined_in_order(
+    tmp_path, sheets_root, input_root, monkeypatch
+):
+    pack, calls = fake_pack(tmp_path)
+    folder = make_sheet_folder(
+        sheets_root, "sheet_run", cells=["c1"], clips=[],
+        audios=["voice_a.wav", "voice_b.wav"], input_root=input_root,
+    )
+    monkeypatch.setattr(rx, "clip_audio", lambda path: VOICE)
+    result = rx.export_bundle(cells=stills(1), video_vae="v", audio_vae="a",
+                              sheet_dir=str(folder), name="run", pack=pack)
+    assert calls["audio"][0]["name"] == "run_voice"
+    assert any("2 files joined" in line for line in result.lines)
+
+
+def test_the_joined_cell_clips_are_the_fallback(tmp_path, sheets_root, monkeypatch):
+    """No reference audio in the manifest: every exported clip is joined, not just one."""
     pack, calls = fake_pack(tmp_path)
     folder = make_sheet_folder(sheets_root, "sheet_run",
                                cells=["c1", "c2"], clips=["c1_00001_.mp4", "c2_00001_.mp4"])
@@ -214,18 +301,41 @@ def test_the_voice_can_come_from_a_cell_clip(tmp_path, sheets_root, monkeypatch)
         cells=stills(2), video_vae="v", audio_vae="a", sheet_dir=str(folder),
         name="run", pack=pack,
     )
-    assert loaded == ["c1_00001_.mp4"], "auto takes the first cell that exported a clip"
-    assert calls["audio"][0]["name"] == "run_voice_cell1"
-    assert any("generated audio of c1_00001_.mp4" in line for line in result.lines)
+    assert loaded == ["c1_00001_.mp4", "c2_00001_.mp4"]
+    assert calls["audio"][0]["name"] == "run_voice_cells"
+    assert any("the audio of 2 exported cell clip(s)" in line for line in result.lines)
 
 
-def test_a_specific_cell_can_supply_the_voice(tmp_path, sheets_root, monkeypatch):
+def test_a_reference_that_is_gone_falls_through_instead_of_failing(
+    tmp_path, sheets_root, input_root, monkeypatch
+):
+    """A tidy-up must not cost the export: a missing reference file is skipped."""
+    pack, calls = fake_pack(tmp_path)
+    folder = make_sheet_folder(sheets_root, "sheet_run", cells=["c1"],
+                               clips=["c1_00001_.mp4"],
+                               audios=["deleted.wav"], input_root=input_root)
+    (input_root / "deleted.wav").unlink()
+    monkeypatch.setattr(rx, "clip_audio", lambda path: VOICE)
+    result = rx.export_bundle(cells=stills(1), video_vae="v", audio_vae="a",
+                              sheet_dir=str(folder), name="run", pack=pack)
+    assert calls["audio"][0]["name"] == "run_voice_cells"
+    assert any("deleted.wav" in line and "not on disk" in line for line in result.lines), (
+        "the report names the reference it could not find, so it can be put back"
+    )
+
+
+def test_a_forced_cell_ignores_the_reference_audio(tmp_path, sheets_root, input_root,
+                                                   monkeypatch):
     pack, calls = fake_pack(tmp_path)
     folder = make_sheet_folder(sheets_root, "sheet_run",
-                               cells=["c1", "c2"], clips=["c1_00001_.mp4", "c2_00002_.mp4"])
-    monkeypatch.setattr(rx, "clip_audio", lambda path: VOICE)
+                               cells=["c1", "c2"], clips=["c1_00001_.mp4", "c2_00002_.mp4"],
+                               audios=["voice.wav"], input_root=input_root)
+    loaded: list[str] = []
+    monkeypatch.setattr(rx, "clip_audio",
+                        lambda path: (loaded.append(Path(path).name), VOICE)[1])
     rx.export_bundle(cells=stills(2), video_vae="v", audio_vae="a", sheet_dir=str(folder),
                      voice_cell=2, name="run", pack=pack)
+    assert loaded == ["c2_00002_.mp4"]
     assert calls["audio"][0]["name"] == "run_voice_cell2"
 
 
@@ -239,6 +349,21 @@ def test_voice_cell_zero_means_no_cell_voice(tmp_path, sheets_root, monkeypatch)
     assert calls["audio"] == []
 
 
+def test_voice_cell_zero_keeps_the_sheet_out_of_the_voice(
+    tmp_path, sheets_root, input_root, monkeypatch
+):
+    """``0`` is the escape hatch when a wired audio should win over the sheet's own."""
+    pack, calls = fake_pack(tmp_path)
+    folder = make_sheet_folder(sheets_root, "sheet_run", cells=["c1"],
+                               clips=["c1_00001_.mp4"], audios=["voice.wav"],
+                               input_root=input_root)
+    monkeypatch.setattr(rx, "clip_audio", lambda path: pytest.fail("must not read audio"))
+    rx.export_bundle(cells=stills(1), video_vae="v", audio_vae="a", audio=VOICE,
+                     sheet_dir=str(folder), voice_cell=0, name="run", pack=pack)
+    assert calls["audio"][0]["name"] == "run_voice"
+    assert calls["audio"][0]["audio"] is VOICE
+
+
 def test_a_sheet_without_clips_says_so_instead_of_failing(tmp_path, sheets_root):
     pack, calls = fake_pack(tmp_path)
     folder = make_sheet_folder(sheets_root, "sheet_run", cells=["c1"], clips=[])
@@ -249,14 +374,115 @@ def test_a_sheet_without_clips_says_so_instead_of_failing(tmp_path, sheets_root)
     assert result.mods, "the appearance member is still worth exporting"
 
 
-def test_both_voice_sources_can_be_members_at_once(tmp_path, sheets_root, monkeypatch):
+def test_a_connected_audio_is_the_last_rung(tmp_path, sheets_root):
+    """Nothing in the sheet: the wired clip is still a voice, and the report says why."""
     pack, calls = fake_pack(tmp_path)
-    folder = make_sheet_folder(sheets_root, "sheet_run",
-                               cells=["c1"], clips=["c1_00001_.mp4"])
-    monkeypatch.setattr(rx, "clip_audio", lambda path: VOICE)
+    folder = make_sheet_folder(sheets_root, "sheet_run", cells=["c1"], clips=[])
     result = rx.export_bundle(cells=stills(1), sheet=None, audio=VOICE, video_vae="v",
                               audio_vae="a", sheet_dir=str(folder), name="run", pack=pack)
-    assert [mod.name for mod in result.mods] == ["run_views", "run_voice", "run_voice_cell1"]
+    assert [mod.name for mod in result.mods] == ["run_views", "run_voice"]
+    assert calls["audio"][0]["audio"] is VOICE
+    assert any("the connected audio" in line for line in result.lines)
+
+
+def test_sheet_audio_references_skips_disabled_and_missing_rows(
+    tmp_path, sheets_root, input_root
+):
+    folder = make_sheet_folder(sheets_root, "sheet_run", cells=["c1"], clips=[],
+                               audios=["keep.wav"], input_root=input_root)
+    manifest = json.loads((folder / "sheet_run.json").read_text(encoding="utf-8"))
+    manifest["spec"]["refs"]["audios"] += [
+        {"audioFile": "off.wav", "role": "voice", "enabled": False},
+        {"audioFile": "gone.wav", "role": "voice", "enabled": True},
+    ]
+    (folder / "sheet_run.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    found = rx.sheet_audio_references(folder)
+    assert [path.name for path in found] == ["keep.wav"]
+
+
+def test_a_manifest_without_a_spec_has_no_reference_audio(tmp_path, sheets_root):
+    folder = make_sheet_folder(sheets_root, "sheet_run", cells=["c1"], clips=[])
+    assert rx.sheet_audio_references(folder) == []
+    assert rx.sheet_audio_references(None) == []
+
+
+# ------------------------------------------------------------------- joining audio
+def tone(seconds: float, rate: int = 32000, channels: int = 1) -> dict:
+    """An AUDIO value shaped like theirs: ``[1, channels, samples]``."""
+    return {
+        "waveform": torch.zeros((1, channels, int(seconds * rate)), dtype=torch.float32),
+        "sample_rate": rate,
+    }
+
+
+def test_clips_are_joined_as_samples_at_h3s_rate():
+    joined = rx.concat_audio([tone(1.0), tone(0.5, rate=16000)])
+    assert joined["sample_rate"] == rx.H3_AUDIO_RATE
+    assert joined["waveform"].shape == (1, 1, 48000), "1s + 0.5s, all at 32 kHz"
+
+
+def test_a_stereo_clip_makes_the_join_stereo():
+    joined = rx.concat_audio([tone(0.25, channels=1), tone(0.25, channels=2)])
+    assert joined["waveform"].shape == (1, 2, 16000), "mono is duplicated, like theirs"
+
+
+def test_the_join_is_capped_not_extended():
+    joined = rx.concat_audio([tone(3.0), tone(3.0)], max_seconds=2.0)
+    assert joined["waveform"].shape == (1, 1, 64000), "voice_seconds is a ceiling"
+    assert rx.concat_audio([]) is None
+
+
+def test_audio_parts_refuses_something_that_is_not_an_audio_value():
+    with pytest.raises(rx.RefModExportError, match="AUDIO value"):
+        rx.audio_parts({"waveform": torch.zeros(1)})
+    with pytest.raises(rx.RefModExportError, match="one batch"):
+        rx.audio_parts({"waveform": torch.zeros((2, 1, 100)), "sample_rate": 32000})
+
+
+# ---------------------------------------------------------------------- row share
+def test_the_report_gives_every_member_its_share_of_the_rows(tmp_path):
+    pack, _calls = fake_pack(tmp_path)
+    result = rx.export_bundle(cells=stills(8), sheet=None, audio=VOICE, video_vae="v",
+                              audio_vae="a", name="hero", pack=pack)
+    # The fake pack counts 100 tokens per still and 80 per second of voice (30s).
+    assert any("800 tokens" in line and "of the bundle" in line for line in result.lines)
+    assert any("2400 tokens" in line and "of the bundle" in line for line in result.lines)
+
+
+def test_a_thin_voice_member_gets_the_copies_hint(tmp_path):
+    """Rows are the whole story: 76 of 8,956 is why an A/B can look like noise.
+
+    (Measured on a real bundle: an 0.95s cell clip next to a 640x384/124f target - and
+    the target itself adds thousands of rows the bundle report cannot see.)
+    """
+    members = [
+        {"name": "views", "kind": "video", "tokens": 8880},
+        {"name": "voice", "kind": "audio", "tokens": 76},
+    ]
+    hint = rx.share_hint(members, 8956)
+    assert len(hint) == 1
+    assert "76 of the bundle's 8956 rows (0.8%)" in hint[0]
+    assert "copies 3" in hint[0]
+
+
+def test_a_hint_says_so_when_copies_cannot_fix_it():
+    members = [
+        {"name": "views", "kind": "video", "tokens": 100000},
+        {"name": "voice", "kind": "audio", "tokens": 40},
+    ]
+    hint = rx.share_hint(members, 100040)
+    assert "even 10 copies" in hint[0] and "voice_seconds" in hint[0]
+
+
+def test_a_voice_with_a_real_share_gets_no_hint():
+    members = [
+        {"name": "views", "kind": "video", "tokens": 8000},
+        {"name": "voice", "kind": "audio", "tokens": 2000},
+    ]
+    assert rx.share_hint(members, 10000) == []
+    assert rx.share_hint([], 0) == []
+    assert rx.share_hint([members[0]], 8880) == [], "an appearance-only bundle is fine"
 
 
 def test_a_voice_member_needs_the_audio_vae(tmp_path):

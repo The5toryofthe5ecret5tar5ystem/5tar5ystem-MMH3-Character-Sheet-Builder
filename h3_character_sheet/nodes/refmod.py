@@ -6,13 +6,17 @@
 The character sheet is a multi-view identity board, which is exactly what a RefMod
 wants: their own ``elf_girl`` mod is four stills of one person stacked
 (``source=stack``). This node turns the Builder's picked cells and the composited
-sheet into members of one version-5 bundle, adds the voice (a connected AUDIO, or the
-H3-generated audio of a cell's exported clip) and saves it to
-``models/refmods/<subfolder>/<name>.safetensors``, where ``Load H3 RefMods`` lists it.
+sheet into members of one version-5 bundle and adds a voice member whose source is the
+sheet's own reference audio (the WAV in the Builder's References tab, recorded in the
+manifest), else its exported cell clips joined, else a connected AUDIO - and saves it
+to ``models/refmods/<subfolder>/<name>.safetensors``, where ``Load H3 RefMods`` lists
+it.
 
-The heavy lifting - both VAE encodes - is ComfyUI-MiniMaxH3Mod's own code; see
-``h3_character_sheet/refmod_export.py``. That pack is an optional dependency: without
-it this node stops with the clone line instead of failing somewhere deep.
+A reference is worth the rows it occupies in the packed sequence the model attends
+over, so the report prints each member's share and says which ``copies`` count would
+make a thin voice matter; see ``h3_character_sheet/refmod_export.py``. Both VAE encodes
+are ComfyUI-MiniMaxH3Mod's own code, and that pack is an optional dependency: without it
+this node stops with the clone line instead of failing somewhere deep.
 """
 
 from __future__ import annotations
@@ -56,9 +60,9 @@ class H3SheetRefMod(io.ComfyNode):
             description=(
                 "Export a character sheet as a ComfyUI-MiniMaxH3Mod (RefMod) bundle: "
                 "the picked cell stills as a stacked appearance member, the composited "
-                "sheet as a second one, and a voice member from a connected audio or "
-                "the generated audio of a cell's clip. One file, written to "
-                "models/refmods/<subfolder>/<name>.safetensors. Needs the "
+                "sheet as a second one, and a voice member from the sheet's own "
+                "reference audio, its exported clips, or a connected audio. One file, "
+                "written to models/refmods/<subfolder>/<name>.safetensors. Needs the "
                 "ComfyUI-MiniMaxH3Mod pack for the encoders."
             ),
             is_output_node=True,
@@ -97,21 +101,25 @@ class H3SheetRefMod(io.ComfyNode):
                     tooltip="Optional voice clip for a voice member: wire an AUDIO here "
                             "(core Load Audio, a video's own track via GetVideoComponents, "
                             "a TTS node...). Any audio, mono or stereo, resampled to H3's "
-                            "32 kHz. Needs audio_vae; without it this member is skipped "
-                            "and the report says so.",
+                            "32 kHz. It is the voice ladder's LAST choice - the sheet's "
+                            "own reference audio or its cell clips win unless "
+                            "'voice_cell' is 0. Needs audio_vae; without it this member "
+                            "is skipped and the report says so.",
                 ),
                 io.String.Input(
                     "sheet_dir",
                     display_name="sheet folder or name",
                     default="",
                     optional=True,
-                    tooltip="Where to read the sheet's own exported clips from. This is a "
-                            "text box on the node, not a socket: drag the Character Sheet "
-                            "Builder's 'sheet_dir' output onto the dot on its left to wire "
-                            "it (or right-click it -> 'Convert widget to input'), or just "
-                            "type the sheet's name as it was rendered here "
-                            "(the Builder's output_name; a %date% name resolves to the "
-                            "newest matching run).",
+                    tooltip="Where to read the sheet's own exported clips from - and "
+                            "the manifest that records the reference audio the sheet "
+                            "was rendered with (the voice ladder's first choice). This "
+                            "is a text box on the node, not a socket: drag the "
+                            "Character Sheet Builder's 'sheet_dir' output onto the dot "
+                            "on its left to wire it (or right-click it -> 'Convert "
+                            "widget to input'), or just type the sheet's name as it "
+                            "was rendered here (the Builder's output_name; a %date% "
+                            "name resolves to the newest matching run).",
                 ),
                 io.String.Input(
                     "name",
@@ -188,10 +196,13 @@ class H3SheetRefMod(io.ComfyNode):
                     default=VOICE_AUTO,
                     min=-1,
                     max=64,
-                    tooltip="-1 = take the voice from the first cell that exported a "
-                            "clip, 0 = no cell voice, n = the nth cell. The clip is the "
-                            "H3 render of that cell, so the voice is the one you "
-                            "actually heard in the panel.",
+                    tooltip="-1 = walk the voice ladder: the sheet's own reference audio "
+                            "(the file in the Builder's References tab) if the manifest "
+                            "has one, else every exported cell clip joined, else the "
+                            "connected audio. 0 = no sheet audio, the connected audio "
+                            "only. n = force the generated audio of the nth cell "
+                            "(~1s - the voice you heard in the panel, but a tiny "
+                            "reference).",
                 ),
                 io.Float.Input(
                     "voice_seconds",
@@ -199,9 +210,11 @@ class H3SheetRefMod(io.ComfyNode):
                     min=0.5,
                     max=600.0,
                     step=0.5,
-                    tooltip="Longest slice of audio encoded per voice member. Their "
-                            "default is 30s (5120 tokens); a longer clip is truncated "
-                            "rather than refused.",
+                    tooltip="Ceiling, not a target: the longest slice of audio encoded "
+                            "per voice member (a longer clip is truncated, not refused). "
+                            "Longer is stronger - a 1s reference is ~0.5% of the rows "
+                            "the model attends over. Their recommended 30s / 5120 "
+                            "tokens.",
                 ),
                 io.Boolean.Input(
                     "save",

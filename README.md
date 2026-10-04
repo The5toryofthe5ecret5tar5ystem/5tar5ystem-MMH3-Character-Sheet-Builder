@@ -59,7 +59,8 @@ cell's clip with the audio H3 generated. Re-picking a frame and re-compositing c
 **Export it as a RefMod - appearance *and* voice.** [ComfyUI-MiniMaxH3Mod](https://github.com/Luisacaotica/ComfyUI-MiniMaxH3Mod)
 "RefMods" are tiny no-training reference adapters that ride H3's own reference path. `H3 Sheet →
 RefMod` turns the sheet into one: the picked cells stacked, the composite as a second member, and a
-voice member from a clip you connect or from the audio H3 generated with a cell. Written to
+voice member from the sheet's own reference audio (or its cell clips, or a clip you connect).
+Written to
 `models/refmods/`, where `Load H3 RefMods` lists it - no training, no second pass.
 
 **Watch it render, and re-roll a single cell.** The panel's **LIVE** strip plays a looping clip of
@@ -149,8 +150,8 @@ more - but the ratio between the two tiers is what to plan around.
    character is, press Queue.
    [`... Builder + RefMod.json`](example_workflows/5tar5ystem%20MMH3%20Character%20Sheet%20Builder%20+%20RefMod.json)
    is the same graph with the export node appended: one queue renders the sheet, saves the
-   PNG *and* writes the RefMod bundle (cells + composite + the first cell's own voice), so a
-   sheet you like is a mod you can use without a second pass.
+   PNG *and* writes the RefMod bundle (cells + composite + the sheet's own reference voice),
+   so a sheet you like is a mod you can use without a second pass.
 
 ### Presets (top of the panel)
 
@@ -671,8 +672,16 @@ rides H3's own reference path for a fraction of the tokens a real reference cost
 |---|---|---|
 | `<name>_views` | the Builder's `cells` output - the picked still of every cell, stacked (up to their 16-slot limit, sampled end to end) | `[1,24,T,H,W]` |
 | `<name>_sheet` | the Builder's `sheet` output - the composite, as its own member | `[1,24,1,H,W]` |
-| `<name>_voice` | a connected `AUDIO` - any clip, or a reference tile you liked | `[1,32,2,T]` |
-| `<name>_voice_cellN` | the audio track of cell *N*'s exported clip (`voice_cell`, `-1` = first cell with a clip) | `[1,32,2,T]` |
+| `<name>_voice` | the sheet's **own reference audio** - the WAV in the Builder's References tab, recorded in the manifest | `[1,32,2,T]` |
+| `<name>_voice_cells` | every exported cell clip joined into one waveform (the fallback when the manifest has no reference audio) | `[1,32,2,T]` |
+| `<name>_voice_cellN` | the audio track of cell *N*'s exported clip, forced with `voice_cell=n` | `[1,32,2,T]` |
+
+`voice_cell` is the ladder switch: `-1` (default) walks *reference audio -> cell clips
+joined -> a connected `AUDIO`*, `0` keeps the sheet out of it (a wired clip only) and
+`n` forces the nth cell's clip. The reference wins by default because it is the voice
+the sheet was built from - seconds long and clean, where a cell clip only holds the ~1s
+H3 generated for that one take. `voice_seconds` is a **ceiling** on what is encoded, not
+a target.
 
 ```text
 models/refmods/<subfolder>/<name>.safetensors      # <subfolder> defaults to character_sheets
@@ -687,7 +696,7 @@ audio helper for the voice), so nothing about the VAE math is duplicated here - 
 dependency is optional: without it the node fails with `ComfyUI-MiniMaxH3Mod is not
 installed - clone ...` instead of somewhere deep in a graph.
 
-Two things worth knowing before you spend a render on it:
+Three things worth knowing before you spend a render on it:
 
 * **Full Reference** (the default) stores the real encode at `ref_resolution`, so
   identity survives - that is the mode a character sheet is for. **Compressed
@@ -697,6 +706,15 @@ Two things worth knowing before you spend a render on it:
   (`max_tokens` caps the total, `0` = uncapped) on every frame that uses the mod. The
   node's report prints the per-member count and the total, so the trade is visible
   before you queue a long clip.
+* **Rows are what makes a voice reference heard.** Everything in a bundle is packed into
+  one sequence the model attends over, so a reference only counts for the rows it
+  occupies: a 0.95s voice member is 76 rows next to the appearance members' thousands -
+  **0.5% of the whole sequence** once the video being generated is packed in too, which
+  is why an A/B of *voice 1.0* against *voice 0.0* can come out at noise level (measured
+  on a real bundle; the speaker-specific signal is there, it is just tiny). The export
+  reports each member's share of the bundle and, when the voice is thin, the `copies`
+  count on *Load H3 RefMods* that fixes it (`copies 3` on a 0.5% member = 1.6%; ten
+  copies of a 1s clip is still thin, so a longer reference clip beats every other knob).
 
 ## How a cell is rendered
 

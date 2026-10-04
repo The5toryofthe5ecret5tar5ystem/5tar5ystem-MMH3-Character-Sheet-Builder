@@ -4,6 +4,42 @@ All notable changes to **5tar5ystem MMH3 Character Sheet Builder** are recorded 
 follows [semantic versioning](https://semver.org/): the node type (`MiniMaxH3CharacterSheet`) and
 the payload contract are what "breaking" refers to, not the panel's layout.
 
+## [Unreleased]
+
+The voice member of a RefMod export now defaults to the voice the sheet was *built from*,
+and the report says how much of the model's attention each member actually gets - the two
+answers to "why does my voice reference do nothing?".
+
+### Changed
+
+* **`H3 Sheet → RefMod`: the voice comes from the sheet's own reference audio by default.**
+  `voice_cell = -1` used to mean "the first cell that exported a clip", which made the
+  bundle's voice the ~1s H3 generated for that one take; it is now a ladder - the sheet's
+  **own reference audio** (the WAV in the Builder's References tab, recorded in the
+  manifest's `spec.refs.audios`), else **every exported cell clip joined into one
+  waveform**, else a connected `AUDIO`. `voice_cell = 0` still means "no sheet audio, use
+  the connected clip", and `n` still forces the nth cell's clip (`<name>_voice_cellN`).
+  The joined clips are one member (`<name>_voice_cells`) because the encoder takes a single
+  waveform: clips are resampled to H3's 32 kHz and concatenated as samples, so the latent
+  clock never cuts mid-frame. A manifest row whose file is gone is reported and skipped
+  rather than failing the export, and the report names whatever the ladder passed over so
+  the override is discoverable.
+* **`voice_seconds` is documented as what it is: a ceiling, not a target.** A clip longer
+  than the cap is truncated (from the front), never refused - and a *short* reference is the
+  usual reason a bundle feels inert.
+
+### Added
+
+* **The export report gives every member its share of the bundle, and says what to do
+  about a thin voice.** Rows are what a reference is worth: everything in a bundle is
+  packed into one sequence the model attends over, and the video being generated adds its
+  own rows on top of the bundle's. A measured 0.95s voice member is 76 rows next to the
+  appearance members' thousands - **0.5% of the whole sequence** - which is why an A/B of
+  *voice 1.0* against *voice 0.0* on a real bundle came out at noise level. Each member
+  line now ends with its share of the bundle, and when the voice is under 2% the report
+  names the `copies` count on *Load H3 RefMods* that would put it on the map (`copies 3`
+  on a 0.5% member = 1.6%), or says so when even ten copies would stay thin.
+
 ## [1.1.0] - 2026-10-03
 
 RefMods: a finished sheet can now be exported as one, appearance and voice together, and both
