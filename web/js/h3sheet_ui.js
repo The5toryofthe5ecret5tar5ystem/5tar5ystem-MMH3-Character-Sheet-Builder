@@ -23,7 +23,7 @@ import {
     LIVE_PREVIEW_EVENT,
     REF_GROUPS,
     enforceWidgetWidth,
-} from "./h3sheet_core.mjs?boot=h3sheet_v59";
+} from "./h3sheet_core.mjs?boot=h3sheet_v60";
 
 const CLASS = "MiniMaxH3CharacterSheet";
 const DOM_WIDGET = "h3_character_sheet_ui";
