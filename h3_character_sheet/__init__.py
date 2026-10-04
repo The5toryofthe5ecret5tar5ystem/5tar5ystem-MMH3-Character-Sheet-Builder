@@ -10,6 +10,9 @@ Two nodes and an in-node panel:
   nodes; no other custom pack required).
 * ``H3SheetGrid`` - composites the sheet from the per-cell frames, keeps every
   frame, and picks one frame per cell.
+* ``H3SheetRefMod`` - exports the sheet as a ComfyUI-MiniMaxH3Mod "RefMod" bundle
+  (appearance members plus a voice member). Needs that pack for the VAE encoders;
+  without it the node stops with the clone line. See ``refmod_export.py``.
 
 Everything lands in ``<output>/minimax_sheets/<name>/`` and is re-composable from
 disk with no re-render (the panel's Rebuild action, or POST
@@ -32,6 +35,7 @@ else:
     from .nodes.cellsink import H3SheetCellSink
     from .nodes.grid import H3SheetGrid
     from .nodes.ordergate import H3SheetOrderGate
+    from .nodes.refmod import H3SheetRefMod
     from .nodes.sheet import MiniMaxH3CharacterSheet
 
     NODE_CLASS_MAPPINGS = {
@@ -42,6 +46,8 @@ else:
         "H3SheetCellSink": H3SheetCellSink,
         # Internal: sequences the cells so they render in list order.
         "H3SheetOrderGate": H3SheetOrderGate,
+        # Optional: needs ComfyUI-MiniMaxH3Mod installed to actually run.
+        "H3SheetRefMod": H3SheetRefMod,
     }
 
     NODE_DISPLAY_NAME_MAPPINGS = {
@@ -49,6 +55,7 @@ else:
         "H3SheetGrid": "H3 Character Sheet Grid",
         "H3SheetCellSink": "H3 Sheet Cell Saver (internal)",
         "H3SheetOrderGate": "H3 Sheet Order Gate (internal)",
+        "H3SheetRefMod": "H3 Sheet → RefMod",
     }
 
     WEB_DIRECTORY = "./web/js"

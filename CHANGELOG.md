@@ -6,6 +6,26 @@ the payload contract are what "breaking" refers to, not the panel's layout.
 
 ## [Unreleased]
 
+### Added
+
+* **`H3 Sheet → RefMod`: export the sheet as a RefMod bundle with appearance *and* voice
+  members.** A sheet is a multi-view identity board, which is what
+  [ComfyUI-MiniMaxH3Mod](https://github.com/Luisacaotica/ComfyUI-MiniMaxH3Mod) wants: a latent
+  that rides H3's own reference path for a fraction of the tokens a real reference costs. The new
+  node writes one version-5 bundle - the picked cells stacked (`<name>_views`), the composite
+  (`<name>_sheet`), a connected audio (`<name>_voice`) and/or the H3-generated audio of a cell's
+  own exported clip (`<name>_voice_cellN`) - to `models/refmods/<subfolder>/<name>.safetensors`,
+  the tree `Load H3 RefMods` lists. Both VAE encodes are that pack's own code (its `Create H3
+  RefMod` and audio helper), so no VAE math is duplicated here and the file is exactly what its
+  loader expects; the dependency is optional and a missing install is reported as
+  `ComfyUI-MiniMaxH3Mod is not installed - clone ...` rather than a traceback in a graph. The
+  report prints each member's token count and the total, because that - not the file size - is
+  what a full-reference export costs at sampling time.
+* **The Builder node outputs `sheet_dir`** (added last, so existing workflows keep their slots):
+  the absolute folder the run wrote, so a downstream node can read the sheet's own files
+  (clips, picks, manifest) without retyping or re-deriving the name - which is how the RefMod
+  export finds the voice of a cell.
+
 ### Fixed
 
 * **A hand-picked frame no longer reverts to the rule.** Clicking a thumbnail in Results records a

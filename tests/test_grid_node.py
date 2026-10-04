@@ -85,7 +85,7 @@ def test_flatten_turns_a_batch_into_frames():
 # the node
 # --------------------------------------------------------------------------- #
 def test_execute_writes_frames_picks_and_sheet(outputs):
-    sheet, cells, report = grid_node.H3SheetGrid.execute(
+    sheet, cells, report, sheet_dir = grid_node.H3SheetGrid.execute(
         sheet_data=json.dumps(_spec()),
         name="grid sheet",
         keep_frames=True,
@@ -93,6 +93,9 @@ def test_execute_writes_frames_picks_and_sheet(outputs):
     ).args
     store = store_mod.SheetStore("grid_sheet")
     assert store.sheet_path.is_file()
+    # The folder travels with the sheet so a downstream node (the RefMod export) can
+    # read what the run wrote - clips, picks, manifest - without guessing a name.
+    assert sheet_dir == str(store.dir)
     assert len(store.frame_files("hero")) == 3
     assert len(store.frame_files("front")) == 4
     picks = json.loads(store.picks_path.read_text(encoding="utf-8"))
@@ -126,7 +129,7 @@ def test_sharpest_pick_mode_is_honoured(outputs):
     assert picks["hero"]["index"] == 2
 
 def test_missing_cells_are_reported_not_fatal(outputs):
-    _sheet, _cells, report = grid_node.H3SheetGrid.execute(
+    _sheet, _cells, report, _dir = grid_node.H3SheetGrid.execute(
         sheet_data=json.dumps(_spec()), name="grid sheet", cells={"cell_0": _batch(2)}
     ).args
     store = store_mod.SheetStore("grid_sheet")
@@ -157,7 +160,7 @@ def test_manifest_records_the_spec_that_ran(outputs):
 
 
 def test_no_cells_at_all_still_produces_a_sheet(outputs):
-    sheet, cells, _report = grid_node.H3SheetGrid.execute(
+    sheet, cells, _report, _dir = grid_node.H3SheetGrid.execute(
         sheet_data=json.dumps(_spec()), name="grid sheet", cells=None
     ).args
     assert store_mod.SheetStore("grid_sheet").sheet_path.is_file()

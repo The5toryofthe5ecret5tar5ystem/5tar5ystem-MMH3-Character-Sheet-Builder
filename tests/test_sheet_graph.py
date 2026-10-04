@@ -378,10 +378,10 @@ def test_grid_receives_one_slot_per_cell_in_order():
         assert saver["inputs"]["name"] == "sheet run"
     assert grid["inputs"]["name"] == "sheet run"
     assert json.loads(grid["inputs"]["sheet_data"])["cells"][0]["id"] == "hero"
-    # The node's own outputs ARE the grid's outputs (sheet, cells, report).
+    # The node's own outputs ARE the grid's outputs (sheet, cells, report, sheet_dir).
     grid_id = next(node_id for node_id, node in nodes.items() if node_id.endswith("sheet_grid"))
-    assert [link[0] for link in outputs] == [grid_id, grid_id, grid_id]
-    assert [link[1] for link in outputs] == [0, 1, 2]
+    assert [link[0] for link in outputs] == [grid_id, grid_id, grid_id, grid_id]
+    assert [link[1] for link in outputs] == [0, 1, 2, 3]
 
 
 def test_keep_frames_reaches_the_grid():

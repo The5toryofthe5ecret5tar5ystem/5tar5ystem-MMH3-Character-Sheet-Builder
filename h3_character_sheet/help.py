@@ -358,6 +358,39 @@ SECTIONS: tuple[HelpSection, ...] = (
         ),
     ),
     HelpSection(
+        id="refmod",
+        title="Exporting the sheet as a RefMod (appearance + voice)",
+        intro=(
+            "A sheet is a multi-view identity board, and that is what a RefMod wants: a "
+            "latent that rides H3's own reference path for a fraction of the tokens. "
+            "**H3 Sheet → RefMod** writes one bundle holding the picked cells stacked as "
+            "appearance, the composited sheet as a second member, and a voice member."
+        ),
+        bullets=(
+            "**Needs** ComfyUI-MiniMaxH3Mod (Luisa's RefMod pack) for the two VAE encoders - "
+            "*Load H3 RefMods* and *Apply H3 RefMod* live there. Without it the node stops "
+            "with the sentence that says where to clone it; nothing else in this pack cares.",
+            "**Wire it**: the Builder's *cells* and *sheet* outputs into the node, the same "
+            "video_vae the sheet node uses, *sheet_dir* (the Builder's fourth output) so a "
+            "cell's own clip can supply the voice, and the audio_vae if you want a voice "
+            "at all.",
+            "**Voice**: connect any *AUDIO* (a reference tile, a clip you like) and/or let "
+            "*voice_cell* take the audio H3 generated with a cell - `-1` is the first cell "
+            "that exported a clip, `0` is no cell voice, `n` is that cell. Both can be "
+            "members at once.",
+            "**Full Reference** (default) stores the real encode at *ref_resolution*, so a "
+            "face survives - that is the mode a character sheet is for. **Compressed "
+            "Reference** pools it to a tiny grid: nearly free to inject, and it carries "
+            "concept rather than identity.",
+            "**Where it goes**: ``models/refmods/<subfolder>/<name>.safetensors``, the tree "
+            "*Load H3 RefMods* lists. That dropdown is built when the page loads, so reload "
+            "ComfyUI before looking for the new file.",
+            "Tokens are the dial to watch: a full-reference sheet of 5+ cells injects "
+            "thousands of them (*max_tokens* caps the total, 0 = uncapped), and every frame "
+            "that uses the mod pays for them.",
+        ),
+    ),
+    HelpSection(
         id="render",
         title="While it renders (live preview + new seed)",
         intro=(

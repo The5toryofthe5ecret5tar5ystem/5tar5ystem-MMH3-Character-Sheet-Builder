@@ -322,7 +322,7 @@ def build_sheet_graph(
         keep_frames=bool(keep_frames),
         **cell_links,
     )
-    return grid.out(0), grid.out(1), grid.out(2)
+    return grid.out(0), grid.out(1), grid.out(2), grid.out(3)
 
 
 class MiniMaxH3CharacterSheet(io.ComfyNode):
@@ -513,6 +513,13 @@ class MiniMaxH3CharacterSheet(io.ComfyNode):
                 io.Image.Output(display_name="sheet"),
                 io.Image.Output(display_name="cells"),
                 io.String.Output(display_name="report"),
+                io.String.Output(
+                    display_name="sheet_dir",
+                    tooltip="Absolute folder the sheet was written to (frames, picks, "
+                            "clips, manifest). Wire it into H3 Sheet → RefMod to export "
+                            "the sheet as a RefMod bundle, including the generated "
+                            "voice of a cell.",
+                ),
             ],
         )
 
@@ -596,7 +603,7 @@ class MiniMaxH3CharacterSheet(io.ComfyNode):
         blur_lines = blur_reference_plan(spec, refs)
         payload = grid_payload(spec, name=sheet_name)
         graph = GraphBuilder()
-        sheet, cells, report = build_sheet_graph(
+        sheet, cells, report, sheet_dir = build_sheet_graph(
             graph,
             model=model,
             clip=clip,
@@ -642,7 +649,7 @@ class MiniMaxH3CharacterSheet(io.ComfyNode):
         report = f"{report}\n\n" + "\n".join(preview_lines)
         for line in preview_lines:
             log.info("Character sheet: %s", line)
-        return io.NodeOutput(sheet, cells, report, expand=graph.finalize())
+        return io.NodeOutput(sheet, cells, report, sheet_dir, expand=graph.finalize())
 
 
 def _spec_from_widgets(sheet_data: Any, widgets: dict[str, Any]):

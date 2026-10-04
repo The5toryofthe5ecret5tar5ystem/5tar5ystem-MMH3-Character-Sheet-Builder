@@ -127,8 +127,9 @@ more - but the ratio between the two tiers is what to plan around.
 
 | Node | What it does |
 |---|---|
-| `MiniMax H3 Character Sheet Builder` | The whole feature: references + cells -> N short H3 renders -> `H3SheetGrid`. Outputs `sheet` (IMAGE), `cells` (IMAGE batch) and `report`. |
+| `MiniMax H3 Character Sheet Builder` | The whole feature: references + cells -> N short H3 renders -> `H3SheetGrid`. Outputs `sheet` (IMAGE), `cells` (IMAGE batch), `report` and `sheet_dir` (the folder the run wrote, for nodes that read the sheet's own files). |
 | `H3 Character Sheet Grid` | Composites a sheet from per-cell frames. Use it on its own to re-composite a finished sheet, or with any other H3 workflow. |
+| `H3 Sheet → RefMod` | Optional: exports the sheet as a [RefMod](https://github.com/Luisacaotica/ComfyUI-MiniMaxH3Mod) bundle - appearance members plus a voice member. Needs that pack for the VAE encoders; without it the node stops with the clone line. |
 
 ## Using it
 
@@ -641,6 +642,47 @@ tags that will arrive blurred, marked `face blurred: <Picture 2>`.
 different layout / aspect / picks never needs a re-render. The panel's Rebuild
 button (or `POST /h3-character-sheet/action` with `{"action":"compose", ...}`) uses
 the same code path.
+
+The fourth output, `sheet_dir`, is that folder as an absolute path - wire it into a
+node that reads what the run wrote (the RefMod export below does).
+
+## Exporting the sheet as a RefMod (appearance + voice)
+
+A character sheet *is* a multi-view identity board, which is what a
+[RefMod](https://github.com/Luisacaotica/ComfyUI-MiniMaxH3Mod) wants: a VAE latent that
+rides H3's own reference path for a fraction of the tokens a real reference costs.
+`H3 Sheet → RefMod` writes one version-5 bundle holding:
+
+| Member | Built from | Layout |
+|---|---|---|
+| `<name>_views` | the Builder's `cells` output - the picked still of every cell, stacked (up to their 16-slot limit, sampled end to end) | `[1,24,T,H,W]` |
+| `<name>_sheet` | the Builder's `sheet` output - the composite, as its own member | `[1,24,1,H,W]` |
+| `<name>_voice` | a connected `AUDIO` - any clip, or a reference tile you liked | `[1,32,2,T]` |
+| `<name>_voice_cellN` | the audio track of cell *N*'s exported clip (`voice_cell`, `-1` = first cell with a clip) | `[1,32,2,T]` |
+
+```text
+models/refmods/<subfolder>/<name>.safetensors      # <subfolder> defaults to character_sheets
+```
+
+`Load H3 RefMods` lists that tree, so the export shows up there after a ComfyUI reload
+(the dropdown is built at page load). `Apply H3 RefMod` takes the bundle directly, and
+the `mods` output means you do not have to save first to try it.
+
+Both encoders are that pack's own code (`Create H3 RefMod` for the visual members, its
+audio helper for the voice), so nothing about the VAE math is duplicated here - and the
+dependency is optional: without it the node fails with `ComfyUI-MiniMaxH3Mod is not
+installed - clone ...` instead of somewhere deep in a graph.
+
+Two things worth knowing before you spend a render on it:
+
+* **Full Reference** (the default) stores the real encode at `ref_resolution`, so
+  identity survives - that is the mode a character sheet is for. **Compressed
+  Reference** pools it to a tiny grid: nearly free to inject, and it carries concept
+  rather than a face.
+* **Tokens are the cost.** Five full-reference cells is thousands of injected tokens
+  (`max_tokens` caps the total, `0` = uncapped) on every frame that uses the mod. The
+  node's report prints the per-member count and the total, so the trade is visible
+  before you queue a long clip.
 
 ## How a cell is rendered
 

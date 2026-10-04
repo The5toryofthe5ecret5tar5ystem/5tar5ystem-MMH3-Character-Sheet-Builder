@@ -74,6 +74,12 @@ class H3SheetGrid(io.ComfyNode):
                 io.Image.Output(display_name="sheet"),
                 io.Image.Output(display_name="cells"),
                 io.String.Output(display_name="report"),
+                io.String.Output(
+                    display_name="sheet_dir",
+                    tooltip="Absolute folder this sheet was written to - feed it to a "
+                            "node that reads the sheet's own files (clips, picks, "
+                            "manifest), e.g. H3 Sheet → RefMod for a cell's voice.",
+                ),
             ],
         )
 
@@ -151,7 +157,7 @@ class H3SheetGrid(io.ComfyNode):
                 for cell in spec.enabled_cells
             ]
         )
-        return io.NodeOutput(sheet_tensor, cells_tensor, report)
+        return io.NodeOutput(sheet_tensor, cells_tensor, report, str(store.dir))
 
 
 def _load_cell_png(store: SheetStore, cell_id: str) -> np.ndarray | None:
