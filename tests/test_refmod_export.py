@@ -260,9 +260,40 @@ def test_both_voice_sources_can_be_members_at_once(tmp_path, sheets_root, monkey
 
 
 def test_a_voice_member_needs_the_audio_vae(tmp_path):
+    """The encoder refuses a missing/wrong VAE - that is their guard, kept as a unit."""
     pack, _calls = fake_pack(tmp_path)
+    api = rx.entry_points(pack)
     with pytest.raises(rx.RefModExportError, match="audio VAE"):
-        rx.export_bundle(audio=VOICE, audio_vae=None, name="c", pack=pack)
+        rx.build_voice_mod(api, name="v", audio=VOICE, audio_vae=None)
+
+
+def test_a_connected_audio_without_the_audio_vae_is_skipped_not_fatal(tmp_path):
+    """Forgetting the audio VAE must not cost the appearance members.
+
+    The export is still worth having, so the voice is dropped and the report says which
+    file to connect (the node leads with it in the status line).
+    """
+    pack, calls = fake_pack(tmp_path)
+    result = rx.export_bundle(cells=stills(2), sheet=None, audio=VOICE, video_vae="v",
+                              audio_vae=None, name="hero", pack=pack)
+    assert [mod.name for mod in result.mods] == ["hero_views"]
+    assert calls["audio"] == []
+    assert any("skipped" in line and "minimax_h3_audio_vae_fp32" in line
+               for line in result.lines)
+    assert result.path, "the bundle is still written"
+
+
+def test_a_cell_voice_without_the_audio_vae_is_skipped_too(tmp_path, sheets_root,
+                                                           monkeypatch):
+    pack, calls = fake_pack(tmp_path)
+    folder = make_sheet_folder(sheets_root, "sheet_run", cells=["c1"],
+                               clips=["c1_00001_.mp4"])
+    monkeypatch.setattr(rx, "clip_audio", lambda path: pytest.fail("must not decode"))
+    result = rx.export_bundle(cells=stills(1), video_vae="v", audio_vae=None,
+                              sheet_dir=str(folder), name="run", pack=pack)
+    assert calls["audio"] == []
+    assert any("skipped" in line for line in result.lines)
+    assert [mod.name for mod in result.mods] == ["run_views"]
 
 
 def test_an_appearance_member_needs_the_video_vae(tmp_path):

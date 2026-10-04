@@ -72,7 +72,9 @@ class H3SheetRefMod(io.ComfyNode):
                     "audio_vae",
                     optional=True,
                     tooltip="MiniMax H3 audio VAE, needed for a voice member (their "
-                            "encoder refuses the video VAE).",
+                            "encoder refuses the video VAE). Without it the voice is "
+                            "skipped and the report says which file to load - the "
+                            "appearance members are still exported.",
                 ),
                 io.Image.Input(
                     "cells",
@@ -92,9 +94,11 @@ class H3SheetRefMod(io.ComfyNode):
                 io.Audio.Input(
                     "audio",
                     optional=True,
-                    tooltip="Optional voice clip for a voice member (any audio, mono or "
-                            "stereo; resampled to H3's 32 kHz). A reference tile from the "
-                            "sheet's References tab, or any clip you like.",
+                    tooltip="Optional voice clip for a voice member: wire an AUDIO here "
+                            "(core Load Audio, a video's own track via GetVideoComponents, "
+                            "a TTS node...). Any audio, mono or stereo, resampled to H3's "
+                            "32 kHz. Needs audio_vae; without it this member is skipped "
+                            "and the report says so.",
                 ),
                 io.String.Input(
                     "sheet_dir",

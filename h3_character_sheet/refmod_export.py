@@ -62,6 +62,15 @@ VOICE_AUTO = -1
 #: both spellings; naming ours explicitly keeps this working if they rename again).
 MODES = {"Full Reference": "encode", "Compressed Reference": "training"}
 
+#: A voice member is an H3 audio-VAE encode, so it needs that VAE. Rather than fail an
+#: export whose appearance members are perfectly fine, the voice is skipped and the
+#: report says why - with the exact filename to load.
+NO_AUDIO_VAE = (
+    "skipped - connect the MiniMax H3 audio VAE to 'audio_vae' "
+    "(VAELoader -> minimax_h3_audio_vae_fp32.safetensors); the appearance members are "
+    "still exported"
+)
+
 VIDEO_SUFFIXES = (".mp4", ".mkv", ".webm", ".mov")
 
 _CLIPS_DIR = "clips"
@@ -545,18 +554,21 @@ def export_bundle(
         lines.append(f"appearance: the composited sheet as '{mod_name}_sheet'")
 
     if audio is not None:
-        members.append(
-            build_voice_mod(
-                api,
-                name=f"{mod_name}_voice",
-                audio=audio,
-                audio_vae=audio_vae,
-                max_seconds=voice_max_seconds,
-                max_tokens=voice_max_tokens,
-                description=voice_description,
+        if audio_vae is None:
+            lines.append("voice: " + NO_AUDIO_VAE)
+        else:
+            members.append(
+                build_voice_mod(
+                    api,
+                    name=f"{mod_name}_voice",
+                    audio=audio,
+                    audio_vae=audio_vae,
+                    max_seconds=voice_max_seconds,
+                    max_tokens=voice_max_tokens,
+                    description=voice_description,
+                )
             )
-        )
-        lines.append(f"voice: the connected audio as '{mod_name}_voice'")
+            lines.append(f"voice: the connected audio as '{mod_name}_voice'")
 
     folder = sheet_folder(sheet_dir)
     if int(voice_cell) != 0:
@@ -574,6 +586,8 @@ def export_bundle(
                 f"voice: cell {int(voice_cell)} has no clip "
                 f"(the sheet exported {len(clips)})"
             )
+        elif audio_vae is None:
+            lines.append("voice: " + NO_AUDIO_VAE)
         else:
             clip = clips[index]
             members.append(

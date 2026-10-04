@@ -25,6 +25,11 @@ the payload contract are what "breaking" refers to, not the panel's layout.
   the absolute folder the run wrote, so a downstream node can read the sheet's own files
   (clips, picks, manifest) without retyping or re-deriving the name - which is how the RefMod
   export finds the voice of a cell.
+* **A voice member with no audio VAE is skipped, not fatal.** A voice is an H3 audio-VAE encode,
+  so it needs that VAE connected; forgetting it used to fail the whole export *after* the
+  appearance encodes were done. Now the voice is dropped, the bundle is still written, and the
+  node's status leads with `voice: skipped - connect the MiniMax H3 audio VAE ... (VAELoader ->
+  minimax_h3_audio_vae_fp32.safetensors)`.
 
 ### Fixed
 
