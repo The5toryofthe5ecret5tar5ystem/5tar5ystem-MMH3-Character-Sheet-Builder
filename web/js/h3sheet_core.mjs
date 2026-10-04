@@ -296,7 +296,7 @@ export const KNOB_COLUMNS = 3;
  * build makes that a glance instead of an investigation; a test keeps it in step with the
  * import, so bumping one without the other fails the suite rather than confusing a user.
  */
-export const PANEL_BUILD = "h3sheet_v58";
+export const PANEL_BUILD = "h3sheet_v59";
 
 /** The frontend's own widget/host names, straight from the shipped frontend bundle. */
 export const PREVIEW_HOST_CLASS = "comfy-img-preview";
@@ -904,16 +904,12 @@ export const MIN_TILE_ASPECT = 9 / 16;
 export const MAX_TILE_ASPECT = 2.6;
 
 //: Node geometry measured on the live frontend: the DOM widget starts under the
-//: node header (`widget.y`, 86px), the knob rows follow it with a small gap, and the node
-//: keeps 20px below the panel of its own (measured: node height - widget.y - panel
-//: clientHeight). The node is exactly as tall as that stack - a node taller than its panel
-//: is the runaway "very very tall node" state, which only ever grows on its own.
-//:
-//: `maxHeight` is the ceiling for that stack: panes grow with their content now, so without
-//: it a 110-thumbnail Results list would ask for a 3000px node. Past the ceiling the pane
-//: scrolls again - inside a node that is already as tall as the screen. The wiring prefers a
-//: viewport-derived ceiling and falls back to this one.
-export const PANEL_FIT = { headerTop: 86, rowGap: 20, rowHeight: 24, bottomPad: 20, maxHeight: 1200 };
+//: node header (`widget.y`, 86px) and the node keeps 20px of its own below the panel
+//: (measured: node height - widget.y - panel clientHeight). Kept as a measurement because
+//: the panel fills whatever box it is given - nothing in this pack sizes the NODE any more
+//: (see `enforceWidgetWidth`): the node keeps the size the user gave it, and the active pane
+//: scrolls when its content needs more room than that.
+export const PANEL_METRICS = { headerTop: 86, bottomInset: 20 };
 
 //: The node's own inset around its DOM widget: a 880px node hosts an 860px panel.
 //: Measured on the live frontend at several sizes, so it is exact - and it is the whole
@@ -931,6 +927,10 @@ export const WIDGET_INSET = 20;
  * Grow only: a wrapper wider than the node is left alone (that is the frontend's layout
  * doing something deliberate), and the write happens only when the number is actually wrong,
  * so calling it every frame costs one parseFloat.
+ *
+ * The node's own size is never touched here or anywhere else in this pack: a panel that
+ * resized its node on a tab switch or a refresh is exactly what users complained about.
+ * This only ever puts the DOM widget's box back inside the size the node already has.
  */
 export function enforceWidgetWidth(node, inset = WIDGET_INSET) {
     const element = node?._mmxSheet?.widget?.element;
@@ -951,47 +951,6 @@ export function enforceWidgetWidth(node, inset = WIDGET_INSET) {
 /** The width the panel may occupy: the node's own width less its inset. */
 export function panelWidthFor(node, inset = WIDGET_INSET) {
     return Math.max(240, Math.round(Number(node?.size?.[0]) || 0) - inset);
-}
-
-/** Was the panel laid out for its node's width, or is this a squeezed measurement?
- *
- * The fit measures the panel's CONTENT, and a squeezed panel wraps the same content into
- * more rows - so a height taken while the wrapper is narrow is not a height this node has.
- * Measuring one and setting it is what makes a node grow, shrink and grow again while the
- * frontend re-writes the wrapper, so the fit asks this first and skips the pass instead.
- *
- * One-sided on purpose: a wrapper WIDER than the node is the frontend's own business (the
- * fit leaves those alone) and it cannot inflate the content, so it is not untrustworthy.
- * No inline width at all means the wrapper follows the node by itself - also trustworthy.
- */
-export function panelWidthMatches(node, inset = WIDGET_INSET) {
-    const element = node?._mmxSheet?.widget?.element;
-    if (!element || !node.graph) return true;
-    const wrapper = element.closest?.(".dom-widget") || element.parentElement;
-    const inline = wrapper?.style?.width || "";
-    if (!wrapper || !inline) return true;
-    const current = Number.parseFloat(inline) || 0;
-    if (current <= 0) return true;
-    return current >= panelWidthFor(node, inset) - 8;
-}
-
-/** Height the node needs for this panel: header + panel + knob rows.
- *
- * A saved workflow restores its own node size and the frontend only ever grows a
- * node, so the wiring re-measures after every panel change and snaps the node to
- * this number - otherwise a sheet that was tall while it was rendering stays tall
- * for good, leaving a huge empty area under the panel.
- */
-export function panelFitHeight({ top, panelHeight, rows, rowsHeight, ceiling } = {}) {
-    const header = Number.isFinite(top) && top > 0 ? Number(top) : PANEL_FIT.headerTop;
-    const height = Math.max(0, Number(panelHeight) || 0);
-    const knobHeight = Number.isFinite(rowsHeight)
-        ? Math.max(0, Number(rowsHeight))
-        : Math.max(0, Number(rows) || 0) * PANEL_FIT.rowHeight;
-    const gap = knobHeight > 0 ? PANEL_FIT.rowGap : 0;
-    const wanted = Math.round(header + height + gap + knobHeight + PANEL_FIT.bottomPad);
-    const limit = Number.isFinite(ceiling) && ceiling > 0 ? Number(ceiling) : PANEL_FIT.maxHeight;
-    return Math.min(wanted, Math.round(limit));
 }
 
 /** The reference group for a media kind. */
@@ -1169,14 +1128,14 @@ export const PANEL_CSS = `
   border-bottom: none; border-radius: 6px 6px 0 0; padding: 4px 10px; cursor: pointer; font-size: 11px;
 }
 .mmx-tab.is-active { background: var(--mmx-card); color: var(--mmx-fg); border-color: var(--mmx-line); }
-/* The panel is a column and the ACTIVE PANE fills what is left of it. Panes used to cap
-   themselves at 520px "so a long Results list scrolls inside the panel" - which left an empty
-   box under the content of a node the user had already made tall enough (every tab, not just
-   the settings one). Now a pane grows with its content, the node fit measures that and sizes
-   the node to it, and the ceiling in PANEL_FIT is what stops a 110-thumbnail Results list
-   from making a 3000px node - past the ceiling the pane scrolls again, but inside a node that
-   is already full-height. Keep these as real CSS comments: a double-slash line in here eats
-   the whole next rule, and then every tab renders blank. */
+/* The panel is a column and the ACTIVE PANE fills what is left of it, scrolling when its
+   content needs more room than the node has (the .mmx-pane.is-active rule below). Panes used to
+   cap themselves at 520px "so a long Results list scrolls inside the panel", which left an
+   empty box under the content of a node the user had already made tall enough; a pane now
+   grows with its content and the NODE is the thing that decides how much of it is on screen.
+   The pack never resizes the node, so the size it has is the size the user dragged it to.
+   Keep these as real CSS comments: a double-slash line in here eats the whole next rule, and
+   then every tab renders blank. */
 .mmx-pane { display: none; }
 .mmx-pane.is-active { display: block; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .mmx-card {

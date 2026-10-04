@@ -6,17 +6,26 @@ the payload contract are what "breaking" refers to, not the panel's layout.
 
 ## [Unreleased]
 
+### Changed
+
+* **The node no longer resizes itself. The size you drag it to is the size it keeps.** The pack
+  used to measure the panel after every change and snap the node to the height its content
+  wanted, which meant your size was thrown away on a page refresh (reproduced live: a node
+  dragged 260px taller came back at its content height the moment the workflow was configured)
+  and on every panel re-layout - switching a tab was enough, and 1.2.1's tile geometry changed
+  the content height, so it snapped to a *new* height rather than the one you set. That fit is
+  gone, together with everything that could ask for it: the load/refresh pass, the panel's own
+  `layoutChanged` report, the preview-cap passes, a preset being applied and the knob rows
+  being hidden. The node opens at the size the workflow saved. The panel fills whatever box it
+  is given (the reference tiles scale into it) and the active pane scrolls when its content
+  needs more room, so a fixed node size has somewhere to put a long Results list.
+
 ### Fixed
 
-* **The panel width repair no longer moves the node's height.** Repairing a squeezed wrapper
-  (1.2.1) asked for a height fit immediately afterwards, but the panel is still laid out for the
-  squeezed width at that moment (it re-lays out on a debounce), so the fit measured the *narrow*
-  content, set the node to that height, and the panel's own resize observer then asked for a
-  different one - a two-state loop that kept resizing the node while the frontend rewrote the
-  wrapper. The repair is now a width-only correction: the panel re-lays itself out for the width
-  it gets back and brings the node to that height through `layoutChanged`, and the fit refuses to
-  measure at all unless the wrapper is at least as wide as the node (`panelWidthMatches`), so a
-  squeezed measurement can never become a node height.
+* **A squeezed panel width is repaired without touching the node's size at all.** The frontend
+  can write a squeezed inline width onto the DOM widget's wrapper (measured: an 880px node's
+  wrapper at 345px); putting it back is now strictly a width correction - the only thing this
+  pack writes is the wrapper's box, never `node.size`.
 
 ## [1.2.1] - 2026-10-04
 

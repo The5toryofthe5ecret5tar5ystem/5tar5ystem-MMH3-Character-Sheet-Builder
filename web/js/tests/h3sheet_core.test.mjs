@@ -1020,44 +1020,19 @@ assert.equal(core.moveSlot(refs, "pictures", 0, 3), true);
 assert.equal(refs.pictures[3].file, "a", "moveSlot swaps by default");
 ok.push("reorder / slot helpers behave");
 
-// --- the node is exactly as tall as its panel + knobs --------------------------
-// Measured on the live frontend: panel top 86, panel 450, then 20 knob rows of 24
-// with a 20px gap and a 20px bottom pad = 1056. The node keeps 20px below the DOM widget
-// of its own (probed: node height - widget.y - panel clientHeight), so the fit has to ask
-// for it - with 12 the panel was given 8px less than its content and scrolled forever.
-// A node taller than this is the runaway "node is very very tall" state: the frontend
-// layout only ever grows a node and a saved workflow restores whatever size it had.
+// --- the node keeps the size the user gave it --------------------------------
+// The pack used to measure the panel and snap the node to the height its content wanted.
+// That threw the user's size away on every refresh (reproduced live: a node dragged 260px
+// taller came back at its content height the moment the workflow was configured) and again
+// whenever the panel re-laid itself out. The maths is gone, not merely unused: what makes a
+// fixed node size safe is that the panel fills whatever box it gets and the active pane
+// scrolls when its content needs more room.
 {
-    assert.equal(
-        core.panelFitHeight({ top: 86, panelHeight: 450, rows: 20 }), 1056,
-        "the live geometry must reproduce: header + panel + knob rows",
-    );
-    assert.equal(
-        core.panelFitHeight({ top: 86, panelHeight: 450, rowsHeight: 20 * 24 }), 1056,
-        "measured row heights are used when the wiring has them",
-    );
-    assert.equal(
-        core.panelFitHeight({ panelHeight: 450, rows: 20 }),
-        core.panelFitHeight({ top: core.PANEL_FIT.headerTop, panelHeight: 450, rows: 20 }),
-        "a missing widget.y falls back to the known header height",
-    );
-    assert.ok(
-        core.panelFitHeight({ top: 86, panelHeight: 450, rows: 20 })
-            > core.panelFitHeight({ top: 86, panelHeight: 450, rows: 4 }),
-        "more knobs means a taller node",
-    );
-    assert.ok(core.panelFitHeight({}) >= core.PANEL_FIT.headerTop, "garbage in, a sane floor out");
-    assert.equal(core.panelFitHeight({ top: 86, panelHeight: 0, rows: 0 }), 106,
-        "an empty panel keeps the header and the pad");
-    // The ceiling: panes grow with their content, so a long Results list must not ask for a
-    // 3000px node. Past the ceiling the pane scrolls again.
-    assert.equal(core.PANEL_FIT.maxHeight, 1200, "a fallback ceiling when there is no viewport");
-    assert.equal(core.panelFitHeight({ top: 86, panelHeight: 5000, rows: 0 }), 1200,
-        "content taller than the ceiling is clamped to it");
-    assert.equal(core.panelFitHeight({ top: 86, panelHeight: 5000, rows: 0, ceiling: 900 }), 900,
-        "and the wiring can pass its own (viewport-derived) ceiling");
-    assert.equal(core.panelFitHeight({ top: 86, panelHeight: 400, rows: 0, ceiling: 900 }), 506,
-        "content under the ceiling is untouched");
+    assert.deepEqual(core.PANEL_METRICS, { headerTop: 86, bottomInset: 20 },
+        "the measured node geometry stays as a measurement - nothing applies it any more");
+    assert.equal(core.panelFitHeight, undefined,
+        "no node-height maths in the module: nothing may resize the node");
+    assert.equal(core.PANEL_FIT, undefined, "nor the constants it was built from");
 
     const stylesheet = panel.container.querySelector("style")?.textContent || "";
     // Every pane fills the panel: a capped pane left empty space under the content of a node
@@ -1094,7 +1069,9 @@ ok.push("reorder / slot helpers behave");
         probe.container.remove();
     }
 
-    // The wiring can only re-fit the node if the panel says when its height changed.
+    // The panel tells the host when its height changed. It used to be the trigger for a node
+    // re-fit; the wiring now has nothing to size, but the report stays part of the contract
+    // (and the panel still re-lays itself out, which is what the tiles are measured into).
     let layoutCalls = 0;
     let planCalls = 0;
     const probe = core.buildSheetInterface({
@@ -1117,7 +1094,7 @@ ok.push("reorder / slot helpers behave");
     await tick();
     assert.ok(layoutCalls > before, "switching to the Cells tab reports the layout too");
     assert.ok(planCalls > 0, "and the Cells tab asks the backend for the final prompts");
-    ok.push("node height hugs its panel: the fit maths, the capped pane and the hook");
+    ok.push("the node keeps the size the user gave it: no fit maths, a panel that fills it");
 }
 
 // --- the Prompt tab shows what will actually be sent ---------------------------
@@ -2630,29 +2607,15 @@ ok.push("reorder / slot helpers behave");
 
     assert.equal(core.enforceWidgetWidth({ size: [880, 700], graph: {}, _mmxSheet: {} }), false,
         "no widget element, no repair");
-
-    // The fit measures the panel's CONTENT, and the same content wraps into more rows in a
-    // narrow panel - so a height taken while the wrapper is squeezed is not this node's height.
-    // Setting it is what made the node grow and shrink while the frontend rewrote the wrapper,
-    // so the fit asks this before it measures.
+    // The wrapper's box is the only thing this pack writes: the NODE's size is the user's, and
+    // no measurement of the panel may ever end up in it (see the size test below).
     assert.equal(core.panelWidthFor(node), 345, "the width the panel may occupy");
-    assert.equal(core.panelWidthMatches(node), true,
-        "a wrapper wider than the node cannot inflate the content - trustworthy");
-    wrapper.style.width = "1200px";
-    assert.equal(core.panelWidthMatches(node), true, "still trustworthy, and not ours to shrink");
-    wrapper.style.width = "345px";
-    assert.equal(core.panelWidthMatches(node), true, "exactly its node's panel width is the good case");
     wrapper.style.width = "300px";
-    assert.equal(core.panelWidthMatches(node), false, "a squeezed panel is not measured");
-    assert.equal(core.enforceWidgetWidth(node), true, "...and the repair is still what fixes it");
-    assert.equal(core.panelWidthMatches(node), true, "after the repair the measurement is this width");
-    wrapper.style.width = "";
-    assert.equal(core.panelWidthMatches(node), true,
-        "no inline width at all: the wrapper follows the node by itself");
+    assert.equal(core.enforceWidgetWidth(node), true, "a squeezed panel is repaired");
+    assert.deepEqual([node.size[0], node.size[1]], [365, 700],
+        "and the repair never touches the node's own size");
     delete wrapper.style.width;
     document.body.removeChild(wrapper);
-    assert.equal(core.panelWidthMatches({ size: [880, 700], graph: {}, _mmxSheet: {} }), true,
-        "nothing to measure, nothing to distrust");
     ok.push("a squeezed DOM-widget wrapper is widened back to its node");
 }
 

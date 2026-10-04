@@ -18,107 +18,27 @@ import {
     applyPreviewMode,
     enforcePreviewCaps,
     nodePreviews,
-    previewHeight,
-    previewParts,
     readState,
     toPayload,
     LIVE_PREVIEW_EVENT,
     REF_GROUPS,
-    PANEL_FIT,
-    panelFitHeight,
     enforceWidgetWidth,
-    panelWidthMatches,
-} from "./h3sheet_core.mjs?boot=h3sheet_v58";
+} from "./h3sheet_core.mjs?boot=h3sheet_v59";
 
 const CLASS = "MiniMaxH3CharacterSheet";
 const DOM_WIDGET = "h3_character_sheet_ui";
 const DATA_WIDGET = "sheet_data";
 const BASE = "/h3-character-sheet";
 const POLL_MS = 4000;
-//: A height difference smaller than this is layout jitter, not the runaway node.
-const FIT_TOLERANCE = 24;
-//: Re-measure after the browser has settled: fonts and thumbnails land late.
-const FIT_DELAYS = [120, 400, 1200];
 //: How often the preview caps are re-checked while a node is on the canvas (see
 //: startPreviewKeeper). It writes only when something is actually wrong, so in practice this is
 //: a check that does nothing.
 const PREVIEW_KEEPER_MS = 400;
+//: Re-apply the node's preview size after a run, as the frontend's own preview widgets settle.
+const PREVIEW_APPLY_DELAYS = [120, 400, 1200];
 function apiUrl(path = "") {
     const url = `${BASE}${path}`;
     return typeof api?.apiURL === "function" ? api.apiURL(url) : url;
-}
-
-/**
- * Snap the node back to the height its panel actually needs.
- *
- * A node never shrinks on its own (the frontend's layout only grows), and a saved
- * workflow restores whatever size it had - so a sheet that was tall while it was
- * rendering kept a huge empty area under the panel after a refresh. Re-measuring on
- * every panel change is what keeps the node hugging its content.
- */
-function fitNodeToPanel(node) {
-    const part = node?._mmxSheet;
-    const widget = part?.widget;
-    const element = widget?.element;
-    if (!widget || !element) return;
-    if (app.canvas?.resizing_node === node) return;   // never fight a user's drag
-    // The node's width is the panel's width, and the frontend can have squeezed the wrapper
-    // under it (see enforceWidgetWidth): a narrow panel measures TALLER content, so the height
-    // this function is about to compute would be wrong too. Put the width back first.
-    enforceWidgetWidth(node);
-    // ...and if it is STILL narrow (the frontend wrote its width again since), this pass has
-    // nothing trustworthy to measure: the content height belongs to a panel that is not this
-    // node's. Fitting it is what made the node grow and shrink while the frontend rewrote the
-    // wrapper - the panel's own resize observer re-lays it out once the width is back and asks
-    // for the fit again (see layoutChanged), so skipping here costs one pass, not the height.
-    if (!panelWidthMatches(node)) return;
-    const knobs = (node.widgets || []).filter((item) => item !== widget && item.hidden !== true);
-    // ComfyUI's own output previews are DOM widgets too, and in `compact` mode the pack caps
-    // their height - so the fit has to size the node for THAT, not for the height the
-    // frontend would have given them (which is what made a finished sheet a 1000px-wide,
-    // very tall node).
-    const compactPreview = previewHeight(part.previewMode || nodePreviews(part.state));
-    const rowsHeight = knobs.reduce(
-        (total, item) => total + (isPreviewWidget(item, widget)
-            ? (compactPreview || Number(item.computedHeight) || PANEL_FIT.rowHeight)
-            : (Number(item.computedHeight) || PANEL_FIT.rowHeight)),
-        0,
-    );
-    // Measure the panel's CONTENT, not the height the node handed it: the element is sized by
-    // the node (`height: 100%`), so its clientHeight only ever looks back at the node and the
-    // content never gets to ask for room - which is how the compact settings grid ended up
-    // scrolling inside a node with space to spare. `scrollHeight` is the root's own content
-    // (it scrolls), and a pane that is capped on purpose (a run's 110 thumbnails) reports its
-    // capped height, so the node still cannot explode.
-    const client = Number(element.clientHeight) || 0;
-    const content = Math.max(client, Number(element.scrollHeight) || 0);
-    // Whatever the panel says it cannot fit is room the model above got wrong (a different
-    // zoom, another ComfyUI build, a font that landed late). Add it instead of hoping the fit
-    // tolerance swallows it - the difference is a few px, and over those few px sits a
-    // permanent scrollbar. It goes away as soon as the panel fits, so this cannot run away.
-    const overflow = Math.max(0, content - client);
-    const target = panelFitHeight({
-        top: Number(widget.y),
-        panelHeight: content + overflow,
-        rowsHeight,
-        ceiling: fitCeiling(),
-    });
-    const current = Math.round(Number(node.size?.[1]) || 0);
-    if (!Number.isFinite(target) || target < 240) return;
-    // Ignore small differences: a few pixels of jitter is not worth a re-layout, and
-    // it leaves a deliberate resize alone unless it is far off its content.
-    if (Math.abs(current - target) < FIT_TOLERANCE) return;
-    node.setSize?.([node.size[0], target]);
-}
-
-/** Fit now, then again as fonts/images/layout settle after a change. */
-function scheduleFit(node) {
-    fitNodeToPanel(node);
-    const timers = node._mmxSheetFitTimers || (node._mmxSheetFitTimers = []);
-    while (timers.length) clearTimeout(timers.pop());
-    for (const delay of FIT_DELAYS) {
-        timers.push(setTimeout(() => fitNodeToPanel(node), delay));
-    }
 }
 
 function widgetOf(node, name) {
@@ -344,7 +264,6 @@ function setKnobsVisible(node, visible) {
     }
     node.setDirtyCanvas?.(true, true);
     node.graph?.setDirtyCanvas?.(true, true);
-    scheduleFit(node);
     return widgets.length;
 }
 
@@ -403,7 +322,12 @@ function mountPanel(node) {
         // "This cell is no good": cancel the run and render that one cell again with a new seed.
         retryCell: ({ cellId }) => retryCellRender(node, cellId),
         clearSheet: () => sheetAction(node, { action: "clear" }),
-        layoutChanged: () => scheduleFit(node),
+        // The panel re-laid itself out. The node keeps the size the user gave it, so this is
+        // where a height fit used to run - and the panel's own resolution now is to fill the
+        // node, with the active pane scrolling when its content needs more room than the node
+        // has. Nothing here may call `setSize`: a node that resizes itself on a tab switch or a
+        // refresh is the bug, not the feature.
+        layoutChanged: () => {},
         // The recommended whole-node settings come from the pack's backend
         // (h3_character_sheet/presets.py): one definition, and the panel can only offer
         // what the node implements.
@@ -423,12 +347,7 @@ function mountPanel(node) {
         /** Take the node's own knob rows away (or give them back), leaving the values. */
         setKnobsVisible: (visible) => setKnobsVisible(node, visible),
         /** ComfyUI's own output previews: smaller, side by side, or gone. */
-        setPreviewMode: (mode) => {
-            const result = applyNodePreviews(node, mode);
-            // The node can be a lot shorter once the previews are capped.
-            scheduleFit(node);
-            return result;
-        },
+        setPreviewMode: (mode) => applyNodePreviews(node, mode),
         /** Write a preset's values onto the node's own knobs (cell size, steps, layout...). */
         applyWidgets: async (values) => {
             const applied = [];
@@ -440,8 +359,6 @@ function mountPanel(node) {
             }
             node.setDirtyCanvas?.(true, true);
             node.graph?.setDirtyCanvas?.(true, true);
-            // The panel's own height can change with the layout it just asked for.
-            scheduleFit(node);
             return applied;
         },
         // The final prompt per cell comes from the pack's planner (no GPU, no render),
@@ -584,7 +501,6 @@ function mountPanel(node) {
         panel.refreshResults();
     }, POLL_MS);
     panel.refreshResults();
-    scheduleFit(node);
     // ComfyUI's own previews are already on the node when a saved workflow is opened (and
     // arrive after each render), so the node's preview size is applied from the start - and
     // kept that way as the frontend creates and re-creates them (see startPreviewKeeper).
@@ -594,32 +510,14 @@ function mountPanel(node) {
 }
 
 /**
- * The tallest the node may get before a pane is allowed to scroll again.
- *
- * Panes grow with their content now, so a Results list with a few hundred thumbnails would
- * otherwise ask for a 3000px node. The ceiling is the viewport, so the node fills the screen
- * and scrolls after that; without a viewport (a test, an odd embed) it is PANEL_FIT.maxHeight.
- */
-function fitCeiling() {
-    const viewport = Number(globalThis.innerHeight) || 0;
-    if (viewport <= 0) return PANEL_FIT.maxHeight;
-    return Math.max(600, Math.round(viewport - 140));
-}
-
-/** Is this widget one of ComfyUI's own output previews (image host or the animation one)? */
-function isPreviewWidget(widget, panelWidget = null) {
-    if (!widget || widget === panelWidget) return false;
-    return previewParts({ widgets: [widget] }).widgets.length > 0;
-}
-
-/**
  * Size the node's own output previews (ComfyUI's, under the panel).
  *
  * The frontend computes each preview image from the node width, so a wide node means a
  * giant preview and two of them make the node enormous. This caps them (and puts them side
- * by side) or hides them, per the panel's preference; `fitNodeToPanel` then sizes the node to
- * match. Re-applied after each render because the frontend creates/updates the preview
- * widgets when images arrive.
+ * by side) or hides them, per the panel's preference. It changes the preview widgets' own
+ * heights only: the node itself keeps the size the user gave it, so a node with the previews
+ * capped simply has that much more room for the panel. Re-applied after each render because
+ * the frontend creates/updates the preview widgets when images arrive.
  */
 function applyNodePreviews(node, mode) {
     const part = node?._mmxSheet;
@@ -634,7 +532,7 @@ function schedulePreviewMode(node) {
     const part = node?._mmxSheet;
     if (!part) return;
     applyNodePreviews(node, part.previewMode || nodePreviews(part.state));
-    for (const delay of FIT_DELAYS) {
+    for (const delay of PREVIEW_APPLY_DELAYS) {
         setTimeout(() => { if (node._mmxSheet) applyNodePreviews(node, node._mmxSheet.previewMode); }, delay);
     }
 }
@@ -645,11 +543,9 @@ function schedulePreviewMode(node) {
  * The frontend adds the canvas image-preview widget when the image finishes loading - seconds
  * after a run on a big sheet PNG - and re-arranges the node's widgets whenever it wants, so a
  * one-shot cap at mount / on stop / on selector change can be applied to a node that has no
- * preview yet, and then never again. An uncapped preview is both huge and unstable: its minimum
- * joins the node's layout minimums while its unbounded maximum swallows the free height, so the
- * frontend's layout grows the node and this pack's fit shrinks it back, every frame (the preview
- * "jittering up and down"). This is a light timer that puts the caps back and, when it had to
- * change something, re-fits the node once so it can settle.
+ * preview yet, and then never again. An uncapped preview is unbounded: nothing stops the
+ * frontend's layout from growing the node for it after a render. This is a light timer that
+ * puts the caps back, so the previews stay the size the panel asked for.
  */
 function startPreviewKeeper(node) {
     if (node._mmxPreviewKeeper) return;
@@ -658,14 +554,9 @@ function startPreviewKeeper(node) {
         if (!part || document.hidden || !node.graph) return;
         // The wrapper's width can be re-written by the frontend at any time, background tab or
         // not, so the same keeper that watches the preview caps watches that too. The repair is
-        // NOT followed by a fit: the panel re-lays itself out for the width it gets back (its
-        // own resize observer) and asks for the fit then, with a measurement that belongs to
-        // this width - fitting from the repair itself measured the squeezed layout and moved
-        // the node height on every frame the frontend rewrote the wrapper.
+        // a WIDTH correction: it never touches the node's size, which belongs to the user.
         enforceWidgetWidth(node);
-        const result = enforcePreviewCaps(node, part.previewMode || nodePreviews(part.state), { skip: [DOM_WIDGET, DATA_WIDGET] });
-        // Something was late or got inflated: settle the node around the corrected previews.
-        if (result.changed) scheduleFit(node);
+        enforcePreviewCaps(node, part.previewMode || nodePreviews(part.state), { skip: [DOM_WIDGET, DATA_WIDGET] });
     }, PREVIEW_KEEPER_MS);
 }
 
@@ -701,17 +592,12 @@ function wrapNode(nodeType) {
         if (part) {
             // The draw pass runs after the frontend has finished laying its widgets out, which
             // is when a squeezed wrapper width has to be corrected (a repair inside the panel
-            // cannot win against a `width` on the wrapper). No fit is asked for here on purpose:
-            // the repair changes the panel's width, the panel's own resize observer re-lays it
-            // out and `layoutChanged` brings the node back to that height. Fitting immediately
-            // measured the layout the panel still had from the squeezed width, which is how the
-            // node ended up resizing its height every frame.
+            // cannot win against a `width` on the wrapper). Width only: the node's own size is
+            // the user's, and nothing in this pack may change it - see layoutChanged.
             enforceWidgetWidth(this);
-            const caps = enforcePreviewCaps(this, part.previewMode || nodePreviews(part.state), {
+            enforcePreviewCaps(this, part.previewMode || nodePreviews(part.state), {
                 skip: [DOM_WIDGET, DATA_WIDGET],
             });
-            // A late or inflated preview changes the node's layout: settle it once.
-            if (caps.changed) scheduleFit(this);
         }
         return result;
     };
@@ -728,9 +614,10 @@ function wrapNode(nodeType) {
             // payload says they belong (setState above read the same flag).
             setKnobsVisible(this, !this._mmxSheet.panel.compactKnobs);
             applyNodePreviews(this, this._mmxSheet.panel.nodePreviews);
-            // ...and a saved node size that no longer matches the panel (that is the
-            // "node is suddenly enormous" state after a refresh) gets corrected too.
-            scheduleFit(this);
+            // The node opens at the size the workflow SAVED. It used to be re-fitted to its
+            // panel here (in case an earlier render had left it enormous), which meant every
+            // refresh threw away the size the user had dragged to - the panel fills whatever
+            // node it is given, so there is nothing to correct.
         }
         return result;
     };
@@ -740,8 +627,6 @@ function wrapNode(nodeType) {
         clearInterval(this._mmxSheetPoll);
         this._mmxSheetPoll = null;
         stopPreviewKeeper(this);
-        for (const timer of this._mmxSheetFitTimers || []) clearTimeout(timer);
-        this._mmxSheetFitTimers = null;
         // Listeners hold this node (and its panel) alive: the live stream one would keep a
         // deleted node's DOM in memory for the rest of the session.
         const events = this._mmxSheetEvents;

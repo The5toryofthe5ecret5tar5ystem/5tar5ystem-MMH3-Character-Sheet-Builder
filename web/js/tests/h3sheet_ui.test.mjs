@@ -148,13 +148,22 @@ assert.ok(wiring.includes('body.append("subfolder", "h3_character_sheet")'),
     assert.ok(core.includes("className: \"mmx-muted mmx-build\""),
         "and the header shows it, so a stale tab is visible");
 }
-assert.ok(wiring.includes("panelFitHeight") && wiring.includes("resizing_node === node"),
-    "the wiring must re-measure the node from its panel and never fight a drag");
-assert.ok(wiring.includes("element.scrollHeight"),
-    "the fit must measure the panel's CONTENT: clientHeight is imposed by the node, so only "
-    + "scrollHeight can tell the node it is too short for the pane it is showing");
-assert.ok(wiring.includes("layoutChanged: () => scheduleFit(node)"),
-    "a pane change (which changes the panel's height) has to re-fit the node");
+// The node's size is the USER's. The panel used to measure itself and snap the node to the
+// height its content wanted, which threw that size away on every page refresh (reproduced live:
+// a node dragged 260px taller came back at its content height the moment the workflow was
+// configured) and again whenever the panel re-laid itself out - a tab switch was enough. The
+// panel fills whatever box the node has now, and the active pane scrolls when its content needs
+// more room than that, which is what makes keeping the user's size safe.
+assert.ok(!/\bsetSize\s*\(/.test(wiring),
+    "the wiring must never write the node's size - not on a refresh, not on a tab switch");
+assert.ok(!wiring.includes("panelFitHeight") && !wiring.includes("PANEL_FIT"),
+    "and it must not even carry the node-height maths");
+assert.ok(!wiring.includes("FIT_TOLERANCE") && !wiring.includes("_mmxSheetFitTimers"),
+    "nor the tolerances and timers that fed it");
+assert.ok(wiring.includes("layoutChanged: () => {}"),
+    "the panel still reports its layout, and the host deliberately does nothing with it");
+assert.ok(/\.mmx-pane\.is-active\s*\{[^}]*overflow-y:\s*auto/.test(core),
+    "the active pane scrolls instead, so a fixed node size has somewhere to put long content");
 assert.ok(wiring.includes("action: \"presets\""),
     "the panel must ask the backend for the preset list, not carry its own copy");
 // Saving and deleting the user's own presets: the route names have to match, both ways.
@@ -190,21 +199,21 @@ assert.ok(wiring.includes("readWidgets: (names) => readWidgets(node, names)"),
 // ComfyUI's own output previews scale with the node width; the pack sizes them.
 assert.ok(wiring.includes("applyPreviewMode") && wiring.includes("setPreviewMode:"),
     "the panel has to be able to resize the node's own preview widgets");
-assert.ok(wiring.includes("isPreviewWidget(item, widget)"),
-    "the node fit must count a capped preview at its capped height, not at the frontend's");
+assert.ok(/setPreviewMode: \(mode\) => applyNodePreviews\(node, mode\)/.test(wiring),
+    "and a mode change is just the cap: it must not re-measure the node either");
 assert.ok(wiring.includes("schedulePreviewMode(node)"),
     "the frontend rebuilds the previews after a run, so the size is re-applied then too");
 // ...and kept applied: the frontend adds the canvas image-preview widget when the image finishes
 // loading, which can be seconds after the run, so a one-shot pass is not enough.
 assert.ok(wiring.includes("startPreviewKeeper(node)"),
     "a light keeper re-applies the caps after the frontend creates or re-creates a preview");
-assert.ok(wiring.includes("const result = enforcePreviewCaps(node, part.previewMode || nodePreviews(part.state), { skip: [DOM_WIDGET, DATA_WIDGET] })"),
+assert.ok(wiring.includes("enforcePreviewCaps(node, part.previewMode || nodePreviews(part.state), { skip: [DOM_WIDGET, DATA_WIDGET] })"),
     "the keeper enforces the cap on the pack's own widget exclusions, like every other pass");
 // The draw pass is where the frontend creates those widgets, and a background tab throttles
 // timers - so the draw hook is the primary place the caps are re-asserted.
 assert.ok(wiring.includes("nodeType.prototype.onDrawBackground = function () {"),
     "the node's draw pass re-asserts the preview caps");
-assert.ok(wiring.includes("const caps = enforcePreviewCaps(this, part.previewMode"),
+assert.ok(wiring.includes("enforcePreviewCaps(this, part.previewMode"),
     "calling the same cap keeper the interval uses");
 assert.ok(!wiring.includes("PREVIEW_CHECK_MS"),
     "and NOT throttled: a late preview must not be drawn full size for even a frame or two");
@@ -218,32 +227,22 @@ assert.ok(wiring.includes("document.hidden"),
 // SQUEEZED width onto it (measured: an 880px node's wrapper at 345px) - which narrows every
 // card in the panel, the Browse overlay included. Nothing inside the panel can win against a
 // width on the wrapper, so the repair has to be re-asserted where the frontend has just laid
-// its widgets out: the draw pass, the keeper for an offscreen node, and the fit.
+// its widgets out: the draw pass and the keeper for a node that is not being drawn.
 assert.ok(wiring.includes("enforceWidgetWidth(this);"),
     "the draw pass puts a squeezed DOM-widget width back");
 assert.ok(wiring.includes("        enforceWidgetWidth(node);\n"),
     "and the keeper does it for a node that is not being drawn");
-assert.ok(wiring.includes("    enforceWidgetWidth(node);"),
-    "the node fit repairs it first, because a narrow panel measures taller content");
-// ...but the repair must NOT ask for a height fit. The repair changes the panel's WIDTH, and the
-// panel is still laid out for the squeezed one (it re-renders debounced, 180ms), so a fit taken
-// here measures the squeezed content - which is how the node ended up resizing its height on
-// every frame the frontend rewrote the wrapper. The panel's own resize observer re-lays it out
-// and `layoutChanged` brings the node to that height instead.
+assert.ok(wiring.includes("    enforceWidgetWidth,\n"),
+    "the width repair is the one thing that does use the panel module's geometry");
+// The repair is a WIDTH correction and nothing else - it must never be followed by a node fit,
+// which is what moved the node's height on every frame the frontend rewrote the wrapper.
 assert.ok(!wiring.includes("enforceWidgetWidth(this)) scheduleFit(this)"),
-    "the draw pass repairs the width WITHOUT fitting the node to the squeezed layout");
+    "the draw pass repairs the width without touching the node's size");
 assert.ok(!wiring.includes("if (enforceWidgetWidth(node)) scheduleFit(node);"),
     "and so does the keeper");
-assert.ok(wiring.includes("if (!panelWidthMatches(node)) return;"),
-    "the fit skips a pass whose panel is not at its node's width: only that measurement is "
-    + "the node's own height");
-assert.ok(wiring.includes("panelWidthMatches,\n} from \"./h3sheet_core.mjs?boot="),
-    "the guard comes from the panel module, next to the repair it guards");
-assert.ok(wiring.includes("    enforceWidgetWidth,\n"),
-    "all of that uses the one implementation in the panel module");
-// Panes fill the node now, so the fit needs a ceiling and the panel watches its own size.
-assert.ok(wiring.includes("ceiling: fitCeiling()"),
-    "the node fit is capped by the viewport, or a long Results list asks for a 3000px node");
+// Panes fill the node, and the panel watches its own size to lay its content out again.
+assert.ok(wiring.includes("ceiling: fitCeiling()") === false,
+    "no viewport-derived ceiling either: nothing measures the node any more");
 assert.ok(wiring.includes("panel?.dispose?.()"),
     "the resize observer goes with the node (onRemoved disposes the panel)");
 assert.ok(routes.includes('"knobs"'), "the action route must list knobs among its actions");
