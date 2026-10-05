@@ -5,8 +5,9 @@
 custom-node folder (any name), typically `ComfyUI-H3-Character-Sheet`
 **Version**: 2.0.0 · [`CHANGELOG.md`](CHANGELOG.md) ·
 [releases](https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/releases) ·
-[`docs/civitai-post.md`](docs/civitai-post.md) is the short public writeup (features, model
-links, install steps)
+[`docs/civitai-post-2.0.md`](docs/civitai-post-2.0.md) is the short public writeup for 2.0
+(features, model links, install steps); [`docs/civitai-post.md`](docs/civitai-post.md) is the
+1.1.0 one it replaces
 
 Standalone **MiniMax H3 character sheet builder** for ComfyUI: give it photos, videos
 and audio of a person, say what each reference is for, pick a matrix of views /
@@ -73,15 +74,16 @@ keep the frames they already have. On by default; see [the live strip](#the-live
 
 ## Screenshots
 
-A five-cell sheet straight out of the node - one image, captions included:
+A five-cell sheet straight out of the node - one image, one render:
 
-| Balanced - 1024px cells, 2304 x 1536, ~81 s | Fidelity - 2048px cells, 5760 x 3840, ~378 s | Expression row - one face, five emotions |
-| --- | --- | --- |
-| ![Balanced character sheet](images/sheet-balanced-1536p-81s.png) | ![Fidelity character sheet](images/sheet-fidelity-3840p-378s.png) | ![Expression sheet](images/sheet-expressions-5-cells.png) |
+![One-pass 4K character sheet: a headshot, a chest-up portrait, a full body front, a 90 degree side and a back view, arranged as one hero panel beside four smaller ones](images/sheet-4k-onepass-hero-4-panels.png)
 
-Every sheet is a **reference image**: the fidelity one for identity, the expression row for what the
-face is doing (same framing, same light, only the expression changes - that is what latent
-continuation buys you on a face row).
+The `Hero + 4 panels` layout at the `4K` size, 3264 x 2176 in a single 5-frame H3 pass: headshot,
+chest-up portrait, full body front, 90 degree side, back, all neutral, on the flat neutral tan
+backdrop. The panels are sliced back out of this one image into `cells/` and `frames/`, so the frame
+picker, the Results tab and the RefMod export read a one-pass sheet panel by panel. The
+[per-cell pass](#one-pass-sheet-the-default) is one switch away when a panel has to be exactly
+right; see [how long it takes](#how-long-it-takes) for what each tier costs.
 
 The panel, on a real graph: the sheet node, `H3 Sheet → RefMod` (appearance **and** voice from the
 same sheet) and the `Save Image` that writes it, all in one queue.

@@ -305,6 +305,19 @@ mean.)*
 
 ### Changed
 
+* **The README's image set is the 2.0 one.** The headline is a `4K` one-pass render of the
+  `Hero + 4 panels` layout (3264 x 2176, one 5-frame H3 pass) in place of the three 1.x sheet shots,
+  followed by the Cells tab (layout cards, framing glyphs, resolution cards, the mode row) and the
+  References tab mid-paint, both on a real graph with the RefMod export and the sheet it writes. The
+  six pre-redesign images are no longer referenced by the README and stay in `images/` for the 1.1.0
+  post.
+* **`docs/civitai-post-2.0.md`** is a new post written for this version, covering only 2.0: one render
+  per sheet, the panel, the prompt, what each mode gives up, the resolutions and their token costs,
+  the blur passes, clips and continuation, the output folder, presets and the suite, the RefMod export,
+  install, the model files, a first sheet, and the upgrade note. `docs/civitai-post.md` (1.1.0) is kept.
+* The `v2.0.0` release carries the two example workflows as assets
+  (`5tar5ystem.MMH3.Character.Sheet.Builder.json` and the `+ RefMod` one), so the post's direct
+  download links resolve without a GitHub account.
 * The README's screenshot gallery is the 2.0 panel: the **Cells** tab (layout cards, framing glyphs,
   the resolution cards, the mode row) and the **References** tab mid-paint, both on a real graph with
   the RefMod export and the sheet it writes. The earlier panel shots (`panel-references.png`,
