@@ -151,15 +151,22 @@ def _int(value: Any, default: int) -> int:
 
 
 async def sheet_media_list(request):
-    """Browse ComfyUI's input/output folders for the panel's reference picker."""
+    """Browse ComfyUI's input/output folders for the panel's reference picker.
+
+    Answered from ``sheet_media.cached_media``: fresh listings cost nothing, a stale one is served
+    while a background thread refreshes it, and a first scan is capped at
+    ``sheet_media.DEFAULT_BUDGET_MS`` so a cold network share cannot hang a click. A capped scan
+    says ``partial: true`` and the panel asks again once the rest of the walk has landed.
+    """
     params = request.rel_url.query
-    payload = sheet_media.list_media(
+    payload = sheet_media.cached_media(
         source=params.get("source", "inputs"),
         kind=params.get("kind", "all"),
         subfolder=params.get("subfolder", ""),
         query=params.get("q", ""),
         recursive=_flag(params.get("recursive"), True),
         limit=_int(params.get("limit"), sheet_media.DEFAULT_LIMIT),
+        budget_ms=_int(params.get("budget_ms"), sheet_media.DEFAULT_BUDGET_MS),
     )
     # A bad folder is a normal answer for a picker, not a crash: 404 with the reason.
     return web.json_response(payload, status=200 if payload.get("ok") else 404)

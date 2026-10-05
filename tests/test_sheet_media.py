@@ -182,3 +182,116 @@ def test_a_symlink_out_of_the_tree_is_not_followed(media_tree: Path, tmp_path: P
         pytest.skip("symlinks unavailable on this filesystem")
     payload = sm.list_media("inputs", "all", "escape", base_dir=media_tree)
     assert payload["ok"] is False
+
+
+# --------------------------------------------------------------------------- #
+# cost: the budget, the cache, and what the walk refuses to follow
+# --------------------------------------------------------------------------- #
+@pytest.fixture(autouse=True)
+def _clean_cache():
+    """The listing cache is process-wide; a test must not inherit another one's answer."""
+    sm.reset_cache()
+    yield
+    sm.reset_cache()
+
+
+def test_a_scan_budget_answers_with_what_it_has(media_tree: Path):
+    """A cold network share has measured 31s: a picker may not wait for that.
+
+    The deadline is checked between batches of files and between directories, so a tree smaller than
+    one batch still finishes - what has to be true is that running out of time is REPORTED, and that
+    what it did find is a subset of the real answer.
+    """
+    capped = sm.list_media("inputs", "all", recursive=True, base_dir=media_tree, budget_ms=0)
+    assert capped["partial"] is True
+    full = sm.list_media("inputs", "all", recursive=True, base_dir=media_tree)
+    assert full["partial"] is False
+    assert {item["path"] for item in capped["items"]} <= {item["path"] for item in full["items"]}
+    assert len(full["items"]) == 6
+
+
+def test_the_listing_says_what_it_cost(media_tree: Path):
+    payload = sm.list_media("inputs", "all", recursive=True, base_dir=media_tree)
+    assert payload["recursive"] is True
+    assert isinstance(payload["scanMs"], float) and payload["scanMs"] >= 0
+    shallow = sm.list_media("inputs", "all", base_dir=media_tree)
+    assert shallow["recursive"] is False
+    assert isinstance(shallow["scanMs"], float)
+
+
+def test_the_walk_does_not_descend_a_symlinked_folder(media_tree: Path, tmp_path: Path):
+    """The recursive walk's escape guarantee, now checked per DIRECTORY instead of per file."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.png").write_bytes(b"x")
+    link = media_tree / "link"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError:  # pragma: no cover - shares without symlink support
+        pytest.skip("symlinks unavailable on this filesystem")
+    payload = sm.list_media("inputs", "all", recursive=True, base_dir=media_tree)
+    assert payload["ok"] is True
+    assert "link/secret.png" not in [item["path"] for item in payload["items"]]
+
+
+def test_the_second_listing_is_served_from_the_cache(media_tree: Path, monkeypatch: pytest.MonkeyPatch):
+    walked: list[str] = []
+    real = sm.list_media
+
+    def counted(*args, **kwargs):
+        walked.append(str(kwargs.get("subfolder", "")))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(sm, "list_media", counted)
+    first = sm.cached_media("inputs", "all", base_dir=media_tree)
+    second = sm.cached_media("inputs", "all", base_dir=media_tree)
+    assert len(walked) == 1, "the second answer must not touch the filesystem"
+    assert first["cached"] is False and first["stale"] is False
+    assert second["cached"] is True and second["stale"] is False
+    # ...and a different request is its own entry, not a hit on someone else's answer.
+    other = sm.cached_media("inputs", "audio", base_dir=media_tree)
+    assert len(walked) == 2
+    assert [item["name"] for item in other["items"]] == ["voice.wav"]
+
+
+def test_a_stale_listing_is_served_while_it_refreshes(media_tree: Path, monkeypatch: pytest.MonkeyPatch):
+    scheduled: list[tuple] = []
+    monkeypatch.setattr(sm, "_schedule", lambda key, kwargs: scheduled.append(key))
+    start = 1_000.0
+    sm.cached_media("inputs", "all", base_dir=media_tree, now=start)
+    assert scheduled == [], "a fresh listing needs no refresh"
+    again = sm.cached_media("inputs", "all", base_dir=media_tree, now=start + sm.CACHE_TTL + 1)
+    assert again["stale"] is True and again["cached"] is True
+    assert again["items"], "and the stale answer is still a usable one"
+    assert len(scheduled) == 1, "the refresh is on its way in the background"
+    # A different folder is a different entry: it must not be answered from this one.
+    sm.cached_media("inputs", "all", "h3_character_sheet", base_dir=media_tree, now=start)
+    assert len(scheduled) == 1
+
+
+def test_a_partial_answer_is_never_used_as_a_complete_one(media_tree: Path,
+                                                          monkeypatch: pytest.MonkeyPatch):
+    scheduled: list[tuple] = []
+    monkeypatch.setattr(sm, "_schedule", lambda key, kwargs: scheduled.append(key))
+    partial = sm.cached_media("inputs", "all", recursive=True, base_dir=media_tree, budget_ms=0)
+    assert partial["partial"] is True
+    assert len(scheduled) == 1, "the rest of the walk is handed to a thread"
+    after = sm.cached_media("inputs", "all", recursive=True, base_dir=media_tree)
+    assert after["stale"] is True, "a capped scan may not be reused as if it were finished"
+
+
+def test_a_background_refresh_replaces_what_the_cap_returned(media_tree: Path):
+    """The thread's own path, run inline: it must store a complete listing for that key."""
+    key = sm._cache_key(media_tree, "all", "", "", True, sm.DEFAULT_LIMIT)
+    kwargs = {"source": "inputs", "kind": "all", "subfolder": "", "query": "",
+              "recursive": True, "limit": sm.DEFAULT_LIMIT, "base_dir": media_tree}
+    sm.cached_media("inputs", "all", recursive=True, base_dir=media_tree, budget_ms=0)
+    sm._refresh(key, kwargs)
+    with sm._cache_lock:
+        stamp, payload = sm._cache[key]
+    assert payload["partial"] is False
+    assert len(payload["items"]) == 6
+    # ...and the next request is a fresh cache hit of the FULL listing.
+    full = sm.cached_media("inputs", "all", recursive=True, base_dir=media_tree)
+    assert full["partial"] is False and full["stale"] is False
+    assert len(full["items"]) == 6

@@ -1156,5 +1156,121 @@ ok.push("blur area: face / face + hair / whole head, as chips under the picture,
     ok.push("a fresh node's canvas shows the pack's sample render, and only until a reference is wired");
 }
 
+// --- the media picker: one folder read at a time, and the walk on request ---------------------
+// Opening the picker used to walk the WHOLE tree every time (the wiring always asked for
+// recursive=1): 3.9s on this box's 25k-file input folder, 31s cold on the network share the output
+// folder lives on. The picker now opens on the folder you are in - one directory read - and
+// "all folders, newest first" is a deliberate mode (which the backend caches).
+{
+    const calls = [];
+    let partialNext = false;
+    const rootListing = {
+        ok: true, source: "inputs", kind: "all", subfolder: "", parent: null,
+        folders: [{ name: "h3_character_sheet", path: "h3_character_sheet" },
+            { name: "masks", path: "masks" }],
+        items: [{ name: "face.png", path: "face.png", kind: "image", url: "/view?filename=face.png" }],
+        truncated: false, partial: false, recursive: false, scanMs: 11.0,
+    };
+    const subListing = {
+        ...rootListing, subfolder: "h3_character_sheet", parent: "", folders: [],
+        items: [{ name: "hero.webp", path: "h3_character_sheet/hero.webp", kind: "image",
+            url: "/view?filename=hero.webp&subfolder=h3_character_sheet" }],
+        scanMs: 9.0,
+    };
+    const deepListing = {
+        ...rootListing, recursive: true, folders: [], truncated: true, cached: true,
+        items: [{ name: "frame_00000001.png", path: "masks/scene/frames/frame_00000001.png",
+            kind: "image", url: "/view?filename=frame_00000001.png" }],
+        scanMs: 1374.8,
+    };
+    const browsePanel = core.buildSheetInterface({
+        state: core.readState(""),
+        hooks: {
+            status: () => {},
+            stateChanged: () => {},
+            planCells: async () => ({ cells: [] }),
+            assetUrl: (url) => url,
+            upload: async () => "x.png",
+            listMedia: async (request) => {
+                calls.push(request);
+                if (request.recursive) {
+                    if (partialNext) {
+                        // One capped scan, then the complete listing: exactly what the route does
+                        // while the rest of a cold walk finishes in its background thread.
+                        partialNext = false;
+                        return { ...deepListing, items: [], partial: true, cached: false };
+                    }
+                    return deepListing;
+                }
+                return request.folder ? subListing : rootListing;
+            },
+        },
+    });
+    await tick();
+    browsePanel.showTab("references");
+    await tick();
+    const openPicker = () => browsePanel.container.querySelector('[data-action="browse-media"]');
+    assert.ok(openPicker(), "the references head offers Browse ComfyUI");
+    click(openPicker());
+    await tick();
+    // 1. The default is the folder listing: no walk, no recursion.
+    assert.equal(calls.length, 1, "opening the picker asks once");
+    assert.deepEqual(calls[0], { source: "inputs", kind: "all", query: "", folder: "", recursive: false },
+        "and it asks for the CURRENT folder, not the whole tree");
+    const trail = browsePanel.container.querySelector(".mmx-browse__trail");
+    assert.ok(trail, "the picker says which folder it is showing");
+    assert.match(trail.textContent, /input/, "spelled out");
+    const chip = browsePanel.container.querySelector('[data-action="browse-folder"][data-folder="h3_character_sheet"]');
+    assert.ok(chip, "and offers the subfolders it found");
+    assert.equal(browsePanel.container.querySelector('[data-action="browse-up"]'), null,
+        "at the root there is nowhere to go up to");
+    // 2. Into a folder: one more directory read, and now there is a way back.
+    click(chip);
+    await tick();
+    assert.equal(calls.at(-1).folder, "h3_character_sheet", "clicking a folder asks for that folder");
+    assert.equal(calls.at(-1).recursive, false, "still without walking the tree");
+    assert.ok(browsePanel.container.querySelector('[data-action="browse-up"]'), "and it can go back up");
+    assert.match(browsePanel.container.querySelector(".mmx-browse__trail").textContent,
+        /input\/h3_character_sheet/, "the trail names the folder you are in");
+    assert.match(browsePanel.container.querySelector(".mmx-pickgrid").textContent, /hero\.webp/);
+    click(browsePanel.container.querySelector('[data-action="browse-up"]'));
+    await tick();
+    assert.equal(calls.at(-1).folder, "", "up goes back to the root");
+    // 3. "all folders" is the walk, and it says what it costs.
+    const mode = browsePanel.container.querySelector('[data-action="browse-mode"]');
+    assert.ok(mode, "the picker offers the whole-tree mode");
+    assert.equal(mode.classList.contains("is-on"), false, "off to begin with: this folder");
+    click(mode);
+    await tick();
+    assert.equal(calls.at(-1).recursive, true, "clicking it asks for the walk");
+    const foot = [...browsePanel.container.querySelectorAll(".mmx-muted")]
+        .map((node) => node.textContent)
+        .find((text) => /newest first across all of input/.test(text));
+    assert.ok(foot, "and the footer says the listing is newest-first across everything");
+    assert.match(foot, /1 file\(s\)/, "with a count");
+    assert.equal(browsePanel.container.querySelector(".mmx-browse__trail").children.length, 0,
+        "the folder trail belongs to folder mode, not to the flat list");
+    // 4. A capped scan says so and asks again once the rest has landed.
+    partialNext = true;
+    browsePanel.container.querySelector('[data-action="browse-mode"]').click();
+    await tick();
+    browsePanel.container.querySelector('[data-action="browse-mode"]').click();
+    await tick();
+    const partialFoot = [...browsePanel.container.querySelectorAll(".mmx-muted")]
+        .map((node) => node.textContent)
+        .find((text) => /still reading this folder/.test(text));
+    assert.ok(partialFoot, "a partial listing says it is still reading");
+    const beforeRetry = calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 1300));
+    assert.ok(calls.length > beforeRetry, "and it asks again by itself");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const fullFoot = [...browsePanel.container.querySelectorAll(".mmx-muted")]
+        .map((node) => node.textContent)
+        .find((text) => /newest first across all of input/.test(text));
+    assert.ok(fullFoot && !/still reading/.test(fullFoot), "which lands on the complete listing");
+    browsePanel.dispose();
+    ok.push("the media picker opens on one folder, and only walks the tree when asked");
+}
+
 console.log("h3sheet_core: PASS");
 for (const line of ok) console.log(" -", line);

@@ -369,7 +369,7 @@ export const KNOB_COLUMNS = 3;
  * build makes that a glance instead of an investigation; a test keeps it in step with the
  * import, so bumping one without the other fails the suite rather than confusing a user.
  */
-export const PANEL_BUILD = "h3sheet_v85";
+export const PANEL_BUILD = "h3sheet_v86";
 
 /**
  * The pack's own sample render, shown in a fresh node's reference canvas (see canvasCard).
@@ -1543,6 +1543,13 @@ export const PANEL_CSS = `
    far end of the row so it cannot be mistaken for a board, and stays quiet when it is off. */
 .mmx-chip--follow { margin-left: auto; font-size: 10px; opacity: 0.8; }
 .mmx-chip--follow.is-on { opacity: 1; }
+/* The browse picker's folder trail: where the listing is pointed, and the way into a subfolder. It
+   only exists in folder mode - the all-folders mode is one flat newest-first grid by definition. */
+.mmx-browse__trail {
+  display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+  font-size: 11px; margin-bottom: 6px;
+}
+.mmx-browse__trail:empty { display: none; }
 .mmx-chiprow__hint { font-size: 10px; }
 .mmx-col__foot {
   margin-top: 4px; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding-top: 2px;
@@ -5924,7 +5931,12 @@ export function buildSheetInterface({ state, hooks = {} }) {
         ctx.restore();
     }
 
-    const browseState = { source: "inputs", kind: "all", query: "" };
+    // The picker's own state: which source, which kind, the query, the folder it is looking at, and
+    // whether it is looking at the whole tree. Both extras exist because the whole-tree listing is
+    // a filesystem walk: with the folder mode on (the default) opening the picker is one directory
+    // read, and "all folders" is the deliberate choice that pays for the walk (which the backend
+    // then caches, so it is only paid once per folder).
+    const browseState = { source: "inputs", kind: "all", query: "", folder: "", recursive: false };
 
     /** `index` = the slot being filled, or null for "first free slot".
      *  ``group`` null = the unified picker: every kind, each file routed by type. */
@@ -5934,7 +5946,7 @@ export function buildSheetInterface({ state, hooks = {} }) {
         renderBrowse(group, index);
     }
 
-    function renderBrowse(group, index) {
+    function renderBrowse(group, index, { attempt = 0 } = {}) {
         const pane = openOverlay("mmx-browse");
         container.dataset.browseFor = `${group ? group.key : "media"}:${index ?? "auto"}`;
 
@@ -5943,6 +5955,7 @@ export function buildSheetInterface({ state, hooks = {} }) {
         for (const [key, label] of [["inputs", "Inputs"], ["outputs", "Outputs"]]) {
             const seg = button(label, () => {
                 browseState.source = key;
+                browseState.folder = "";
                 renderBrowse(group, index);
             });
             if (browseState.source === key) seg.classList.add("is-active");
@@ -5966,6 +5979,21 @@ export function buildSheetInterface({ state, hooks = {} }) {
             clearTimeout(searchTimer);
             searchTimer = setTimeout(() => renderBrowse(group, index), 250);
         });
+        const everyFolder = button(
+            browseState.recursive ? "all folders · newest first" : "this folder",
+            () => {
+                browseState.recursive = !browseState.recursive;
+                renderBrowse(group, index);
+            },
+        );
+        everyFolder.classList.add("mmx-chip");
+        everyFolder.dataset.action = "browse-mode";
+        everyFolder.classList.toggle("is-on", browseState.recursive);
+        everyFolder.title = browseState.recursive
+            ? "Every file under this folder, newest first. Click to go back to the folder you are in "
+                + "(one directory read instead of a walk of the whole tree)."
+            : "Only the folder you are in, plus its subfolders to click into. Click for every file "
+                + "under this folder, newest first.";
         head.append(
             element("span", {
                 textContent: group ? `Choose ${group.label.toLowerCase()}` : "Choose media - pictures, video or audio",
@@ -5975,15 +6003,17 @@ export function buildSheetInterface({ state, hooks = {} }) {
             kindSelect,
             search,
             element("span", { className: "mmx-spacer" }),
+            everyFolder,
             button("Upload from disk", () => pickFiles(group, index)),
             button("Close", closeOverlay),
         );
 
         const body = element("div", { className: "mmx-overlay__body" });
+        const trail = element("div", { className: "mmx-browse__trail" });
         const grid = element("div", { className: "mmx-pickgrid" });
         const foot = element("div", { className: "mmx-muted" });
         foot.textContent = "Loading…";
-        body.append(grid);
+        body.append(trail, grid);
         pane.append(head, body, foot);
 
         Promise.resolve(hooks.listMedia?.({ ...browseState }))
@@ -5993,6 +6023,38 @@ export function buildSheetInterface({ state, hooks = {} }) {
                     return;
                 }
                 const items = payload.items || [];
+                const folders = payload.folders || [];
+                // Where we are, and the way back up: with folder mode the picker is a browser, so it
+                // has to say which folder it is showing rather than leaving it to the file names.
+                trail.replaceChildren();
+                if (!browseState.recursive) {
+                    const where = `${payload.source === "outputs" ? "output" : "input"}`
+                        + (payload.subfolder ? `/${payload.subfolder}` : "");
+                    if (payload.parent !== null && payload.parent !== undefined) {
+                        const up = button("↑ up", () => {
+                            browseState.folder = String(payload.parent || "");
+                            renderBrowse(group, index);
+                        });
+                        up.classList.add("mmx-chip");
+                        up.dataset.action = "browse-up";
+                        trail.append(up);
+                    }
+                    trail.append(element("span", { textContent: where, className: "mmx-title" }));
+                    for (const folder of folders) {
+                        const chip = button(folder.name, () => {
+                            browseState.folder = String(folder.path || "");
+                            renderBrowse(group, index);
+                        });
+                        chip.classList.add("mmx-chip");
+                        chip.dataset.action = "browse-folder";
+                        chip.dataset.folder = String(folder.path || "");
+                        chip.title = `Open ${folder.path}`;
+                        trail.append(chip);
+                    }
+                    if (!folders.length && !items.length) {
+                        trail.append(element("span", { textContent: "no subfolders", className: "mmx-muted" }));
+                    }
+                }
                 grid.replaceChildren();
                 for (const item of items) {
                     const card = element("button", { type: "button", className: "mmx-pick", title: item.path });
@@ -6017,9 +6079,30 @@ export function buildSheetInterface({ state, hooks = {} }) {
                     });
                     grid.append(card);
                 }
-                foot.textContent = items.length
-                    ? `${items.length} file(s) in ${payload.source}${browseState.query ? ` matching “${browseState.query}”` : " (newest first)"}${payload.truncated ? " — newest only" : ""}`
-                    : "Nothing here yet — drop files on a tile, or use “Upload from disk”.";
+                const where = browseState.recursive
+                    ? `newest first across all of ${payload.source === "outputs" ? "output" : "input"}`
+                    : `in ${payload.source === "outputs" ? "output" : "input"}${payload.subfolder ? `/${payload.subfolder}` : ""}`;
+                const counted = items.length
+                    ? `${items.length} file(s) ${where}${payload.truncated ? " — newest only" : ""}`
+                    : (folders.length && !browseState.recursive
+                        ? `no files here — ${folders.length} folder(s) to open`
+                        : `Nothing here yet${browseState.query ? " matching " + JSON.stringify(browseState.query) : ""} — drop files on a tile, or use “Upload from disk”.`);
+                foot.textContent = payload.partial
+                    ? `${counted} · still reading this folder…`
+                    : counted;
+                // A capped scan hands back what it has and finishes in the background. One retry (a
+                // couple of times, spaced out) is the most this should ever need: the second answer
+                // comes from the cache.
+                if (payload.partial && attempt < 3) {
+                    setTimeout(() => {
+                        if (overlay && overlay.dataset.overlay === "mmx-browse") {
+                            renderBrowse(group, index, { attempt: attempt + 1 });
+                        }
+                    }, 1200);
+                } else if (!payload.partial && payload.stale) {
+                    // A stale answer was served while the real one was computed: say so quietly.
+                    foot.textContent = `${counted} · refreshing…`;
+                }
             })
             .catch((error) => {
                 foot.textContent = `Could not list media: ${error.message}`;

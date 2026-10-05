@@ -101,6 +101,32 @@ mean.)*
   through a new `packAsset` hook - the wiring against its own `import.meta.url`, the standalone harness
   against the mockups folder - so a bare module (or any host that cannot resolve it) simply gets the
   old hint instead of a broken image, and `PLACEHOLDER_ART` is exported so the path cannot drift.
+* **The media picker no longer walks the whole tree to open.** It did: the wiring always asked for
+  `recursive=1`, so every open (every kind change, every keystroke past the debounce) walked the
+  entire `input` or `output` folder and stat-ed every file in it. On this box that is a 25k-file local
+  folder (**3.9s**) and a 6.7k-file folder on a network share (**31s cold**, 1.3s warm) - which is
+  exactly the "takes a while to load" the picker showed. Three changes, none of which removes an
+  option:
+  * **The listing is cheaper**: the name is filtered before any filesystem call, a `stat` is paid only
+    for files that can match, `os.scandir`'s own `DirEntry` replaces a fresh `Path.stat()` per file,
+    and the per-file `resolve()` is gone - the walk now checks each DIRECTORY against the base folder
+    once (and never descends a symlinked one), which is the same guarantee for a fraction of the
+    syscalls. Verified against the old implementation on the real folders: **identical file sets**
+    (25,168 / 4,293 / 182 / 1,873 paths, sets and newest-first order) at **3.1x** the speed
+    (3,409ms -> 1,110ms for the 25k walk).
+  * **A scan budget**: a walk stops after `budget_ms` (2.5s) and answers `partial: true` with what it
+    has; the rest finishes in a background thread. A cold share can no longer hang a click, and the
+    panel says `still reading this folder…` and asks again by itself.
+  * **A cache with stale-while-revalidate** (`CACHE_TTL` = 20s): a repeat request is answered from
+    memory (measured **0.0ms**), and a stale one is still served instantly while a background thread
+    refreshes it. The payload says which it was (`cached`, `stale`) and what the scan cost
+    (`scanMs`).
+* **The picker browses folders by default.** Opening it now lists the folder you are in - with the
+  subfolders as chips above the grid and an `↑ up` to come back - and the new chip beside the search
+  box switches to **all folders · newest first**, which is the recursive listing the picker used to
+  always use (and which the cache now makes cheap). A folder view measured **15ms** on the input
+  folder and **48ms** on the shared output folder, so the overlay paints immediately whatever the
+  folder is sitting on.
 * The README's suite section now says what the code actually does: the record is a `suite` block in
   the run's own `<name>.json` manifest (there is no `suite.json` file), and the four sheets are
   reached through the panel's board row rather than by appearing as top-level folders. The Results

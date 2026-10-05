@@ -27,7 +27,7 @@ import {
     NODE_WIDTH,
     REF_GROUPS,
     enforceWidgetWidth,
-} from "./h3sheet_core.mjs?boot=h3sheet_v85";
+} from "./h3sheet_core.mjs?boot=h3sheet_v86";
 
 const CLASS = "MiniMaxH3CharacterSheet";
 const DOM_WIDGET = "h3_character_sheet_ui";
@@ -199,13 +199,21 @@ async function uploadReference(file, groupKey) {
     return subfolder ? `${subfolder}/${name}` : name;
 }
 
-/** Media already in ComfyUI's input / output folders, for the Browse overlay. */
-async function listMedia({ source = "inputs", kind = "all", query = "" } = {}) {
+/** Media already in ComfyUI's input / output folders, for the Browse overlay.
+ *
+ * `folder` is the directory the picker is looking at and `recursive` is the "all folders" mode.
+ * The default is one directory read, because the recursive listing is a walk of the whole tree (and
+ * the output folder on this box is a network share); the backend caches whatever it walks, so the
+ * mode only pays for itself once per folder.
+ */
+async function listMedia({ source = "inputs", kind = "all", query = "", folder = "",
+    recursive = false } = {}) {
     const params = new URLSearchParams({
         source: source === "outputs" ? "outputs" : "inputs",
         kind,
         q: query,
-        recursive: "1",
+        subfolder: folder || "",
+        recursive: recursive ? "1" : "0",
     });
     const response = await api.fetchApi(apiUrl(`/media?${params.toString()}`), { cache: "no-store" });
     const data = await response.json().catch(() => ({}));

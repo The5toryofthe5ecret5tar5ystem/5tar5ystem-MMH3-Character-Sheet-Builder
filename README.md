@@ -479,8 +479,13 @@ setting nobody chose.
    * **drag a filled tile onto another** to reorder references (the order is the
      order of `@image1`, `@image2`, ...); the badge on the tile is that number;
    * **click a tile** to pick something that is *already in ComfyUI* - the Browse
-     overlay lists your `input` / `output` folders, newest first, with a search box
-     and a kind filter, plus **Upload from disk**;
+     overlay lists your `input` / `output` folders with a search box and a kind filter,
+     plus **Upload from disk**. It opens on **the folder you are in** (one directory read,
+     ~15ms) with the subfolders above the grid to click into and an `↑ up` to come back, and
+     the chip beside the search box switches to **all folders · newest first**, which walks
+     the whole tree and is the mode that pays for it (the backend caches the walk, so the
+     second time costs nothing). A walk that runs out of its scan budget says
+     `still reading this folder…` and refreshes itself a moment later instead of hanging;
    * hover a tile for **preview** and **remove** - the two buttons are stacked
      vertically in the tile's top-right corner, which is narrow enough to stay inside a
      small tile (a horizontal pair ran off the right edge and was hard to click). Every
@@ -1299,11 +1304,24 @@ close-up, and a reference whose whole role is the eyes is not claimed for a mout
   picks, sheet URL) for the panel. A SUITE run answers with the board it resolved (`board`) and the
   run's whole `boards` list, and with no board named it answers from the run's **first** board,
   because the run folder itself holds no cells.
-* `GET /h3-character-sheet/media?source=inputs|outputs&kind=image|video|audio|all&q=&recursive=1&limit=`
-  - the Browse picker's listing: `{ok, source, kind, folders, items:[{name, path,
-  subfolder, kind, url, size, mtime}], truncated}`, newest first when recursive.
-  Only ComfyUI's own input / output folders are served, and a request that tries to
-  leave them is refused.
+* `GET /h3-character-sheet/media?source=inputs|outputs&kind=image|video|audio|all&q=&subfolder=&recursive=0|1&limit=&budget_ms=`
+  - the Browse picker's listing: `{ok, source, kind, subfolder, parent, folders, items:[{name, path,
+  subfolder, kind, url, size, mtime}], truncated, partial, recursive, scanMs, cached, stale}`.
+  With no `subfolder` it lists the folder you are in (plus the subfolders to click into);
+  `recursive=1` walks the whole tree and answers newest first. Only ComfyUI's own input / output
+  folders are served, and a request that tries to leave them is refused (the walked directories are
+  checked the same way, and a symlinked folder is never descended).
+
+  **Why the picker opens on one folder.** The output folder on a box like this one is a network
+  share, and a full walk of it measured **31s cold** (1.3s warm); a 25k-file local `input` folder
+  costs ~1.4s to walk even warm. So the listing is built to be cheap: the file NAME is filtered
+  before anything is touched, a `stat` is only paid for files that can match, `os.scandir`'s own
+  `DirEntry` is used instead of resolving every path, and the walk stops after `budget_ms`
+  (2.5s by default) reporting `partial: true` while the rest finishes in a background thread. The
+  answers are cached for `CACHE_TTL` (20s) and a stale one is still served instantly while it is
+  refreshed, so re-opening the picker, changing kind or typing in the search box costs nothing:
+  measured on this box, a folder view is **15ms (input) / 48ms (output)** and a cached repeat is
+  **0.0ms**.
 * `POST /h3-character-sheet/action` - `list` | `plan` | `compose` | `pick` |
   `delete` | `clear` | `names` | `blur` | `presets` | `save-preset` | `delete-preset` |
   `knobs` (`blur` = face blur one reference and answer with the copy's URL, `presets` = the
