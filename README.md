@@ -83,12 +83,22 @@ Every sheet is a **reference image**: the fidelity one for identity, the express
 face is doing (same framing, same light, only the expression changes - that is what latent
 continuation buys you on a face row).
 
-The panel, on the same character: references with the roles that drive the prompt, the LIVE strip
-mid-render, and the blur editor for a reference that must not supply a face.
+The panel, on a real graph: the sheet node, `H3 Sheet → RefMod` (appearance **and** voice from the
+same sheet) and the `Save Image` that writes it, all in one queue.
 
-| References - roles and blur badges | Cells - LIVE strip at `cell 2/5 - step 7/8` | Face blur - painting a region |
-| --- | --- | --- |
-| ![References tab](images/panel-references.png) | ![Live preview during a render](images/panel-live-preview.png) | ![Face blur editor](images/panel-face-blur.png) |
+| Cells - layout cards, glyph framings, the sizes and the mode row | References - roles per tile, and a blur area painted by hand |
+| --- | --- |
+| ![Cells tab: the layout cards, the framing glyphs, the resolution cards and the One pass segment](images/panel-cells-layout-cards.png) | ![References tab: a reference with a hand-painted blur area, and the blur-area chips](images/panel-references-paint.png) |
+
+The **Cells** shot is a fresh node: `Hero + 4 panels` lit, every card drawing its own arrangement
+(*your renders* is off, so the cards show the plan - switch it on and each one wears your own last
+render of that sheet), `4K` set, **One pass** as the mode, and the arrangement the preset built
+waiting in the stage.
+
+The **References** shot is mid-edit on the same character: the *body, clothing* reference
+(`Picture 2`) has a hand-painted area over the head - the red patch - so the picture that must not
+lend a face or hair arrives with neither. Its tile badge reads `blur auto · 1 painted`, *Blur area* is
+`Face + hair`, and the line under the preview says exactly what the render will send.
 
 ## Models you need
 

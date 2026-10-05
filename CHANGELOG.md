@@ -305,6 +305,10 @@ mean.)*
 
 ### Changed
 
+* The README's screenshot gallery is the 2.0 panel: the **Cells** tab (layout cards, framing glyphs,
+  the resolution cards, the mode row) and the **References** tab mid-paint, both on a real graph with
+  the RefMod export and the sheet it writes. The earlier panel shots (`panel-references.png`,
+  `panel-live-preview.png`, `panel-face-blur.png`) show the pre-redesign frame and are no longer used.
 * Every preset states the draft flag explicitly, so applying a normal preset after *Draft pass*
   leaves draft mode - the `deviates` list on each preset records it.
 * `tests/test_user_presets.py` derives the built-in preset count instead of hardcoding it.

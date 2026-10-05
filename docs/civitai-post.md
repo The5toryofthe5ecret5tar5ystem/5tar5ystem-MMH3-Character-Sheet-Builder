@@ -65,7 +65,7 @@ The fidelity tier is the same five renders at twice the linear resolution (~4.7x
 
 ## Screenshots
 
-Both sheets above are straight out of the node, captions included, and an expression row shows the same face across five emotions with the framing and light held. The panel shots show the References tab with roles and blur badges, the Cells tab with the LIVE strip mid-render, and the blur editor where you paint a region by hand. (All of them are in the repo under `images/`.)
+Both sheets above are straight out of the node, captions included, and an expression row shows the same face across five emotions with the framing and light held. The panel shots show the Cells tab with the layout cards, the framing glyphs and the mode row, and the References tab with a role under every tile and a blur area painted by hand over a reference that must not lend a face. (All of them are in the repo under `images/`.)
 
 ## Install (the node)
 
