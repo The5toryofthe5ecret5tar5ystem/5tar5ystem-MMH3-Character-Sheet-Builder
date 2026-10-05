@@ -856,5 +856,155 @@ ok.push("blur area: face / face + hair / whole head, as chips under the picture,
     ok.push("a suite run's boards are a row in Results: labelled, lit and switchable");
 }
 
+// --- a suite's boards are ticks: which sheets one queue renders --------------------------------
+// A suite is several sheets in one queue, and the question right after that is "which of them do I
+// want". The backend already takes ANY list of layout presets as `render.suite` and validates each
+// one, so this is the Cells tab's own tick row over them - shown only while a suite is active (the
+// suite card on the layout rail is the way in), and never draggable, because a board is a whole
+// sheet and not a choice for one panel.
+{
+    const suiteSaved = [];
+    const suiteState = core.readState("");
+    const boards = [
+        { id: "hero-4", kind: "layout", label: "Hero + 4 panels",
+          build: { views: ["face"] }, widgets: { sheet_layout: "hero-left" } },
+        { id: "expressions-6", kind: "layout", label: "Expressions 2x3",
+          build: { views: ["face"] }, widgets: { sheet_layout: "grid" } },
+        { id: "details-sfw", kind: "layout", label: "Closeups 2x2 (SFW)",
+          build: { views: ["eyes"] }, widgets: { sheet_layout: "grid" } },
+        { id: "refmod-suite", kind: "suite", label: "RefMod suite (4 sheets)",
+          boards: ["hero-4", "expressions-6", "details-sfw"] },
+        { id: "balanced", kind: "quality", label: "One-pass sheet (default)",
+          render: { singlePass: true } },
+    ];
+    const suitePanel = core.buildSheetInterface({
+        state: suiteState,
+        hooks: {
+            status: () => {},
+            planCells: async () => ({ cells: [] }),
+            stateChanged: (payload) => suiteSaved.push(payload),
+            listPresets: async () => ({ presets: boards, resolutions: [] }),
+        },
+    });
+    await tick();
+    suitePanel.showTab("cells");
+    await tick();
+    const row = () => suitePanel.container.querySelector('[data-action="suite-boards-edit"]');
+    const ticks = () => [...row().querySelectorAll("input[type=checkbox]")];
+    const lit = () => ticks().filter((box) => box.checked).map((box) => box.dataset.key);
+    // The presets row holds more than one muted line (the card-art switch has one), so read the
+    // whole row: what matters is that one of them reports the sheets.
+    const hint = () => [...suitePanel.container.querySelectorAll(".mmx-presets .mmx-muted")]
+        .map((node) => node.textContent).join(" | ");
+    assert.ok(row(), "the Sheets column has a board row");
+    assert.equal(row().style.display, "none", "and it stays out of the way with no suite");
+    assert.equal(ticks().length, 0, "with nothing to tick");
+
+    // The suite card is the way in: applying it ticks every board it names.
+    suitePanel.container.querySelector('[data-preset-id="refmod-suite"]').click();
+    await tick();
+    await tick();
+    assert.notEqual(row().style.display, "none", "the suite card brings the board row out");
+    assert.deepEqual(ticks().map((box) => box.dataset.key),
+        ["hero-4", "expressions-6", "details-sfw"],
+        "one tick per layout preset the node could render as a board");
+    assert.deepEqual(lit(), ["hero-4", "expressions-6", "details-sfw"], "all of them ticked");
+    assert.match(hint(), /3 sheet/, "and the line under the rails counts SHEETS, not cells");
+    assert.equal(ticks()[0].closest(".mmx-tickgroup").className.includes("mmx-tickgroup--boards"), true,
+        "in its own tick group");
+
+    // Untick one: it leaves the payload's suite, and the list is in PRESET order, not click order.
+    const drop = (key) => {
+        const box = ticks().find((item) => item.dataset.key === key);
+        box.checked = !box.checked;
+        box.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+        return box;
+    };
+    drop("details-sfw");
+    await tick();
+    assert.deepEqual(suiteState.suite, ["hero-4", "expressions-6"], "the unticked board is out");
+    assert.deepEqual(suiteSaved.at(-1).render.suite, ["hero-4", "expressions-6"],
+        "and the payload the node parses follows");
+    assert.equal(suiteState.layoutPreset, "", "a hand-picked list is not that preset any more");
+    assert.match(hint(), /2 sheet/, "the hint follows");
+    assert.match(hint(), /Custom suite/, "and says so, rather than naming a preset it is not");
+    // Ticking it back re-orders by preset, and a payload cannot depend on the click order.
+    drop("details-sfw");
+    await tick();
+    assert.deepEqual(suiteState.suite, ["hero-4", "expressions-6", "details-sfw"],
+        "back in preset order");
+    assert.match(hint(), /3 sheet/, "and the preset's own id comes back with its exact list");
+    assert.equal(suiteState.layoutPreset, "refmod-suite", "the list matches the card again");
+
+    // Unticking the last board means no suite at all: the sheet renders from the cells list again.
+    for (const key of ["hero-4", "expressions-6", "details-sfw"]) drop(key);
+    await tick();
+    assert.deepEqual(suiteState.suite, [], "no boards, no suite");
+    assert.equal(row().style.display, "none", "and the row goes away again");
+    assert.equal("render" in (suiteSaved.at(-1) || {}), true, "the payload still serialises");
+    assert.ok(!("suite" in suiteSaved.at(-1).render), "with no suite key at all");
+    suitePanel.dispose();
+    ok.push("a suite's boards are ticks: preset order, the preset id only while it matches, "
+        + "off when the last one goes");
+}
+
+// --- loading a workflow adopts the whole payload, not half of it -------------------------------
+// The reported class of bug: the panel kept ITS build ticks, backdrop and suite after a workflow was
+// loaded into the same node, and the next persist() then wrote those stale values back over the
+// workflow it had just loaded. Refs, cells and the view switches came across; nothing else did.
+{
+    const loadedSaved = [];
+    const host = core.buildSheetInterface({
+        state: core.readState(""),
+        hooks: {
+            status: () => {},
+            planCells: async () => ({ cells: [] }),
+            stateChanged: (payload) => loadedSaved.push(payload),
+            listPresets: async () => ({ presets: [
+                { id: "hero-4", kind: "layout", label: "Hero + 4 panels",
+                  build: { views: ["face"] }, widgets: { sheet_layout: "hero-left" } },
+                { id: "refmod-suite", kind: "suite", label: "RefMod suite (4 sheets)",
+                  boards: ["hero-4"] },
+            ], resolutions: [] }),
+        },
+    });
+    await tick();
+    host.showTab("cells");
+    await tick();
+    const loadedState = core.readState(JSON.stringify({
+        version: 1,
+        refs: { pictures: [], videos: [], audios: [] },
+        cells: [{ id: "face-neutral-neutral", view: "face", pose: "neutral", expression: "neutral" }],
+        build: { views: ["face", "front"], poses: ["neutral"], expressions: ["smile"] },
+        render: {
+            background: "tan", continuity: "on", exportVideo: false, blurScope: "head",
+            preset: "balanced", layoutPreset: "refmod-suite", suite: ["hero-4"],
+        },
+        ui: { suiteBoard: "hero-4" },
+    }));
+    host.setState(loadedState);
+    await tick();
+    const shared = [...host.container.querySelectorAll(".mmx-presets .mmx-muted")]
+        .map((node) => node.textContent).join(" | ");
+    assert.deepEqual(loadedState.suite, ["hero-4"], "the loaded suite is in the panel state");
+    assert.equal(loadedState.layoutPreset, "refmod-suite");
+    assert.equal(loadedState.background, "tan", "and so is the backdrop it was rendered with");
+    assert.equal(loadedState.blurScope, "head");
+    assert.equal(loadedState.continuity, "on");
+    assert.equal(loadedState.exportVideo, false);
+    assert.deepEqual(loadedState.build, { views: ["face", "front"], poses: ["neutral"],
+        expressions: ["smile"] }, "the ticks come from the workflow, not from this panel");
+    assert.equal(loadedState.suiteBoard, "hero-4", "and the board the Results tab was showing");
+    assert.notEqual(host.container.querySelector('[data-action="suite-boards-edit"]').style.display,
+        "none", "so the board row is drawn from the loaded workflow");
+    assert.match(shared, /1 sheet/, "and the hint counts its sheets");
+    // What is NOT adopted: the served resolution chips and the node's knob values (the routes and
+    // the node own those), so a load cannot blank the size cards.
+    assert.deepEqual(loadedState.resolutions, []);
+    host.dispose();
+    ok.push("a loaded workflow brings its ticks, backdrop, suite and board across - and nothing "
+        + "gets written back over it");
+}
+
 console.log("h3sheet_core: PASS");
 for (const line of ok) console.log(" -", line);

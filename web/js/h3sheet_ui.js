@@ -27,7 +27,7 @@ import {
     NODE_WIDTH,
     REF_GROUPS,
     enforceWidgetWidth,
-} from "./h3sheet_core.mjs?boot=h3sheet_v82";
+} from "./h3sheet_core.mjs?boot=h3sheet_v83";
 
 const CLASS = "MiniMaxH3CharacterSheet";
 const DOM_WIDGET = "h3_character_sheet_ui";

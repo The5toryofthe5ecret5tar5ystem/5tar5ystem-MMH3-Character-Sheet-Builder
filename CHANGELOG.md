@@ -59,6 +59,23 @@ mean.)*
   choice rides the payload's `ui` block like the preview sizes, so a reopened workflow returns to the
   sheet you were reading. A normal single-sheet run is untouched by all of it: no boards, no row, no
   board parameter.
+* **A suite's board list is editable, and a loaded workflow stops writing its own values back.** The
+  suite was a fixed four: `render.suite` could be set by the preset and read by the node, but there
+  was no way to say "these three" or "plus the turnaround". The **Cells** tab now grows a **Boards**
+  row of ticks (one per layout preset, in the rail's order) whenever a suite is active, and ticking
+  rewrites `render.suite` in preset order. The layout record follows the list rather than the other
+  way round, so a hand-picked set is no longer the `refmod-suite` card - the rail un-lights it and
+  the line under the rails reads `Custom suite` with the sheet count - while a list that matches a
+  suite card lights that card again (ticking the last board off hides the row). Two bugs had to go
+  with it, both of which the row exposed: `setState` copied only the references, cells, prompt and
+  the four view switches, so a workflow loaded into an already-mounted node kept the panel's own
+  backdrop, suite, board, preset ids and custom views - and `persist()` then wrote those stale values
+  back over the workflow; it now adopts the whole payload (`build`, backdrop, `blurScope`,
+  `continuity`, `exportVideo` on a fresh load, `presetId`, `layoutPreset`, `suite`, `suiteBoard`),
+  leaving the resolutions and the node's own knob values alone. And the layout rail never refreshed
+  the hint - `applyQualityCard` called `showHint()` and `applyLayoutCard` did not - so applying a
+  layout (or the suite) left the line reading "pick a sheet on the left rail"; both rails refresh it
+  now, as does `refresh()`, so a reopened workflow's line describes what it actually loaded.
 * The README's suite section now says what the code actually does: the record is a `suite` block in
   the run's own `<name>.json` manifest (there is no `suite.json` file), and the four sheets are
   reached through the panel's board row rather than by appearing as top-level folders. The Results

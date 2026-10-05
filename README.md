@@ -262,6 +262,16 @@ never how. The suite preset only sets the mode.
 cannot drift from the layout the panel offers on its own; the run's own cell list is ignored while
 a suite is active (a fifth render nobody asked for), and an unknown or non-layout board id is
 reported in the warnings instead of rendering an empty sheet.
+* **The board list is editable: a row of ticks.** Four is a good default, not a rule, so the
+**Cells** tab grows a **Boards** row the moment a suite is active - one tick per layout preset, in
+the order the rail lists them. Untick the NSFW board for a sheet that never needs it, or tick the
+turnaround to put six sheets in the one queue. The ticks are the layouts you already have, so a
+board cannot be something the panel cannot render, and the layout record follows the list: a
+hand-picked set is no longer the *RefMod suite* card, so the rail stops claiming it and the line
+under the rails reads `Custom suite · 6 sheet(s)` instead - and ticking that card's own four back
+lights the card again. The row hides itself when no suite is active, and a plain single-sheet run
+never grows one. The list rides the payload like the rest of the panel state, so a saved workflow
+reopens with its ticks.
 * **Exporting it to RefMod: one bundle for the whole suite.** *H3 Sheet → RefMod* reads the run's
 `suite` record and puts **every board in one file**: each board contributes its picked cells
 (`<name>_<board>_views`) and its composite (`<name>_<board>_sheet`), and the motion and voice members
@@ -272,7 +282,8 @@ workflow picks this up with nothing rewired - and the run's manifest records the
 bundle; a suite with nothing on disk at all is refused with the reason.
 
 Picking a single layout after the suite returns to one sheet - the boards go with the layout they
-replaced. Switching the quality preset leaves the suite alone.
+replaced - and *Clear layout* empties the list with it. Switching the quality preset leaves the
+suite alone.
 
 ### The panel's frame: an icon rail, a stage, and a size you can read
 

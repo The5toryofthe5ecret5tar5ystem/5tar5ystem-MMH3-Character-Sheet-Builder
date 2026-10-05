@@ -369,7 +369,7 @@ export const KNOB_COLUMNS = 3;
  * build makes that a glance instead of an investigation; a test keeps it in step with the
  * import, so bumping one without the other fails the suite rather than confusing a user.
  */
-export const PANEL_BUILD = "h3sheet_v82";
+export const PANEL_BUILD = "h3sheet_v83";
 
 /** How long a knob hint may be before it stops being printed under its field (it stays a tooltip).
  *
@@ -1624,6 +1624,7 @@ export const PANEL_CSS = `
 .mmx-tickgroup--poses { background: rgba(255,255,255,.065); }
 .mmx-tickgroup--expressions { background: rgba(255,255,255,.095); }
 .mmx-tickgroup--background { background: rgba(255,255,255,.125); }
+.mmx-tickgroup--boards { background: rgba(255,255,255,.155); }
 .mmx-tickgroup__label {
   color: var(--mmx-tick); font-weight: 700; font-size: 10px;
   letter-spacing: .02em; align-self: center; white-space: nowrap;
@@ -2535,7 +2536,7 @@ function kindOfTicks(label) {
     return "view";
 }
 
-function optionRow(label, options, selected, onToggle, group = "") {
+function optionRow(label, options, selected, onToggle, group = "", { drag = true } = {}) {
     // Each group of ticks lives in its own rounded panel (see .mmx-tickgroup): the four
     // groups are one wall of checkboxes otherwise, and "which row am I in" has to be
     // answerable at a glance. The wrapper is returned AS the row, so call sites that just
@@ -2551,10 +2552,14 @@ function optionRow(label, options, selected, onToggle, group = "") {
         box.addEventListener("change", onToggle);
         const caption = element("label", { textContent: text, htmlFor: id }, { fontSize: "10px", marginRight: "4px" });
         // Every tick is also a thing you can put on ONE cell: drag it onto a panel on the stage and
-        // that panel asks for it (the ticks stay the sheet's default - see `applyCellDrop`).
-        draggableOnto(caption, {
-            kind: kindOfTicks(label), key, label: `${kindOfTicks(label)}: ${text}`,
-        });
+        // that panel asks for it (the ticks stay the sheet's default - see `applyCellDrop`). A row
+        // whose ticks are not per-cell choices (the suite's boards, where a tick is a whole SHEET)
+        // passes drag:false - a board dragged onto a panel would mean nothing.
+        if (drag) {
+            draggableOnto(caption, {
+                kind: kindOfTicks(label), key, label: `${kindOfTicks(label)}: ${text}`,
+            });
+        }
         boxes.push(box);
         row.append(box, caption);
     }
@@ -3408,12 +3413,18 @@ export function buildSheetInterface({ state, hooks = {} }) {
         if (!entry) {
             state.layoutPreset = "";
             state.suite = [];
+            state.suiteBoard = "";
             renderPresetRails();
+            // The line under the rails says what is set now, and it just changed.
+            showHint();
             persist();
             notify("layout cleared - the cells stay as they are");
             return;
         }
         await applyPreset(entry);
+        // The quality rail refreshed the hint and this one did not, so the line kept saying "pick a
+        // sheet on the left rail" after a layout (or a suite) had been applied.
+        showHint();
     }
 
     function showHint() {
@@ -3424,14 +3435,16 @@ export function buildSheetInterface({ state, hooks = {} }) {
         const parts = [];
         if (entry) parts.push(entry.label);
         if (layout) parts.push(layout.label);
-        if (!parts.length) {
+        const sheets = (state.suite || []).length;
+        if (!parts.length && !sheets) {
             presetHint.textContent = "Pick a sheet on the left rail; the resolution buttons set the "
                 + "sizes. Hover a card for what it does.";
             return;
         }
+        if (!parts.length) parts.push("Custom suite");
         const cells = state.cells?.length || presetCellCount(layout || entry || {});
-        presetHint.textContent = `${parts.join(" · ")} — ${layout && layout.boards?.length
-            ? `${layout.boards.length} sheets`
+        presetHint.textContent = `${parts.join(" · ")} — ${sheets
+            ? `${sheets} sheet${sheets === 1 ? "" : "s"}`
             : `${cells} cell(s)`}`;
     }
 
@@ -4428,9 +4441,75 @@ export function buildSheetInterface({ state, hooks = {} }) {
     const columnDyn = element("div", { className: "mmx-col__body" });
     const drawColumn = element("div", { className: "mmx-col__stack" });
     const refsColumn = element("div", { className: "mmx-col__stack" });
+    // The SUITE's boards: which sheets a suite run renders, as ticks over the layout presets.
+    //
+    // A suite is several sheets in one queue, and the question a user asks next is "which of them
+    // do I actually want" (the NSFW board on this character, the expression board on that one).
+    // The backend already takes ANY list of layout presets as `render.suite` and validates each one,
+    // so this needs no new payload key, no new route and no new server rule - it is the same tick
+    // row the Cells tab uses (see optionRow), filled from the served preset list and invisible until
+    // a suite is active (the suite card on the layout rail is the way in).
+    const boardsRow = element("div");
+    boardsRow.style.display = "none";
+    boardsRow.dataset.action = "suite-boards-edit";
+    /** Layout presets that can be a board: the same rule the node applies. */
+    function boardChoices() {
+        return presetList.filter(
+            (entry) => (entry.kind || "quality") === "layout" && (entry.build?.views || []).length,
+        );
+    }
+    /** The suite's boards in PRESET order, so the payload cannot depend on click order. */
+    function suiteBoardIds() {
+        const chosen = new Set((state.suite || []).map(String));
+        return boardChoices().filter((entry) => chosen.has(entry.id)).map((entry) => entry.id);
+    }
+    function renderBoards() {
+        const ordered = suiteBoardIds();
+        boardsRow.style.display = ordered.length ? "" : "none";
+        if (!ordered.length) {
+            boardsRow.replaceChildren();
+            return;
+        }
+        // optionRow returns {row, boxes}: the row IS the panel, the boxes are the inputs.
+        boardsRow.replaceChildren(optionRow(
+            "Boards",
+            boardChoices().map((entry) => [entry.id, entry.label]),
+            new Set(ordered),
+            (event) => toggleBoard(event.target.dataset.key, event.target.checked),
+            "boards",
+            { drag: false },
+        ).row);
+    }
+    /**
+     * Put a board in the suite, or take it out.
+     *
+     * Editing the list also drops the preset's own id: a hand-picked suite is not the "RefMod suite
+     * (4 sheets)" preset any more, and a saved workflow should not claim it is. Taking the last one
+     * out means no suite at all - the sheet renders from the cells list again.
+     */
+    function toggleBoard(id, on) {
+        const key = String(id || "");
+        if (!key) return;
+        const chosen = new Set(suiteBoardIds());
+        if (on) chosen.add(key); else chosen.delete(key);
+        state.suite = boardChoices().filter((entry) => chosen.has(entry.id)).map((entry) => entry.id);
+        // The layout record follows the list: a hand-picked suite is not the "RefMod suite (4
+        // sheets)" preset any more, and a saved workflow should not claim it is - but a list that
+        // happens to match a suite card IS that card, so the rail lights up again when it does.
+        const match = presetList.find((entry) => (entry.kind || "quality") === "suite"
+            && (entry.boards || []).join("|") === state.suite.join("|"));
+        state.layoutPreset = match ? match.id : "";
+        renderBoards();
+        showHint();
+        renderPresetRails();
+        persist();
+        notify(state.suite.length
+            ? `suite: ${state.suite.length} sheet(s) - ${state.suite.join(", ")}`
+            : "suite: off - the sheet renders from the cells list again");
+    }
     // The Sheets block IS the column's content on the tab that decides the sheet: arrangement,
     // size, mode, and the references the sheet is built from.
-    drawColumn.append(presetsRow, resRow, modeRow, refsMiniRow);
+    drawColumn.append(presetsRow, boardsRow, resRow, modeRow, refsMiniRow);
     column.append(columnDyn);
     //: The only two tabs that DECIDE something, and so the only two that own a column.
     const COLUMN_TABS = new Set(["cells", "references"]);
@@ -6860,6 +6939,28 @@ export function buildSheetInterface({ state, hooks = {} }) {
         state.cells = Array.isArray(fresh.cells) ? fresh.cells : [];
         state.prompt = String(fresh.prompt || "");
         state.negative = String(fresh.negative || "");
+        // Everything else the payload owns comes across as well. This used to copy refs, cells,
+        // prompt and the view switches only - so loading a workflow into an already-mounted node
+        // kept THIS panel's build ticks, backdrop, suite and preset records, and the next persist()
+        // then wrote those stale values back over the workflow it had just loaded. `resolutions`
+        // and the knob values stay put: those come from the routes and the node, not the payload.
+        state.build = {
+            views: Array.isArray(fresh.build?.views) ? fresh.build.views.map(String) : ["face", "front"],
+            poses: Array.isArray(fresh.build?.poses) ? fresh.build.poses.map(String) : ["neutral"],
+            expressions: Array.isArray(fresh.build?.expressions)
+                ? fresh.build.expressions.map(String)
+                : ["neutral"],
+        };
+        state.background = String(fresh.background || "neutral");
+        state.backgroundCustom = String(fresh.backgroundCustom || "");
+        state.backgroundRef = String(fresh.backgroundRef || "");
+        state.blurScope = blurScope(fresh);
+        state.continuity = continuity(fresh);
+        state.exportVideo = exportVideo(fresh);
+        state.presetId = String(fresh.presetId || "");
+        state.layoutPreset = String(fresh.layoutPreset || "");
+        state.suite = Array.isArray(fresh.suite) ? fresh.suite.map(String) : [];
+        state.suiteBoard = String(fresh.suiteBoard || "");
         // A loaded workflow can carry a different compact preference and different knob
         // values, and the fields here must show what will actually render.
         state.compactKnobs = compactKnobs(fresh);
@@ -6880,6 +6981,10 @@ export function buildSheetInterface({ state, hooks = {} }) {
         closeOverlay();
         renderReferences();
         renderCells();
+        renderBoards();
+        // The line under the rails is a fact about what is set now, so it belongs on this path too:
+        // a loaded workflow used to keep whatever the previous one had said there.
+        showHint();
         refreshTabs();
         // The column follows the tab, and the tab is whatever the panel is showing: a refresh
         // (a new reference, a new cell list) must not leave the column showing the other tab's
