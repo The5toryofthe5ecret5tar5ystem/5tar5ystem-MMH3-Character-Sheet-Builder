@@ -27,7 +27,7 @@ import {
     NODE_WIDTH,
     REF_GROUPS,
     enforceWidgetWidth,
-} from "./h3sheet_core.mjs?boot=h3sheet_v81";
+} from "./h3sheet_core.mjs?boot=h3sheet_v82";
 
 const CLASS = "MiniMaxH3CharacterSheet";
 const DOM_WIDGET = "h3_character_sheet_ui";
@@ -71,9 +71,14 @@ async function sheetAction(node, body) {
     return data;
 }
 
-async function listSheet(node) {
-    const url = apiUrl(`?name=${encodeURIComponent(sheetName(node))}&node_id=${encodeURIComponent(node.id ?? "")}`);
-    const response = await api.fetchApi(url, { cache: "no-store" });
+async function listSheet(node, board = "") {
+    // A SUITE run puts several sheets under one run name, one folder per board, so which board is
+    // being looked at is part of the question. Empty means "whatever this run is", and the route
+    // answers a suite with its first board.
+    const query = `?name=${encodeURIComponent(sheetName(node))}`
+        + `&node_id=${encodeURIComponent(node.id ?? "")}`
+        + (board ? `&board=${encodeURIComponent(board)}` : "");
+    const response = await api.fetchApi(apiUrl(query), { cache: "no-store" });
     const data = await response.json().catch(() => ({}));
     return data?.sheet || null;
 }
@@ -315,7 +320,7 @@ function mountPanel(node) {
         assetUrl: viewUrl,
         upload: uploadReference,
         listMedia,
-        listResults: () => listSheet(node),
+        listResults: (board) => listSheet(node, board),
         // Phase 2's card art: the sheets already on disk, with the layout each was rendered
         // with. The panel maps layout id -> newest thumbnail; nothing is rendered for it.
         listGallery: () => sheetAction(node, { action: "gallery" }),
@@ -327,16 +332,18 @@ function mountPanel(node) {
             }
             await app.queuePrompt(0, 1);
         },
-        pickFrame: (cellId, index) => sheetAction(node, {
+        pickFrame: (cellId, index, board) => sheetAction(node, {
             // ``manual`` is the mode a click records: it carries the frame the user chose, and
             // the store keeps it until a rule is chosen for that cell again (see rebuild_sheet).
-            action: "pick", cell: cellId, mode: "manual", index,
+            action: "pick", cell: cellId, mode: "manual", index, board,
             spec: currentPayload(node, state),
         }),
-        compose: () => sheetAction(node, { action: "compose", spec: currentPayload(node, state) }),
+        compose: (board) => sheetAction(node, {
+            action: "compose", board, spec: currentPayload(node, state),
+        }),
         // "This cell is no good": cancel the run and render that one cell again with a new seed.
         retryCell: ({ cellId }) => retryCellRender(node, cellId),
-        clearSheet: () => sheetAction(node, { action: "clear" }),
+        clearSheet: (board) => sheetAction(node, { action: "clear", board }),
         // The panel re-laid itself out. The node keeps the size the user gave it, so this is
         // where a height fit used to run - and the panel's own resolution now is to fill the
         // node, with the active pane scrolling when its content needs more room than the node
@@ -482,6 +489,9 @@ function mountPanel(node) {
                 }
                 const result = await sheetAction(node, {
                     action: "compose", spec: currentPayload(node, part.state),
+                    // A suite run is several sheets: the re-roll re-composites the board the panel
+                    // is showing, not the run folder (which holds no cells).
+                    board: String(part.state?.suiteBoard || ""),
                 });
                 await part.panel?.refreshResults?.();
                 // Cells that never finished - the run this replaced was cancelled mid-cell, and a

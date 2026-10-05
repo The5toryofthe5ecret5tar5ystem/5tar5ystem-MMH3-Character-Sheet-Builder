@@ -11,7 +11,7 @@ finished sheet without re-rendering:
 * ``GET  /media``    -> ``{ok, source, kind, folders, items:[...]}`` (browse picker)
 * ``POST /action``   -> ``{ok, action, sheet, ...}``
 
-Actions (all take ``name``)::
+Actions (all take ``name``, and a SUITE run also takes ``board``)::
 
     list     - refresh the listing (optionally with the panel's live spec)
     compose  - re-composite from the frames on disk, with a new spec/layout/picks
@@ -26,6 +26,11 @@ Actions (all take ``name``)::
     delete-preset - remove one of those saved presets (built-ins are refused)
     knobs    - the node's own widgets described for the panel's compact settings grid
     help     - the in-node guide plus a live check of the model files this install has
+
+A SUITE render (see ``suite.py``) puts several sheets under one run name, one folder per board.
+``board`` names which one a request is about, and a listing carries the run's ``boards`` so the
+panel can offer them; with no board named, a suite run answers from its FIRST board rather than from
+the run folder, which holds no cells of its own.
 
 Everything is best effort: a missing sheet folder is an empty listing, never an
 error, because the panel polls this while a render is still starting.
@@ -71,20 +76,48 @@ def _json_error(message: str, status: int = 400) -> web.Response:
 
 
 def _store(body: dict[str, Any] | None = None, query: Any = None) -> SheetStore | None:
+    """The folder this request is about, resolving which SUITE board it means.
+
+    A suite run is several sheets under one name, so ``board`` picks one. With no board named, a
+    suite resolves to its FIRST board (the hero sheet) instead of to the run folder, which holds no
+    cells of its own - that way a curl, an older panel, or any action that has not learned about
+    boards still lands on a real sheet. A board the run does not have is refused with the list it
+    does have, rather than answered from the wrong folder.
+    """
     source = body if isinstance(body, dict) else {}
     name = str(source.get("name") or "").strip()
     node_id = source.get("node_id")
+    board = str(source.get("board") or "").strip()
     if not name and query is not None:
         name = str(query.get("name") or "").strip()
+        board = board or str(query.get("board") or "").strip()
         node_id = node_id or query.get("node_id")
     if not name:
         return None
-    return SheetStore(name, node_id=node_id)
+    boards = sheet_store.suite_boards_of(name)
+    if not boards:
+        # Not a suite. An explicit board only makes sense if that folder is there (a suite run that
+        # was interrupted before it wrote its manifest, or a folder made by hand).
+        if board and not (sheet_store.sheet_dir(name) / sheet_store.safe_sheet_name(board, "board")).is_dir():
+            raise ValueError(f"{name!r} is not a suite run and has no {board!r} folder.")
+        return SheetStore(name, node_id=node_id, board=board or None)
+    known = [entry["folder"] for entry in boards]
+    if not board:
+        board = known[0]
+    elif board not in known:
+        raise ValueError(f"{board!r} is not a board of {name!r}; this run has {', '.join(known)}.")
+    return SheetStore(name, node_id=node_id, board=board)
 
 
 def _listing(store: SheetStore, *, action: str = "", extra: dict | None = None) -> dict:
     payload: dict[str, Any] = {"ok": True, "sheet": store.scan()}
     payload["sheets"] = sheet_store.list_sheet_names()
+    payload["board"] = store.board
+    boards = sheet_store.suite_boards_of(store.requested)
+    if boards:
+        # A suite run's listing carries its boards: the run folder itself holds no cells, so these
+        # are what the panel can switch between (and what it draws the board row from).
+        payload["boards"] = boards
     if action:
         payload["action"] = action
     if extra:
@@ -93,7 +126,10 @@ def _listing(store: SheetStore, *, action: str = "", extra: dict | None = None) 
 
 
 async def sheet_list(request):
-    store = _store(query=request.query)
+    try:
+        store = _store(query=request.query)
+    except ValueError as exc:
+        return _json_error(str(exc))
     if store is None:
         return web.json_response(
             {"ok": True, "sheets": sheet_store.list_sheet_names(), "sheet": None}
@@ -213,7 +249,11 @@ async def sheet_action(request):
         # the panel can show the result before any GPU time is spent on it.
         return _blur_response(body)
 
-    store = _store(body)
+    try:
+        store = _store(body)
+    except ValueError as exc:
+        # A board this run does not have is a bad REQUEST, not a broken sheet.
+        return _json_error(str(exc))
     if store is None:
         return _json_error("A sheet name is required.")
 

@@ -792,5 +792,69 @@ ok.push("blur area: face / face + hair / whole head, as chips under the picture,
     ok.push("a one-pass stream never replaces a panel: the cells keep the plan");
 }
 
+// --- a suite run is several sheets: the Results tab switches between the boards ---------------
+// A suite renders four sheets under ONE run name, one folder per board, and the run folder itself
+// holds no cells - so without a board row the tab loaded the run and showed "nothing rendered yet"
+// while four finished sheets sat in the folder beside it.
+{
+    const seen = [];
+    const boardState = core.readState("");
+    boardState.suite = ["hero-4", "expressions-6"];
+    const boards = [
+        { id: "hero-4", label: "Hero + 4 panels", folder: "hero-4", cells: 5, layout: "hero-left",
+          rendered: true },
+        { id: "expressions-6", label: "Expressions 2x3", folder: "expressions-6", cells: 6,
+          layout: "grid", rendered: false },
+    ];
+    const listing = {
+        name: "character_sheet-20261005_120000", dir: "/out/run", board: "hero-4",
+        sheetUrl: "", sheetFile: "", cells: [], counts: { cells: 0, rendered: 0, frames: 0 },
+        boards, onePass: { active: false, frames: [], prompt: "", panels: [], size: [0, 0] },
+        manifest: {}, spec: {}, report: "",
+    };
+    const suitePanel = core.buildSheetInterface({
+        state: boardState,
+        hooks: {
+            status: () => {},
+            planCells: async () => ({ cells: [] }),
+            stateChanged: (payload) => seen.push(["state", payload]),
+            listResults: async (board) => { seen.push(["list", board]); return listing; },
+        },
+    });
+    await tick();
+    suitePanel.showTab("results");
+    suitePanel.renderResults(listing);
+    await tick();
+    const row = suitePanel.results.querySelector('[data-action="suite-boards"]');
+    assert.ok(row, "a suite run's Results tab offers its boards");
+    const chips = [...row.querySelectorAll(".mmx-chip")];
+    assert.deepEqual(chips.map((chip) => chip.textContent), ["Hero + 4 panels", "Expressions 2x3"]);
+    assert.equal(chips[0].classList.contains("is-on"), true, "the board the listing is about is lit");
+    assert.equal(chips[1].classList.contains("is-on"), false);
+    assert.match(chips[0].title, /5 cell\(s\)/);
+    assert.match(chips[1].title, /not rendered yet/, "a board that never landed says so");
+    // A board with nothing on disk yet reads as that, not as a broken render.
+    assert.match(suitePanel.results.lastElementChild.textContent, /This board has not rendered yet/);
+    // Clicking a board asks the route for THAT board and remembers the choice in the payload.
+    click(chips[1]);
+    await tick();
+    assert.equal(seen.filter(([kind]) => kind === "list").pop()[1], "expressions-6");
+    assert.equal(seen.filter(([kind]) => kind === "state").pop()[1].ui.suiteBoard, "expressions-6");
+    // The row also leads the tab once a board HAS rendered (the ordinary case after a queue).
+    const cell = {
+        id: "face-neutral", frames: [{ file: "f0000.png", url: "/view?filename=f0000.png" }],
+        frameCount: 1, pickMode: "auto", pickIndex: 0, cellUrl: "", clipUrl: "", clipFile: "",
+        rendered: true, view: "face", pose: "neutral", expression: "neutral", caption: "",
+    };
+    suitePanel.renderResults({ ...listing, board: "hero-4", cells: [cell],
+        sheetUrl: "/view?filename=hero-4-20261005.png", sheetFile: "hero-4-20261005.png",
+        counts: { cells: 1, rendered: 1, frames: 1 } });
+    await tick();
+    assert.equal(suitePanel.results.firstElementChild.dataset.action, "suite-boards",
+        "the board row leads the tab, above the sheet");
+    suitePanel.dispose();
+    ok.push("a suite run's boards are a row in Results: labelled, lit and switchable");
+}
+
 console.log("h3sheet_core: PASS");
 for (const line of ok) console.log(" -", line);

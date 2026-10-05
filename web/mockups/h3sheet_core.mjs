@@ -369,7 +369,7 @@ export const KNOB_COLUMNS = 3;
  * build makes that a glance instead of an investigation; a test keeps it in step with the
  * import, so bumping one without the other fails the suite rather than confusing a user.
  */
-export const PANEL_BUILD = "h3sheet_v81";
+export const PANEL_BUILD = "h3sheet_v82";
 
 /** How long a knob hint may be before it stops being printed under its field (it stays a tooltip).
  *
@@ -2289,6 +2289,10 @@ export function readState(payload) {
         panelPreview: panelPreview({ panelPreview: data?.ui?.panelPreview }),
         // Whether the panel polls the sheet folder on its own (off by default).
         autoRefresh: autoRefresh({ autoRefresh: data?.ui?.autoRefresh }),
+        // Which sheet of a SUITE run the panel is showing (see selectBoard). A view preference
+        // rather than a render setting, like the preview sizes - but it has to round-trip, or a
+        // reopened workflow would silently go back to the run folder and show nothing.
+        suiteBoard: String(data?.ui?.suiteBoard || ""),
         build: {
             views: Array.isArray(data.build?.views) ? data.build.views.map(String) : ["face", "front"],
             poses: Array.isArray(data.build?.poses) ? data.build.poses.map(String) : ["neutral"],
@@ -2348,6 +2352,7 @@ export function toPayload(state) {
         nodePreviews: nodePreviews(state),
         panelPreview: panelPreview(state),
         autoRefresh: autoRefresh(state),
+        suiteBoard: String(state.suiteBoard || ""),
     };
     for (const group of REF_GROUPS) {
         payload.refs[group.key] = (state.refs?.[group.key] || [])
@@ -2761,7 +2766,7 @@ export function buildSheetInterface({ state, hooks = {} }) {
     autoLabel.title = "Poll the sheet folder in the background (off: use Refresh)";
     const clearButton = button("Clear sheet", async () => {
         try {
-            await hooks.clearSheet?.();
+            await hooks.clearSheet?.(boardName());
             notify("sheet folder cleared.");
             await refreshResults();
         } catch (error) {
@@ -3516,9 +3521,13 @@ export function buildSheetInterface({ state, hooks = {} }) {
         if (kind === "suite") {
             state.suite = Array.isArray(entry.boards) ? [...entry.boards] : [];
             state.layoutPreset = entry.id;
+            // A different suite means different boards: the remembered board would name a folder
+            // the new run does not have, so the panel goes back to this run's first board.
+            state.suiteBoard = "";
         } else if (kind === "layout") {
             state.layoutPreset = entry.id;
             state.suite = [];
+            state.suiteBoard = "";
         } else {
             state.presetId = entry.id;
         }
@@ -3790,7 +3799,7 @@ export function buildSheetInterface({ state, hooks = {} }) {
     }
     const rebuildButton = button("Re-compose", async () => {
         try {
-            const answer = await hooks.compose?.();
+            const answer = await hooks.compose?.(boardName());
             const sheet = answer?.sheet || null;
             notify(sheet?.sheetFile
                 ? `sheet rebuilt from the frames on disk → ${sheet.sheetFile} `
@@ -6285,6 +6294,59 @@ export function buildSheetInterface({ state, hooks = {} }) {
         parts.pickSpan.textContent = pickText(cell);
         for (const [index, thumb] of parts.thumbs) markThumb(thumb, index === cell.pickIndex);
     }
+    /**
+     * Which sheet of a suite run the panel is working on.
+     *
+     * A suite renders several sheets under ONE run name, one folder per board, so every call that
+     * touches a folder has to say which board it means: the run folder holds no cells of its own.
+     * Empty means "whatever this run is", which the backend answers with the run's first board -
+     * so a normal single-sheet run is unaffected by the whole idea.
+     */
+    function boardName() {
+        return String(state.suiteBoard || "").trim();
+    }
+
+    /** The board row: which sheet of a run the Results tab is showing (null for a plain sheet). */
+    function boardRow(shown) {
+        const boards = Array.isArray(shown?.boards) ? shown.boards : [];
+        if (!boards.length) return null;
+        const current = String(shown?.board || boardName() || boards[0].folder || "");
+        const row = chipChoice(
+            "Board",
+            boards.map((entry) => [String(entry.folder || entry.id || ""),
+                String(entry.label || entry.id || "")]),
+            current,
+            (key) => selectBoard(key),
+            boards.length === 1 ? "one sheet in this run" : `${boards.length} sheets from one queue`,
+        );
+        row.dataset.action = "suite-boards";
+        for (const chip of row.querySelectorAll(".mmx-chip")) {
+            const entry = boards.find((item) => String(item.folder || item.id) === chip.dataset.choice) || {};
+            const bits = [];
+            if (entry.cells) bits.push(`${entry.cells} cell(s)`);
+            if (entry.layout) bits.push(`${entry.layout} layout`);
+            bits.push(entry.rendered ? "rendered" : "not rendered yet");
+            chip.title = `${entry.label || entry.id}: ${bits.join(" · ")}`;
+        }
+        return row;
+    }
+
+    /**
+     * Switch the Results tab to another sheet of the run.
+     *
+     * The choice is a view preference (it rides the payload's `ui` block, like the preview sizes),
+     * and the listing is re-fetched because the board decides which folder answers. Re-compose,
+     * picks and Clear follow it for free: they read the same state.
+     */
+    function selectBoard(folder) {
+        const next = String(folder || "");
+        if (boardName() === next) return;
+        state.suiteBoard = next;
+        persist();
+        notify(`results: ${next || "the sheet"}`);
+        refreshResults();
+    }
+
     function renderResults(sheet, { light = false } = {}) {
         if (sheet !== undefined) lastSheet = sheet;
         const shown = lastSheet;
@@ -6295,8 +6357,12 @@ export function buildSheetInterface({ state, hooks = {} }) {
             resultRows.clear();
             resultSignature = "";
             resultHead = null;
+            const emptyBoards = boardRow(shown);
+            if (emptyBoards) results.append(emptyBoards);
             results.append(element("div", {
-                textContent: "Nothing rendered yet — queue the prompt to render the cells.",
+                textContent: shown?.boards?.length
+                    ? "This board has not rendered yet — Render, then Refresh."
+                    : "Nothing rendered yet — queue the prompt to render the cells.",
                 className: "mmx-muted",
             }));
             refreshTabs();
@@ -6317,6 +6383,8 @@ export function buildSheetInterface({ state, hooks = {} }) {
         resultRows.clear();
         resultSignature = signature;
         resultHead = null;
+        const boardsRow = boardRow(shown);
+        if (boardsRow) results.append(boardsRow);
         if (shown.sheetUrl) {
             const size = panelPreview(state);
             const height = PANEL_PREVIEW_HEIGHTS[size] || 0;
@@ -6499,7 +6567,7 @@ export function buildSheetInterface({ state, hooks = {} }) {
                     parts.pickSpan.textContent = `picking frame ${index}…`;
                     notify(`picking ${cell.id} frame ${index}…`);
                     try {
-                        const answer = await hooks.pickFrame?.(cell.id, index);
+                        const answer = await hooks.pickFrame?.(cell.id, index, boardName());
                         const listing = answer?.sheet || null;
                         // A click is a decision, so record it on the node's own payload as well:
                         // the store keeps the frame, the payload keeps the mode, and the next
@@ -6539,7 +6607,7 @@ export function buildSheetInterface({ state, hooks = {} }) {
         // and re-fetch every thumbnail.
         if (sheet === undefined) {
             try {
-                sheet = await hooks.listResults?.();
+                sheet = await hooks.listResults?.(boardName());
             } catch (error) {
                 notify(`results unavailable: ${error.message}`);
                 return lastSheet;

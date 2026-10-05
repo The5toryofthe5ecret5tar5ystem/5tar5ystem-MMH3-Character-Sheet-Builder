@@ -250,8 +250,11 @@ of 5 frames** - not 19 per-cell clips - because the suite states its mode (`sing
 one-pass off and it renders all 19 cells instead, which is the honest cost of 19 views.
 * **Each board is a folder.** Everything lands under `<output>/minimax_sheets/<run name>/<board>/`
 and every board is a complete sheet folder: `frames/`, `cells/`, `picks/`, its own `report.txt`
-and `manifest.json`. The Results pane lists them as ordinary sheets, and a `suite.json` in the run
-folder records which boards belong together (with their labels and cell counts).
+and manifest. The run folder keeps one record of its own - a `suite` block in its
+`<name>.json` manifest, written by the node, naming every board with its label, its layout and how
+many cells it built - and that record is what the routes read to offer the boards. The Results tab
+then leads with a **Board** row, so you switch between the four sheets in the panel and the folder
+listing still shows one run rather than four unrelated sheets.
 * **The quality axis is the run's.** Reference sizing, steps, seed, sampler, resolution chips,
 continuation and clip export are whatever the node says - the suite changes which cells render,
 never how. The suite preset only sets the mode.
@@ -261,9 +264,10 @@ a suite is active (a fifth render nobody asked for), and an unknown or non-layou
 reported in the warnings instead of rendering an empty sheet.
 * **Exporting it to RefMod.** Each board's folder *is* a sheet folder, so *H3 Sheet → RefMod* takes
 `<run>/<board>/` and exports that board as its own bundle - four bundles for a suite, each with its
-own appearance (and voice/video) members. A single merged bundle whose members are named per board
-(`hero-4_views`, `hero-4_sheet`, `expressions-6_views`, …) is the next step for this preset, not
-something this build does yet.
+own appearance (and voice/video) members. The node's `sheet_dir` output points at the **hero board**,
+so the shipped `+ RefMod` workflow exports the hero sheet from a suite run with no change. A single
+merged bundle whose members are named per board (`hero-4_views`, `hero-4_sheet`, `expressions-6_views`,
+…) is the next step for this preset, not something this build does yet.
 
 Picking a single layout after the suite returns to one sheet - the boards go with the layout they
 replaced. Switching the quality preset leaves the suite alone.
@@ -552,9 +556,7 @@ space) - so 24 knobs cost roughly 500px of node height that the grid fits into ~
   the knob list cannot be read the panel leaves the node's own rows alone rather than hiding
   knobs it cannot draw.
 
-### Node previews (the same Settings tab)
-
-#### The Results tab: the sheet in a card, with a filmstrip
+### The Results tab: the sheet in a card, with a filmstrip
 
 The sheet is what the run is *for*, so it gets the same treatment the reference canvas has: a card
 whose **head** names the file and offers **Open** (the sheet at full size in a new tab), then the
@@ -563,6 +565,16 @@ cell order, each showing the frame the sheet actually uses (the cell's pick, not
 a filmstrip frame jumps to that cell's row and flashes it, which is the short path from "that panel
 is wrong" to the row whose thumbnails decide it. The per-cell rows below are unchanged: every frame
 of every clip, click one to use it, plus *new seed* to render just that cell again.
+
+**A suite run gets a board row.** A [suite](#the-refmod-suite-four-sheets-one-queue) renders several
+sheets under one run name, one folder per board, and the run folder itself holds no cells - so the
+tab leads with a **Board** row (one chip per sheet, lit on the one you are looking at, each naming
+its cells, its layout and whether it has rendered yet). Switching a chip re-asks the routes for that
+board, and Re-compose, the frame picker, Clear sheet and the new-seed re-roll all follow it, because
+they name the same board. The choice rides the payload's `ui` block, so a reopened workflow comes
+back to the sheet you were reading instead of the run folder.
+
+### Node previews (the same Settings tab)
 
 ComfyUI's own output previews under the node are sized by the frontend, and two of them stack into a
 very tall node. The **previews** selector next to *Compact node* decides what happens to them:
@@ -1232,8 +1244,10 @@ close-up, and a reference whose whole role is the eyes is not claimed for a mout
 
 ## HTTP routes
 
-* `GET /h3-character-sheet?name=<sheet>&node_id=<id>` - listing (cells, frames,
-  picks, sheet URL) for the panel.
+* `GET /h3-character-sheet?name=<sheet>&node_id=<id>[&board=<folder>]` - listing (cells, frames,
+  picks, sheet URL) for the panel. A SUITE run answers with the board it resolved (`board`) and the
+  run's whole `boards` list, and with no board named it answers from the run's **first** board,
+  because the run folder itself holds no cells.
 * `GET /h3-character-sheet/media?source=inputs|outputs&kind=image|video|audio|all&q=&recursive=1&limit=`
   - the Browse picker's listing: `{ok, source, kind, folders, items:[{name, path,
   subfolder, kind, url, size, mtime}], truncated}`, newest first when recursive.
@@ -1245,7 +1259,10 @@ close-up, and a reference whose whole role is the eyes is not claimed for a mout
   recommended whole-node settings **plus the user's saved ones** (each entry carries
   `custom`), `save-preset` = store the settings the panel sent as one of those (answering
   with the whole list), `delete-preset` = remove one by id (a built-in is refused with a
-  reason), `knobs` = the node's own widgets described for the Settings tab).
+  reason), `knobs` = the node's own widgets described for the Settings tab). Any of these may
+  name a `board` as well, so a suite run's `compose` / `pick` / `clear` act on the sheet you are
+  reading rather than on the run folder; a board the run does not have is a 400 that names the ones
+  it does.
 
 ## Install
 

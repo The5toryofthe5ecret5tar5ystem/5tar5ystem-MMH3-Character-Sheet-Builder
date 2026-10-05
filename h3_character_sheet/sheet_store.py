@@ -61,6 +61,10 @@ CLIPS_DIR = "clips"
 #: sheet with a composite of slices.
 PASS_DIR = "one_pass"
 PIPELINE = "character_sheet_v1"
+#: The manifest key a SUITE run writes to record its boards (see ``suite.py``). The run folder
+#: holds one complete sheet folder per board, so this is what says they belong together - and it
+#: is how the routes can address a board at all (``suite_boards_of``).
+SUITE_KEY = "suite"
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9 _-]+")
 
@@ -566,6 +570,9 @@ class SheetStore:
         return {
             "name": self.name,
             "dir": str(self.dir),
+            # Which sheet of a SUITE run this listing is (empty for a normal single-sheet run), so
+            # the panel can light the board it is showing from the answer alone.
+            "board": self.board,
             "sheetUrl": _view_url(self.sheet_path, self.root) if sheet_exists else "",
             "sheetFile": self.sheet_path.name if sheet_exists else "",
             "cells": cells,
@@ -828,6 +835,52 @@ def list_sheet_names() -> list[str]:
     return [entry.name for entry in entries]
 
 
+def _board_rendered(folder: Path) -> bool:
+    """Has this board written anything yet? One directory listing, no manifest read."""
+    if not folder.is_dir():
+        return False
+    try:
+        if any(path.is_file() and path.suffix.lower() == ".png" for path in folder.iterdir()):
+            return True
+        cells = folder / CELLS_DIR
+        return cells.is_dir() and any(cells.glob("*.png"))
+    except OSError:
+        return False
+
+
+def suite_boards_of(name: Any) -> list[dict[str, Any]]:
+    """The boards of a SUITE run, in render order, as the run's own manifest recorded them.
+
+    A suite renders several sheets under ONE run name, one folder per board (``suite.py``), and the
+    node writes that list into the run folder's manifest. Reading it back is what lets a board be
+    addressed at all: the run folder holds no cells of its own, so without this the four sheets that
+    ARE the run cannot be listed, picked, re-composed or exported by name.
+
+    Empty for an ordinary single-sheet run. ``rendered`` is answered from the board folder itself,
+    so a suite that was interrupted mid-queue still offers every board it was going to draw - with
+    the ones that never landed marked - rather than only the ones that finished.
+    """
+    run = sheet_dir(name)
+    if not run.is_dir():
+        return []
+    record = SheetStore(name).read_manifest().get(SUITE_KEY)
+    entries = record.get("boards") if isinstance(record, dict) else None
+    boards: list[dict[str, Any]] = []
+    for item in entries if isinstance(entries, list) else []:
+        if not isinstance(item, dict) or not str(item.get("folder") or "").strip():
+            continue
+        folder = run / safe_sheet_name(item["folder"], "board")
+        boards.append({
+            "id": str(item.get("id") or folder.name),
+            "label": str(item.get("label") or item.get("id") or folder.name),
+            "folder": folder.name,
+            "cells": int(item.get("cells") or 0),
+            "layout": str(item.get("layout") or ""),
+            "rendered": _board_rendered(folder),
+        })
+    return boards
+
+
 def gallery_art(limit: int = 12) -> dict[str, Any]:
     """The newest sheet rendered with each LAYOUT preset, for the preset cards' art.
 
@@ -890,6 +943,7 @@ __all__ = [
     "FRAMES_DIR",
     "PIPELINE",
     "SHEETS_DIR_NAME",
+    "SUITE_KEY",
     "SheetStore",
     "gallery_art",
     "layout_from_spec",
@@ -899,5 +953,6 @@ __all__ = [
     "sheet_dir",
     "sheet_file_name",
     "sheets_root",
+    "suite_boards_of",
     "unique_sheet_name",
 ]

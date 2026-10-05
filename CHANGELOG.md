@@ -30,6 +30,27 @@ mean.)*
 
 ### Added
 
+* **A suite's boards are visible and addressable.** The suite rendered four complete sheets under one
+  run name, but nothing could see them: the routes only ever built the store for the run folder
+  (`SheetStore(name, node_id=...)`, board never passed), `list_sheet_names()` lists top-level folders
+  only, and the run folder holds no cells of its own - so the Results tab loaded the run, found
+  nothing, and looked like a failed render while four finished sheets sat in the folders beside it.
+  Now: `sheet_store.suite_boards_of(name)` reads the run manifest's `suite` record and answers with
+  each board's id, label, folder, cell count, layout and whether it has rendered (`rendered` comes
+  from the board folder, so an interrupted suite still offers the boards it was going to draw);
+  `GET /h3-character-sheet` and every `POST action` take a `board`, a listing carries `board` +
+  `boards`, a suite run with no board named answers from its **first** board, and a board the run does
+  not have is a 400 that names the ones it does (a board folder that exists without a manifest record
+  is still accepted); and the panel's Results tab leads with a **Board** chip row - lit on the sheet
+  you are looking at, each chip naming its cells, layout and whether it has rendered - with
+  Re-compose, the frame picker, Clear sheet and the new-seed re-roll all following the choice. The
+  choice rides the payload's `ui` block like the preview sizes, so a reopened workflow returns to the
+  sheet you were reading. A normal single-sheet run is untouched by all of it: no boards, no row, no
+  board parameter.
+* The README's suite section now says what the code actually does: the record is a `suite` block in
+  the run's own `<name>.json` manifest (there is no `suite.json` file), and the four sheets are
+  reached through the panel's board row rather than by appearing as top-level folders. The Results
+  tab's own section was also nested under "Node previews" in the headings; it is a section again.
 * **The resolution control**: three square buttons (1080p / 1440p / 4K) above the presets. One click
   sets TWO paired sizes - the sheet canvas a one-pass render draws and the cell size a per-cell
   render uses - and the readout beside them says which pair is set, or **Custom** when the sizes

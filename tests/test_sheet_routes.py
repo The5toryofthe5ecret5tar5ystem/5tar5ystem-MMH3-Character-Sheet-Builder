@@ -17,7 +17,7 @@ import json
 
 import pytest
 
-from h3cs import sheet_routes
+from h3cs import sheet_routes, sheet_store as store_mod
 
 
 class _Request:
@@ -142,6 +142,108 @@ def test_the_save_preset_action_stores_what_the_panel_sends(tmp_path, monkeypatc
     refused = _call({"action": "save-preset", "widgets": {"cell_size": 1024}})
     assert refused["ok"] is False
     assert "name" in refused["reason"]
+
+
+# ---------------------------------------------------------------- suite boards
+# A suite renders several sheets under ONE run name, one folder per board. The run folder itself
+# holds no cells, so before the routes resolved a board the panel could only name the run and the
+# four sheets that ARE the run were invisible: the Results tab showed nothing and Re-compose had
+# nothing to re-compose. These tests drive the dispatcher, so they check the ANSWER the panel gets.
+
+BOARDS = [
+    {"id": "hero-4", "label": "Hero + 4 panels", "folder": "hero-4", "cells": 5, "layout": "hero-left"},
+    {"id": "expressions-6", "label": "Expressions 2x3", "folder": "expressions-6", "cells": 6,
+     "layout": "grid"},
+    {"id": "details-sfw", "label": "Closeups 2x2 (SFW)", "folder": "details-sfw", "cells": 4,
+     "layout": "grid"},
+]
+
+
+@pytest.fixture
+def suite_run(tmp_path, monkeypatch):
+    """A run folder with a suite record and two boards that have something on disk."""
+    root = tmp_path / "minimax_sheets"
+    run = root / "character_sheet-20261005_120000"
+    (run / "hero-4" / "cells").mkdir(parents=True)
+    (run / "hero-4" / "cells" / "face-neutral.png").write_bytes(b"png")
+    (run / "hero-4" / "hero-4-20261005-120100.png").write_bytes(b"png")
+    (run / "expressions-6").mkdir(parents=True)
+    # Patch the roots FIRST: SheetStore(name) resolves and writes through them, so a store built
+    # before the patch would put the manifest in the real output folder.
+    monkeypatch.setattr(store_mod, "sheets_root", lambda: root)
+    monkeypatch.setattr(sheet_routes.sheet_store, "sheets_root", lambda: root)
+    store = store_mod.SheetStore(run.name)
+    store.write_manifest({"spec": {"render": {"suite": [entry["id"] for entry in BOARDS]}},
+                          "suite": {"name": run.name, "boards": list(BOARDS), "exported": ""}})
+    return run
+
+
+class _GetRequest:
+    """The GET route reads only the query string."""
+
+    def __init__(self, query):
+        self.query = query
+
+
+def _get(query):
+    response = asyncio.run(sheet_routes.sheet_list(_GetRequest(query)))
+    return response.payload, response.status
+
+
+def test_a_suite_run_answers_with_its_first_board_and_lists_them_all(suite_run):
+    answer, status = _get({"name": suite_run.name})
+    assert status == 200 and answer["ok"] is True
+    # No board named: the run resolves to the hero sheet, not to a folder with no cells in it.
+    assert answer["board"] == "hero-4"
+    assert answer["sheet"]["board"] == "hero-4"
+    assert answer["sheet"]["sheetFile"].startswith("hero-4-"), answer["sheet"]["sheetFile"]
+    # Every board is offered, in render order, with what it will draw and whether it landed.
+    assert [entry["folder"] for entry in answer["boards"]] == ["hero-4", "expressions-6", "details-sfw"]
+    assert [entry["cells"] for entry in answer["boards"]] == [5, 6, 4]
+    assert [entry["rendered"] for entry in answer["boards"]] == [True, False, False]
+    assert answer["boards"][1]["label"] == "Expressions 2x3"
+    json.dumps(answer)
+
+
+def test_a_named_board_is_honoured_and_a_bogus_one_is_refused(suite_run):
+    answer, _status = _get({"name": suite_run.name, "board": "expressions-6"})
+    assert answer["board"] == "expressions-6"
+    assert answer["sheet"]["dir"].endswith("expressions-6"), answer["sheet"]["dir"]
+    assert answer["sheet"]["cells"] == [], "that board has not rendered"
+
+    # A board the run does not have is a refusal that names the ones it does - answered from the
+    # run folder instead, the panel would silently show nothing and look broken.
+    refused, status = _get({"name": suite_run.name, "board": "nope"})
+    assert refused["ok"] is False and status == 400
+    assert "nope" in refused["error"] and "hero-4" in refused["error"], refused["error"]
+
+
+def test_actions_are_scoped_to_the_board_they_name(suite_run):
+    """Clear one board and the others are untouched: the board IS the folder."""
+    cleared = _call({"action": "clear", "name": suite_run.name, "board": "hero-4"})
+    assert cleared["ok"] is True, cleared
+    assert cleared["board"] == "hero-4"
+    assert not (suite_run / "hero-4" / "cells" / "face-neutral.png").exists()
+    # An action with no board named takes the run's first board, so an older caller still works.
+    assert (suite_run / "expressions-6").is_dir()
+    listed = _call({"action": "list", "name": suite_run.name})
+    assert listed["board"] == "hero-4" and [entry["folder"] for entry in listed["boards"]][0] == "hero-4"
+
+
+def test_a_normal_sheet_run_has_no_boards(tmp_path, monkeypatch):
+    """The board plumbing must be invisible to a single-sheet run."""
+    root = tmp_path / "minimax_sheets"
+    (root / "plain_sheet").mkdir(parents=True)
+    monkeypatch.setattr(store_mod, "sheets_root", lambda: root)
+    monkeypatch.setattr(sheet_routes.sheet_store, "sheets_root", lambda: root)
+    answer, status = _get({"name": "plain_sheet"})
+    assert status == 200 and answer["ok"] is True
+    assert answer["board"] == ""
+    assert "boards" not in answer
+    # And a board named for it is refused rather than quietly ignored.
+    refused, status = _get({"name": "plain_sheet", "board": "hero-4"})
+    assert refused["ok"] is False and status == 400
+    assert "not a suite run" in refused["error"]
 
 
 def test_the_delete_preset_action_refuses_built_ins(tmp_path, monkeypatch):
