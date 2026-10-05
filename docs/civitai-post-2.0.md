@@ -118,10 +118,11 @@ either, so applying a layout cannot silently undo a 4K choice.
 | 4K | 2176 | 2048 | 3264 x 2176 | about 14k |
 
 These are estimates from the pack's own numbers, not measurements: an int8 DiT is about 10.5 GB
-resident, the nvfp4 text encoder about 5 GB, and activations scale with the token count. The
-counter-intuitive part is worth knowing before you choose: a 4K one-pass render, about 14k tokens, is
-cheaper than one 2048px cell at 22 frames, about 18k tokens, because the one-pass grid is only five
-frames long.
+resident, the nvfp4 text encoder about 5 GB, and activations scale with the token count. One number
+in this area is measured: a 4K one-pass sheet takes about 160 to 170 seconds on an RTX 5090 at 8
+steps. The counter-intuitive part is worth knowing before you choose: a 4K one-pass render, about 14k
+tokens, is cheaper than one 2048px cell at 22 frames, about 18k tokens, because the one-pass grid is
+only five frames long.
 
 Rough guidance: 16 GB cards at 1080p with cell_size 768 and clip export off; 24 GB cards at 1440p
 comfortably and 4K likely; 32 GB cards at 4K and cell_size 2048. A wrong guess costs a re-render,
@@ -270,5 +271,6 @@ license. Full credits are in `NOTICE` and the README. Feedback and issues are we
   sheet used if it is a community one.
 * The release download links above use the GitHub release asset names generated from the workflow
   files, so the spaces are dots and the RefMod variant keeps its name.
-* The screenshots are from a real graph on a 32 GB card. Say so if anyone asks how long a sheet
-  takes: the README's timing table is five cells at 8 steps on an RTX 5090.
+* The screenshots are from a real graph on a 32 GB card. If anyone asks how long a sheet takes: a 4K
+  one-pass sheet is about 160 to 170 seconds on an RTX 5090 at 8 steps, and the README's timing table
+  also has the per-cell numbers for five cells at 22 frames.

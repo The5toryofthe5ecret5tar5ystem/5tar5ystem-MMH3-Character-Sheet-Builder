@@ -305,6 +305,11 @@ mean.)*
 
 ### Changed
 
+* **The timing table leads with the default render.** A `4K` one-pass sheet (2048px cells, 3264 x 2176)
+  takes **160-170 s** on an RTX 5090 at 8 steps, measured, and it is the first row now; the per-cell
+  figures (Balanced 81 s, Fidelity 378 s for five cells at 22 frames) follow as the classic pass, with
+  the reason for the gap named (a frame picker, per-cell clips and latent continuation). The
+  resolution table's modelled token counts stay modelled, and now say which single number is measured.
 * **The README's image set is the 2.0 one.** The headline is a `4K` one-pass render of the
   `Hero + 4 panels` layout (3264 x 2176, one 5-frame H3 pass) in place of the three 1.x sheet shots,
   followed by the Cells tab (layout cards, framing glyphs, resolution cards, the mode row) and the

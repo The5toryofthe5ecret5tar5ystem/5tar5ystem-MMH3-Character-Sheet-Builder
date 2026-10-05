@@ -131,24 +131,26 @@ looping, nothing to install, and the render is unaffected either way.
 
 ## How long it takes
 
-Measured on an **RTX 5090 (32 GB)** with a TURBO H3 checkpoint at 8 steps, `res_multistep` /
-`simple`, 22 frames per cell and clips exported - i.e. the shipped presets, unchanged. A sheet is
-five cells, so the per-cell figure is the wait between live-preview cells:
+Measured on an **RTX 5090 (32 GB)** with a TURBO H3 checkpoint at 8 steps and `res_multistep` / `simple` -
+i.e. the shipped presets, unchanged. A sheet is five cells, so the per-cell figure is the wait
+between live-preview cells:
 
-| Sheet | Cells | Per cell | Whole sheet |
+| Render | Cells | Per cell | Whole sheet |
 | --- | --- | --- | --- |
-| **Full Character Sheet - Balanced** (1024px cells, 2304 x 1536) | 5 | ~10-13 s | **81 s** |
-| **Full Character Sheet - Fidelity** (2048px cells, 5760 x 3840) | 5 | ~60 s | **378 s** |
+| **One-pass sheet at 4K** (2048px cells, 3264 x 2176) | one render | - | **160-170 s** |
+| **Full Character Sheet - Balanced** (1024px cells, 2304 x 1536), per cell | 5 | ~10-13 s | **81 s** |
+| **Full Character Sheet - Fidelity** (2048px cells, 5760 x 3840), per cell | 5 | ~60 s | **378 s** |
 
-*Fidelity* is the same five renders at twice the linear resolution, so it costs about four times
-the pixels and ~4.7x the wall clock (378 s vs 81 s). Those are single measurements on one machine -
-a slower GPU, more frames per cell, or a non-turbo checkpoint at 20-30 steps costs proportionally
-more - but the ratio between the two tiers is what to plan around.
+The first row is the **default render**: one clip, 5 frames, the whole sheet inside it, at the `4K`
+resolution - a single wait of about two and a half minutes for a 3264 x 2176 sheet. That is what to
+budget for a prompt you are still iterating on. The two per-cell rows are the classic pass, where
+five renders of 22 frames each cost what they cost because a frame picker, per-cell clips and latent
+continuation come with them; the Fidelity row is the Balanced row at twice the linear resolution, so
+about four times the pixels and ~4.7x the wall clock (378 s against 81 s).
 
-The **[one-pass sheet](#one-pass-sheet-the-default)** is the default render: one clip, 5 frames, the
-whole sheet inside it. It is a single wait instead of five, so the numbers above are the per-cell
-pass's - and the one-pass default is what you iterate a prompt with. The per-cell figures are what
-a sheet costs when a panel has to be exactly right.
+The one-pass figure was measured on a 5090 at 8 steps; these are single measurements on one machine -
+a slower GPU, a non-turbo checkpoint at 20-30 steps, or the 1440p and 1080p sizes scale from them -
+but the ratios between the rows are what to plan around.
 
 ## Nodes
 
@@ -1077,7 +1079,9 @@ ceiling apply again.
 
 **These are modelled, not measured** (the pack's own numbers: int8 DiT ~10.5 GB plus the nvfp4 text
 encoder ~5 GB resident, and activations scaling with latent tokens ~ (w/32)(h/32) x latent frames).
-The counter-intuitive part is worth knowing before you pick: **a 4K one-pass render (~14k tokens) is
+The one number here that *was* measured is the default render: **a 4K one-pass sheet takes about
+160-170 s** on an RTX 5090 at 8 steps (see [how long it takes](#how-long-it-takes)). The
+counter-intuitive part is worth knowing before you pick: **a 4K one-pass render (~14k tokens) is
 cheaper than a single 2048px cell at 22 frames (~18k)**, because the 5-frame grid is so short. What
 to plan around:
 
