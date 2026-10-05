@@ -127,6 +127,29 @@ mean.)*
   always use (and which the cache now makes cheap). A folder view measured **15ms** on the input
   folder and **48ms** on the shared output folder, so the overlay paints immediately whatever the
   folder is sitting on.
+* **A suite rendered ONE sheet and called it done (fixed).** Reproduced from a real run: the run folder
+  held a single board (`<run>/hero-4/`) while the manifest listed all four, and the report still
+  described the previous single-sheet run. The cause is ComfyUI's execution rule, not the board
+  expansion: the executor collects the prompt's **output nodes** and runs only what is reachable from
+  them, pruning the rest. A suite builds every board into ONE expansion and returns only the FIRST
+  board's result as the builder node's own outputs, so every other board ended in nodes that nothing
+  consumed - measured on the real graph: **12 of 48 nodes reachable**, with three of the four writers
+  pruned. Nodes that WRITE now declare `is_output_node`, exactly as core's `SaveImage`/`SaveVideo` do:
+  `H3SheetOnePassSink` (frames, sheet still, slices, report, manifest), `H3SheetCellSink` (a cell's
+  frames, clip and pick) and `H3SheetGrid` (the composed sheet, its frames, report and manifest).
+  After the fix every board's writers are reachable in both modes (48/48 one-pass, 240/240 per-cell,
+  nothing stranded). A regression test now walks the graph the way the executor does, for both modes,
+  so a node that writes but cannot be reached fails the suite instead of quietly not running.
+* **A per-cell suite composed every board into the run folder (fixed).** The grid node - which is what
+  writes the composed sheet - had no `board` input, unlike both sinks, so four boards would have
+  composed over each other in the run folder and the last one would have won. `H3SheetGrid` takes
+  `board` now (appended after `keep_frames` so a saved workflow's positional widget values still
+  line up) and `build_sheet_graph` passes each board's folder to it.
+* **A suite run's own record is now its own.** The run manifest and `report.txt` are written from the
+  run's spec and the suite's board list (`spec.render.suite` filled, `sheetFile` explicitly empty,
+  cells empty - the boards own those) instead of merging into whatever ran in that folder before,
+  which left a previous single-sheet run's sheet, onePass block and cells describing a suite run that
+  had not happened. `write_manifest` gained an explicit `sheet_file` argument for that.
 * The README's suite section now says what the code actually does: the record is a `suite` block in
   the run's own `<name>.json` manifest (there is no `suite.json` file), and the four sheets are
   reached through the panel's board row rather than by appearing as top-level folders. The Results

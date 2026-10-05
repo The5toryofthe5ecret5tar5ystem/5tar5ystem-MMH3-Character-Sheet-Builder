@@ -340,6 +340,10 @@ def build_sheet_graph(
         sheet_data=json.dumps(payload),
         name=str(name),
         keep_frames=bool(keep_frames),
+        # The board folder, like the sinks: a suite renders several sheets from one queue and each
+        # composes into its OWN folder. Without this every board's grid wrote into the run folder and
+        # the last one won.
+        board=str(board or ""),
         **cell_links,
     )
     return grid.out(0), grid.out(1), grid.out(2), grid.out(3)
@@ -958,10 +962,31 @@ class MiniMaxH3CharacterSheet(io.ComfyNode):
             # The suite's own record, in the run folder beside the boards: what rendered, where each
             # board landed and how many cells it built. The panel lists the boards as ordinary
             # sheets (each folder is a complete sheet), and this is what says they belong together.
+            # It REPLACES the run's manifest and report rather than merging into whatever ran in
+            # this folder before: the run folder holds no sheet and no cells of its own (the boards
+            # own those), and a manifest that inherited the previous single-sheet run's sheetFile
+            # and onePass block described a run that never happened.
             store = SheetStore(str(sheet_name or spec.name)).ensure()
-            manifest = store.read_manifest()
-            manifest["suite"] = suite_manifest(boards, name=store.name)
-            store.write_manifest(manifest)
+            store.write_report("\n".join(
+                [f"H3 Sheet suite: {len(boards)} board(s) from ONE queue - "
+                 f"{sum(board.cells for board in boards)} cell(s) in total."]
+                + suite_lines(boards, name=store.name)
+                + board_lines
+            ))
+            store.write_manifest(
+                {
+                    "spec": spec.to_dict(),
+                    # The boards own the cells, the sheets and the frames; the run folder is the
+                    # record that ties them together. No size either: each board lays its own canvas
+                    # out, and its own manifest is where that number belongs.
+                    "cells": {},
+                    "missing": [],
+                    "warnings": list(spec.warnings),
+                    "notes": list(spec.notes),
+                    "suite": suite_manifest(boards, name=store.name),
+                },
+                sheet_file="",
+            )
             for line in suite_lines(boards, name=store.name) + board_lines:
                 log.info("Character sheet: %s", line)
             log.info(

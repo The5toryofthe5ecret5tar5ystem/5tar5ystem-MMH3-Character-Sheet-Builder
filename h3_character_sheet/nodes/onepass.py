@@ -51,6 +51,15 @@ class H3SheetOnePassSink(io.ComfyNode):
     def define_schema(cls) -> io.Schema:
         return io.Schema(
             node_id="H3SheetOnePassSink",
+            # AN OUTPUT NODE, and it has to be. This is the node that WRITES the sheet folder
+            # (one_pass/ frames, the sheet still, the slices, the report, the manifest), so a copy
+            # of it that nothing consumes must still run - ComfyUI executes the nodes reachable
+            # from the prompt's output nodes and prunes the rest. A SUITE renders several boards in
+            # one expansion and only the FIRST board's sink is returned as this node's own output,
+            # so without this flag every other board was pruned and the suite quietly rendered one
+            # sheet (see build_suite_graph). Being an output node is also what a writer is: core's
+            # SaveImage/SaveVideo declare the same.
+            is_output_node=True,
             display_name="H3 Sheet One-Pass Sink (internal)",
             category="MiniMaxH3/Character Sheet",
             description=(

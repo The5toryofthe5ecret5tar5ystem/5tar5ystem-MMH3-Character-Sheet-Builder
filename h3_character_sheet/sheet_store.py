@@ -424,13 +424,15 @@ class SheetStore:
             log.warning("sheet: could not save picked frame for %s (%s)", cell_id, exc)
             return None
 
-    def write_manifest(self, payload: dict[str, Any]) -> Path:
+    def write_manifest(self, payload: dict[str, Any], *, sheet_file: Any = None) -> Path:
         self.ensure()
         data = dict(payload)
         data["name"] = self.name
         # Which file this run actually wrote: the panel and the routes read this
-        # instead of recomputing a name that is only valid for one second.
-        data["sheetFile"] = self.sheet_file
+        # instead of recomputing a name that is only valid for one second. A SUITE run writes no
+        # sheet of its own (each board owns one), and it says so with an explicit "" rather than
+        # inheriting the sheet of whatever ran in that folder before.
+        data["sheetFile"] = self.sheet_file if sheet_file is None else str(sheet_file)
         data["updated"] = time.strftime("%Y-%m-%dT%H:%M:%S")
         data["pipeline"] = PIPELINE
         if self.node_id:

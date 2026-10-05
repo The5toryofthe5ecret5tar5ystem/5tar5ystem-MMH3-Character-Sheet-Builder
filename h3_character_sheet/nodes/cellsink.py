@@ -39,6 +39,10 @@ class H3SheetCellSink(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="H3SheetCellSink",
+            # An output node for the same reason as the one-pass sink: it writes the cell's frames,
+            # clip and pick, and a suite in per-cell mode leaves every board but the first with a
+            # sink that nothing consumes - which ComfyUI would prune (see onepass.py).
+            is_output_node=True,
             display_name="H3 Sheet Cell Saver",
             description=(
                 "Internal to the Character Sheet Builder: saves one cell's frames as soon "

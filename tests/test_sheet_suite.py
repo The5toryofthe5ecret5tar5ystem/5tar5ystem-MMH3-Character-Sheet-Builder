@@ -267,6 +267,74 @@ def test_the_boards_do_not_share_a_single_node():
     assert len(decodes) == 4, "each board decodes its own samples"
 
 
+def test_every_board_of_a_suite_actually_runs():
+    """The boards are not enough: the nodes that WRITE them have to be executed.
+
+    ComfyUI executes the nodes reachable from the prompt's output nodes and prunes everything else
+    (``execution.py``: ``get_output_node_ids`` -> the execution walk). A suite builds every board
+    into ONE expansion and returns only the FIRST board's result as this node's own output, so a
+    board whose writer is neither an output node nor consumed by one is silently never run. That is
+    precisely what happened: a four-board suite rendered the hero sheet and reported success, and in
+    per-cell mode the other boards' sinks were pruned with their grids - cells without sheets.
+
+    Every node that writes to the sheet folder therefore declares ``is_output_node`` (core's
+    SaveImage/SaveVideo do the same, for the same reason: a writer must run). This walks the graph
+    the way the executor does and fails if any writer - or anything else in the expansion - would be
+    left out.
+    """
+    from h3cs.nodes.cellsink import H3SheetCellSink
+    from h3cs.nodes.grid import H3SheetGrid
+    from h3cs.nodes.onepass import H3SheetOnePassSink
+
+    writers = {
+        "H3SheetOnePassSink": H3SheetOnePassSink,
+        "H3SheetCellSink": H3SheetCellSink,
+        "H3SheetGrid": H3SheetGrid,
+    }
+    for name, cls in writers.items():
+        assert cls.OUTPUT_NODE is True, f"{name} writes into the sheet folder, so it must run"
+
+    for single_pass in (True, False):
+        spec = _suite_spec()
+        spec.render.single_pass = single_pass
+        boards, _warnings = suite_mod.suite_boards(spec)
+        cells = sum(len(board.spec.enabled_cells) for board in boards)
+        expand, outputs_, _lines = _suite_graph(spec)
+        counts: dict[str, int] = {}
+        for node in expand.values():
+            if node["class_type"] in writers:
+                counts[node["class_type"]] = counts.get(node["class_type"], 0) + 1
+        expected = ({"H3SheetOnePassSink": len(boards)} if single_pass
+                    else {"H3SheetCellSink": cells, "H3SheetGrid": len(boards)})
+        assert counts == expected, (
+            f"one writer per board (or per cell) - single_pass={single_pass}: {counts} != {expected}"
+        )
+        # What the executor starts from: the node's own returned outputs, plus every output node
+        # inside the expansion (execution.py collects those from the expanded graph).
+        roots = {
+            str(link[0])
+            for link in outputs_
+            if isinstance(link, list) and link and isinstance(link[0], str)
+        }
+        roots |= {
+            key for key, node in expand.items()
+            if getattr(writers.get(node["class_type"]), "OUTPUT_NODE", False) is True
+        }
+        reachable, frontier = set(roots), list(roots)
+        while frontier:
+            node_id = frontier.pop()
+            for value in expand.get(node_id, {}).get("inputs", {}).values():
+                if (isinstance(value, list) and value and isinstance(value[0], str)
+                        and value[0] not in reachable):
+                    reachable.add(value[0])
+                    frontier.append(value[0])
+        stranded = [(key, expand[key]["class_type"]) for key in expand if key not in reachable]
+        assert not stranded, (
+            f"nothing in a suite expansion may be stranded (single_pass={single_pass}), or it is "
+            f"built and never run: {stranded}"
+        )
+
+
 def test_the_suite_wraps_the_preview_once_for_all_boards():
     """One model, one preview wrapper: four wrappers would stack four step clocks on it."""
     spec = _suite_spec()
@@ -328,6 +396,11 @@ def test_a_suite_in_per_cell_mode_renders_every_board_s_cells():
     boards_seen = {node["inputs"]["board"] for node in expand.values()
                    if node["class_type"] == "H3SheetCellSink"}
     assert boards_seen == set(preset_mod.SUITE_BOARD_IDS), boards_seen
+    # ...and so does the composed sheet: the GRID is what writes it, so it is given the same board
+    # folder. Without that every board's grid composed into the run folder and the last one won.
+    grid_boards = {node["inputs"].get("board") for node in expand.values()
+                   if node["class_type"] == "H3SheetGrid"}
+    assert grid_boards == set(preset_mod.SUITE_BOARD_IDS), grid_boards
 
 
 def test_the_suite_ignores_the_run_s_own_cells():

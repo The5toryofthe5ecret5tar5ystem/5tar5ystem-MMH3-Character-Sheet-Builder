@@ -248,6 +248,12 @@ How it behaves:
 them, so the whole suite is a single Queue press. In the default mode that is **four H3 renders
 of 5 frames** - not 19 per-cell clips - because the suite states its mode (`singlePass`). Turn
 one-pass off and it renders all 19 cells instead, which is the honest cost of 19 views.
+* **A board's writers run even though nothing consumes them.** ComfyUI executes the nodes reachable
+from the prompt's output nodes and prunes the rest, and a merged expansion returns only the first
+board's result as this node's own outputs - so every node that writes into a sheet folder
+(`H3SheetOnePassSink`, `H3SheetCellSink`, `H3SheetGrid`) declares `is_output_node`, the way core's
+`SaveImage` / `SaveVideo` do. Without that a four-board suite rendered the hero sheet and reported
+success, and in per-cell mode the other boards produced cells but never composed their sheets.
 * **Each board is a folder.** Everything lands under `<output>/minimax_sheets/<run name>/<board>/`
 and every board is a complete sheet folder: `frames/`, `cells/`, `picks/`, its own `report.txt`
 and manifest. The run folder keeps one record of its own - a `suite` block in its

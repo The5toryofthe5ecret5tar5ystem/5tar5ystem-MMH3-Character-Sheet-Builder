@@ -38,6 +38,14 @@ class H3SheetGrid(io.ComfyNode):
     def define_schema(cls) -> io.Schema:
         return io.Schema(
             node_id="H3SheetGrid",
+            # An output node because it WRITES: this node creates the sheet folder, saves every
+            # cell's frames, composes and saves the sheet, and writes the report and the manifest.
+            # ComfyUI only runs what is reachable from the prompt's output nodes, so without this a
+            # grid whose sheet nobody wired anywhere would be pruned - which is exactly what
+            # happened to every board of a per-cell SUITE except the one the node returns (the
+            # boards rendered cells but never composed their sheets). Core's own SaveImage /
+            # SaveVideo declare the same thing for the same reason.
+            is_output_node=True,
             display_name="H3 Character Sheet Grid",
             category="MiniMaxH3/Character Sheet",
             description=(
@@ -58,6 +66,17 @@ class H3SheetGrid(io.ComfyNode):
                     default=True,
                     optional=True,
                     tooltip="Keep every frame per cell so the sheet can be re-picked or re-laid out with no re-render.",
+                ),
+                # Appended AFTER keep_frames on purpose: a workflow saved before this input existed
+                # keeps its positional widget values, and `board` falls back to its default.
+                io.String.Input(
+                    "board",
+                    default="",
+                    optional=True,
+                    tooltip=(
+                        "Which sheet of a SUITE run this grid composes - the board's folder inside "
+                        "the run. Empty for a normal single-sheet run (the run folder itself)."
+                    ),
                 ),
                 io.Autogrow.Input(
                     "cells",
@@ -89,13 +108,15 @@ class H3SheetGrid(io.ComfyNode):
         sheet_data: str,
         name: str = "character_sheet",
         keep_frames: bool = True,
+        board: str = "",
         cells: Any = None,
     ) -> io.NodeOutput:
         spec = parse_sheet_spec(sheet_data or {})
         spec.name = str(name or spec.name or "character_sheet")
         # fresh=True: this run writes a NEW dated sheet file, so a finished render is
         # never replaced (the manifest then points the panel at the file we wrote).
-        store = SheetStore(spec.name, fresh=True).ensure()
+        # `board` is the suite's folder for this sheet (empty for a plain run).
+        store = SheetStore(spec.name, fresh=True, board=board or None).ensure()
         # Keep the recorded spec and the folder name identical: the manifest has to
         # describe the sheet that is actually on disk.
         spec.name = store.name
