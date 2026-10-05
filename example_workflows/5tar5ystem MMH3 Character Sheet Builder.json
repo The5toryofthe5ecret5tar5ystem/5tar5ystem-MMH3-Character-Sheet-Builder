@@ -281,6 +281,7 @@
         "3:4",
         "per framing",
         "auto",
+        true,
         true
       ],
       "widgets_values_named": {

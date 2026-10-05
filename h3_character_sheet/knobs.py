@@ -48,7 +48,7 @@ KNOB_LAYOUT: tuple[dict[str, Any], ...] = (
     {"name": "keep_frames", "label": "Keep frames", "group": "Output", "row": 0},
     # One cell: how big, what shape, how long.
     {"name": "cell_size", "label": "Cell size", "group": "Render", "row": 0,
-     "hint": "short edge of one cell"},
+     "hint": "short edge of one cell; the resolution buttons pair it"},
     {"name": "cell_aspect", "label": "Cell shape", "group": "Render", "row": 0},
     {"name": "frames_per_cell", "label": "Frames", "group": "Render", "row": 0,
      "hint": "H3 samples 5, 22, 39..."},
@@ -69,10 +69,15 @@ KNOB_LAYOUT: tuple[dict[str, Any], ...] = (
     {"name": "sheet_layout", "label": "Layout", "group": "Sheet", "row": 0},
     {"name": "sheet_columns", "label": "Columns", "group": "Sheet", "row": 0},
     {"name": "sheet_aspect", "label": "Sheet aspect", "group": "Sheet", "row": 0},
-    {"name": "sheet_short_edge", "label": "Sheet size", "group": "Sheet", "row": 1},
+    {"name": "sheet_short_edge", "label": "Sheet size (custom)", "group": "Sheet", "row": 1,
+     "hint": "the resolution buttons set this - type here for anything else"},
     {"name": "sheet_fit", "label": "Fit", "group": "Sheet", "row": 1},
     {"name": "sheet_captions", "label": "Captions", "group": "Sheet", "row": 1},
     {"name": "sheet_background", "label": "Background", "group": "Sheet", "span": 2, "row": 2},
+    # The render mode: ONE pass for the whole sheet (the default), or one render per cell. Sits
+    # with the sheet's own settings because it decides what the sheet costs and what it is.
+    {"name": "single_pass", "label": "One-pass sheet", "group": "Sheet", "row": 2,
+     "hint": "one H3 render for the whole sheet; off = per-cell renders"},
     # Per-cell extras.
     {"name": "continuity", "label": "Continuation", "group": "Cells", "row": 0},
     {"name": "export_video", "label": "Export clips", "group": "Cells", "row": 0},

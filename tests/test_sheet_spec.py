@@ -730,7 +730,7 @@ def test_a_non_identity_reference_is_told_not_to_supply_a_face():
     spec = _two_ref_spec(view="portrait")
     prompt = ss.build_cell_prompt(spec, spec.cells[0])
     assert (
-        "must not supply a face, a hairstyle, skin tone or facial features" in prompt
+        "must not supply a face, a hairstyle, hair colour, hair length, skin tone or facial features" in prompt
     )
     assert "the person visible in it is not the identity, do not copy their face" in prompt
     assert "<Picture 2> must not change the face, the glasses and the hair, and must not supply" in prompt
@@ -804,6 +804,51 @@ def test_side_and_back_views_keep_the_side_face_and_the_outfit_instructions():
     prompt = ss.build_cell_prompt(spec, spec.cells[0])
     assert "only the side of the face is visible" in prompt
     assert "Take the clothing and the body proportions only from <Picture 2>." in prompt
+
+
+def test_a_side_or_back_view_holds_the_hairstyle():
+    """Reported: the side profile came back with a hairstyle the reference never had.
+
+    A front-facing identity picture says nothing about the side or the back of the head, and the
+    second reference (an outfit photo of somebody with their own hair) is right there with a
+    plausible answer - so the panel that has to invent the head is the one that borrowed it. The
+    fix is a sentence on exactly those angles; every view the reference already covers keeps the
+    prompt it had.
+    """
+    holds = "The hairstyle does not change with the camera"
+    for view, angle in (("profile", "seen from the side"),
+                        ("face-profile", "seen from the side"),
+                        ("three-quarter-back", "seen from behind and to one side"),
+                        ("back", "seen from behind"),
+                        ("head-back", "seen from behind, the back of the head")):
+        spec = _two_ref_spec(view=view)
+        prompt = ss.build_cell_prompt(spec, spec.cells[0])
+        assert holds in prompt, f"{view}: the side/back of the head is unconstrained"
+        assert angle in prompt, f"{view}: the angle is named"
+    # The angles the reference DOES cover keep their prompt: a sentence that says "the hair does
+    # not change" on a front view is noise the prompt does not need.
+    for view in ("face", "portrait", "front", "three-quarter"):
+        spec = _two_ref_spec(view=view)
+        prompt = ss.build_cell_prompt(spec, spec.cells[0])
+        assert holds not in prompt, f"{view}: the reference already shows this angle"
+
+
+def test_the_hairstyle_sentence_needs_a_reference_to_hold():
+    """With no picture wired there is no hairstyle to hold, so the sentence must not appear."""
+    spec = ss.parse_sheet_spec({"cells": [{"id": "c", "view": "profile"}]})
+    assert ss.hair_holds_in_view("profile", spec.refs) == ""
+    assert "The hairstyle does not change" not in ss.build_cell_prompt(spec, spec.cells[0])
+    # An empty vocabulary for the angle, an empty sentence: the helper is not a formatter.
+    assert ss.hair_holds_in_view("front", spec.refs) == ""
+
+
+def test_the_other_picture_must_not_lend_its_hair():
+    """The ban names the hair, not only "a hairstyle": a full-body outfit photo carries a whole
+    head of hair, and "hairstyle" alone left its colour and length unmentioned."""
+    spec = _two_ref_spec(view="profile")
+    prompt = ss.build_cell_prompt(spec, spec.cells[0])
+    assert "hairstyle, hair colour, hair length" in prompt
+    assert "do not copy their face or their hair" in prompt
 
 
 def test_a_reference_without_a_role_claims_nothing():
@@ -976,6 +1021,32 @@ def test_only_cells_round_trips():
     assert spec.to_dict()["render"]["onlyCells"] == ["a"]
     assert ss.parse_sheet_spec(spec.to_dict()).render.only_cells == ["a"]
     assert ss.parse_sheet_spec({"cells": [{"id": "a"}]}).render.only_cells == [], "default: whole sheet"
+
+
+def test_a_panel_face_reference_survives_its_own_round_trip():
+    """The panel's choice is part of the sheet, so the manifest keeps it.
+
+    A saved spec has to be the sheet that was run, panel choices included: this is what the
+    panel writes when a reference is dropped on a cell.
+    """
+    spec = ss.parse_sheet_spec({
+        "refs": {"pictures": [
+            {"imageFile": "identity.jpg", "role": "face"},
+            {"imageFile": "hero.jpg", "role": "body, clothing"},
+        ]},
+        "cells": [{"id": "c0", "view": "front", "faceRef": "pictures:1"}],
+    })
+    assert spec.cells[0].face_ref == "pictures:1"
+    assert spec.to_dict()["cells"][0]["faceRef"] == "pictures:1", "written to the manifest"
+    again = ss.parse_sheet_spec(json.dumps(spec.to_dict()))
+    assert again.cells[0].face_ref == "pictures:1", "and read back"
+
+
+def test_a_face_reference_that_is_not_a_slot_name_is_ignored_with_a_warning():
+    """A malformed name is dropped, not fatal: a workflow from an older panel still renders."""
+    spec = ss.parse_sheet_spec({"cells": [{"id": "c0", "faceRef": "the-handsome-one"}]})
+    assert spec.cells[0].face_ref == ""
+    assert any("face reference" in warning for warning in spec.warnings)
 
 
 def test_a_cell_seed_is_honoured_and_survives_the_round_trip():

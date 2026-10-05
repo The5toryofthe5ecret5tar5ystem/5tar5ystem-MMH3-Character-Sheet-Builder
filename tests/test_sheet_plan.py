@@ -74,7 +74,7 @@ def test_plan_action_returns_each_cells_prompt_and_its_references():
     # The user's own word "head" survives in the brackets; the claim is exclusive.
     assert "<Picture 1> (head, face, hair) is the sole source of the face and the hair." in whole["prompt"]
     assert "<Picture 2> is the sole source of the clothing and the body proportions." in whole["prompt"]
-    assert "must not supply a face, a hairstyle, skin tone or facial features" in whole["prompt"]
+    assert "must not supply a face, a hairstyle, hair colour, hair length, skin tone or facial features" in whole["prompt"]
 
 
 def test_plan_reports_which_references_will_be_blurred():

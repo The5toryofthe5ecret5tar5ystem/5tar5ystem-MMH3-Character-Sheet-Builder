@@ -460,10 +460,12 @@ class _SheetPreviewWrapper:
         fps: float = DEFAULT_FPS,
         budget: float = FRAME_BUDGET_SECONDS,
         cell_ids: list[str] | None = None,
+        whole_sheet: bool = False,
     ) -> None:
         self.name = name
         self.node_id = node_id
         self.cells_total = int(cells_total or 0)
+        self.whole_sheet = bool(whole_sheet)
         self.mute = bool(mute)
         self.stream = bool(stream)
         self.interval = float(interval)
@@ -596,6 +598,9 @@ class _SheetPreviewWrapper:
             "name": self.name,
             "cell": self._cell,
             "cells": self.cells_total,
+            # True when this one clip is the whole sheet (the draft pass): the panel says so
+            # instead of "cell 1", and there is no per-cell re-roll to offer.
+            "whole_sheet": self.whole_sheet,
             "cell_id": self.cell_id_of(self._cell),
             "step": step_index + 1,
             "steps": total,
@@ -663,11 +668,16 @@ def attach_sheet_preview(
     fps: float = DEFAULT_FPS,
     budget: float = FRAME_BUDGET_SECONDS,
     cell_ids: list[str] | None = None,
+    whole_sheet: bool = False,
 ) -> Any:
     """Return the model with the sheet-preview wrapper attached (or the model unchanged).
 
     Best effort, like the mute: a patcher that refuses to clone logs a warning and the render
     proceeds with whatever previews ComfyUI would have shown.
+
+    ``whole_sheet`` marks a render whose single clip IS the sheet (the one-pass sheet, see
+    ``one_pass``): one sampler call, nothing to re-roll per cell, so the panel labels the stream
+    as the sheet rather than as "cell 1".
     """
     if comfy is None or model is None or not (mute or stream):
         return model
@@ -677,7 +687,7 @@ def attach_sheet_preview(
     wrapper = _SheetPreviewWrapper(
         name=name, node_id=node_id, cells_total=cells_total, mute=mute, stream=stream,
         sender=sender, latent_format=latent_format, source=source, max_frames=max_frames,
-        fps=fps, budget=budget, cell_ids=cell_ids,
+        fps=fps, budget=budget, cell_ids=cell_ids, whole_sheet=whole_sheet,
     )
     try:
         wrapped = model.clone()

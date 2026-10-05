@@ -91,9 +91,20 @@ def _custom_slots(cells: Sequence[SheetCell]) -> tuple[int, int]:
 def layout_rects(
     cells: Sequence[SheetCell],
     layout: SheetLayoutSpec,
+    *,
+    canvas: tuple[int, int] | None = None,
 ) -> tuple[tuple[int, int], list[tuple[int, int, int, int]]]:
-    """``((sheet_w, sheet_h), [(x, y, w, h), ...])`` for each cell in order."""
-    sheet_w, sheet_h = sheet_canvas_size(layout)
+    """``((sheet_w, sheet_h), [(x, y, w, h), ...])`` for each cell in order.
+
+    ``canvas`` overrides the canvas the sheet would be composited at (see
+    :func:`sheet_canvas_size`). The draft pass uses it: it renders the sheet instead of
+    compositing it, at its own 32px-aligned size, and the panel boxes it hands H3 have
+    to describe THAT image or the prompt and the render disagree.
+    """
+    if canvas is None:
+        sheet_w, sheet_h = sheet_canvas_size(layout)
+    else:
+        sheet_w, sheet_h = max(int(canvas[0]), _MIN_CELL_PX), max(int(canvas[1]), _MIN_CELL_PX)
     pad = max(0, int(layout.padding or 0))
     gap = max(0, int(layout.gap or 0))
     content_w = max(_MIN_CELL_PX, sheet_w - 2 * pad)

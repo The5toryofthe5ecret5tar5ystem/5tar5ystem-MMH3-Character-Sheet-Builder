@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Character Sheet panel — live preview of the redesign</title>
+<style>
+  html, body { margin: 0; background: #0f0f14; color: #e9e9f1;
+               font: 13px/1.45 "Inter", "Segoe UI", system-ui, sans-serif; }
+  .top { max-width: 1010px; margin: 0 auto; padding: 18px 18px 6px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p { margin: 0 0 8px; color: #9797a8; max-width: 900px; }
+  .bar { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 4px; }
+  .bar button { font: inherit; font-weight: 600; font-size: 12px; color: #9797a8; background: #1b1b22;
+                border: 1px solid #32323e; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+  .bar button.on { color: #17171c; background: #ffb95e; border-color: #ffb95e; }
+  /* The frame the node actually gives the panel: NODE_WIDTH x NODE_HEIGHT less the node's own
+     header and inset. Measuring the panel in here is what makes "does much need scrolling?" a
+     question with an answer instead of a guess. */
+  #stage { width: 1080px; height: 664px; margin: 8px auto 40px; border: 1px solid #3a3a48;
+           border-radius: 12px; overflow: hidden; background: #14141a; box-shadow: 0 14px 40px #0008; }
+  #stage > .mmx-sheet { padding: 10px; }
+  #log { max-width: 968px; margin: 0 auto 40px; font: 11px/1.5 ui-monospace, monospace; color: #8f8f9f;
+         white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>Character Sheet panel — the real module, mounted outside ComfyUI</h1>
+  <p>This page imports <code>web/js/h3sheet_core.mjs</code> itself and mounts the panel with a fake
+     wiring layer, exactly the way the node does. What you see is the pack's actual panel — the new
+     card rails, the glyph tick rows, the resolution chips — not a drawing of it. Buttons that
+     would talk to ComfyUI (render, upload, blur) are stubbed and log to the console at the
+     bottom - which is why <b>Render</b> is disabled here: it presses ComfyUI's own queue, and there
+     is no queue on this page. The two layout cards wearing a sheet with a <b>yours</b> badge show a
+     <b>placeholder</b> for the card art: the real node fills those from your own last render of that
+     layout, and every layout you have not rendered keeps the drawn arrangement.</p>
+  <div class="bar" id="tabs"></div>
+</div>
+
+<div id="stage"></div>
+<div id="log">(nothing yet)</div>
+
+<script type="module">
+import * as core from "../js/h3sheet_core.mjs";
+
+const logBox = document.getElementById("log");
+const log = [];
+function say(line) { log.push(line); logBox.textContent = log.slice(-14).join("\n"); }
+
+// The preset list the backend serves (h3_character_sheet/presets.py), trimmed to what the rails
+// draw: a quality axis, the five layouts and the suite.
+const PRESETS = [
+    { id: "balanced", kind: "quality", label: "One-pass sheet (default)", custom: false,
+      hint: "The node's own defaults, spelled out: one render for the whole sheet.",
+      render: { continuity: "off", exportVideo: true, framesPerCell: 22, singlePass: true },
+      sheet: {}, widgets: { frames_per_cell: 22, steps: 8, single_pass: true },
+      build: {}, boards: [], deviates: [] },
+    { id: "per-cell", kind: "quality", label: "Per-cell renders (classic)", custom: false,
+      hint: "One render per cell, with continuation auto - chains cells whose camera distance matches.",
+      render: { continuity: "auto", exportVideo: false, framesPerCell: 22, singlePass: false },
+      sheet: {}, widgets: { single_pass: false, continuity: "auto", export_video: false },
+      build: {}, boards: [], deviates: ["single_pass", "continuity", "export_video"] },
+    { id: "hero-4", kind: "layout", label: "Hero + 4 panels", custom: false,
+      hint: "Five cells: headshot, chest-up, full body front, side and back, hero on the left.",
+      render: { background: "tan" },
+      sheet: { layout: "hero-left", columns: 2, aspect: "3:2" },
+      widgets: { sheet_layout: "hero-left", sheet_columns: 2, sheet_aspect: "3:2" },
+      build: { views: ["face", "portrait", "front", "profile", "back"], poses: ["neutral"],
+               expressions: ["neutral"] },
+      boards: [], deviates: [] },
+    { id: "expressions-6", kind: "layout", label: "Expressions 2x3", custom: false,
+      hint: "Six face close-ups in a 2x3 grid, one framing - the sheet compares expressions, not angles.",
+      render: {}, sheet: { layout: "grid", columns: 3, aspect: "3:2", cellAspect: "1:1" },
+      widgets: { sheet_layout: "grid", sheet_columns: 3, sheet_aspect: "3:2", cell_aspect: "1:1" },
+      build: { views: ["face"], poses: ["neutral"],
+               expressions: ["neutral", "closed-eyes", "smile", "anger", "crying", "pleasure"] },
+      boards: [], deviates: [] },
+    { id: "turnaround-3", kind: "layout", label: "Turnaround (3 in a row)", custom: false,
+      hint: "Front, side and back in one row on an ultrawide canvas.",
+      render: {}, sheet: { layout: "turnaround", columns: 3, aspect: "21:9" },
+      widgets: { sheet_layout: "turnaround", sheet_columns: 3, sheet_aspect: "21:9" },
+      build: { views: ["front", "profile", "back"], poses: ["neutral"], expressions: ["neutral"] },
+      boards: [], deviates: [] },
+    { id: "details-sfw", kind: "layout", label: "Closeups 2x2 (SFW)", custom: false,
+      hint: "Four detail crops in a square grid: eyes, mouth, hands, feet.",
+      render: {}, sheet: { layout: "grid", columns: 2, aspect: "1:1" },
+      widgets: { sheet_layout: "grid", sheet_columns: 2, sheet_aspect: "1:1" },
+      build: { views: ["eyes", "mouth", "hands", "feet"], poses: [], expressions: ["neutral"] },
+      boards: [], deviates: [] },
+    { id: "details-nsfw", kind: "layout", label: "Closeups 2x2 (NSFW)", custom: false,
+      hint: "The explicit detail a sheet also documents: breasts, groin, butt and the ahego mouth.",
+      render: {}, sheet: { layout: "grid", columns: 2, aspect: "1:1" },
+      widgets: { sheet_layout: "grid", sheet_columns: 2, sheet_aspect: "1:1" },
+      build: { views: ["breasts", "groin", "butt", "mouth"], poses: [], expressions: ["ahego"] },
+      boards: [], deviates: [] },
+    { id: "refmod-suite", kind: "suite", label: "RefMod suite (4 sheets)", custom: false,
+      hint: "Four sheets from one queue, each rendered into its own folder.",
+      render: { singlePass: true }, sheet: {}, widgets: {}, build: {},
+      boards: ["hero-4", "expressions-6", "details-sfw", "details-nsfw"], deviates: [] },
+];
+
+const RESOLUTIONS = [
+    { key: "1080p", label: "1080p", sheetShortEdge: 1088, cellShortEdge: 1024, hint: "the 16 GB tier" },
+    { key: "1440p", label: "1440p", sheetShortEdge: 1440, cellShortEdge: 1024, hint: "comfortable at 24 GB" },
+    { key: "4k", label: "4K", sheetShortEdge: 2176, cellShortEdge: 2048, hint: "the 32 GB tier" },
+];
+
+// What the node currently holds. The panel reads and writes these through the wiring hooks.
+const widgets = {
+    cell_size: 1024, frames_per_cell: 22, steps: 8, sampler_name: "res_multistep",
+    scheduler: "simple", seed: 42, shift_video: 12, shift_audio: 3, ref_image_size: "match",
+    sheet_layout: "hero-left", sheet_columns: 2, sheet_aspect: "3:2", sheet_short_edge: 1088,
+    sheet_captions: true, sheet_background: "#101014", sheet_fit: "contain",
+    keep_frames: true, verbose_logging: false, cell_aspect: "3:4", ref_scope: "per framing",
+    continuity: "off", export_video: true, single_pass: true,
+};
+
+// A stand-in for the reference files (this page has none on disk): a drawn portrait at a real
+// pixel size, so the canvas sizes itself exactly as it would with a photo and the paint surface
+// has something to draw on. Video and audio keep their own URLs (their elements handle them).
+const SAMPLE = "data:image/svg+xml;utf8," + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="640" viewBox="0 0 480 640">' +
+    '<rect width="480" height="640" fill="#2b2b36"/>' +
+    '<ellipse cx="240" cy="230" rx="104" ry="132" fill="#3d3d4a"/>' +
+    '<ellipse cx="240" cy="230" rx="104" ry="132" fill="none" stroke="#6f6f82" stroke-width="3"/>' +
+    '<circle cx="205" cy="210" r="9" fill="#9a9aab"/><circle cx="275" cy="210" r="9" fill="#9a9aab"/>' +
+    '<path d="M212 286c18 14 38 14 56 0" stroke="#9a9aab" stroke-width="4" fill="none"/>' +
+    '<path d="M120 640c22-150 70-210 120-210s98 60 120 210Z" fill="#343440"/>' +
+    '</svg>');
+
+// What the sheet folder would report after a run: the sheet file and its cells, each with the
+// frames its clip produced and which one the sheet uses. The frames are drawn samples (this page
+// has no rendered cells on disk), so the filmstrip and the per-cell strips have something to show.
+const frame = (label, tint) => "data:image/svg+xml;utf8," + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160"><rect width="160" height="160" fill="${tint}"/>` +
+    `<circle cx="80" cy="66" r="30" fill="#4a4a5a"/><path d="M30 160c10-46 30-64 50-64s40 18 50 64Z" fill="#3b3b49"/>` +
+    `<text x="8" y="152" font-family="monospace" font-size="15" fill="#c9c9d6">${label}</text></svg>`);
+
+const RESULTS = {
+    sheetUrl: frame("sheet", "#22222b"),
+    sheetFile: "minimax_sheets/character_sheet-20261005_181500/hero_4.png",
+    dir: "preview",
+    counts: { rendered: 5, cells: 5, frames: 20 },
+    cells: [
+        { id: "face-neutral-neutral", view: "face", pose: "neutral", expression: "neutral",
+          frames: [{ url: frame("f0", "#26262f") }, { url: frame("f1", "#2a2a34") },
+                   { url: frame("f2", "#2e2e39") }, { url: frame("f3", "#31313d") }], pickIndex: 3 },
+        { id: "portrait-neutral-neutral", view: "portrait", pose: "neutral", expression: "neutral",
+          frames: [{ url: frame("p0", "#272730") }, { url: frame("p1", "#2b2b35") }], pickIndex: 0 },
+        { id: "front-neutral-neutral", view: "front", pose: "neutral", expression: "neutral",
+          frames: [{ url: frame("b0", "#282833") }, { url: frame("b1", "#2c2c37") }], pickIndex: 1 },
+        { id: "profile-neutral-neutral", view: "profile", pose: "neutral", expression: "neutral",
+          frames: [{ url: frame("s0", "#292934") }], pickIndex: 0 },
+        { id: "back-neutral-neutral", view: "back", pose: "neutral", expression: "neutral",
+          frames: [{ url: frame("k0", "#2a2a35") }], pickIndex: 0 },
+    ],
+};
+
+// The node's knobs, as the backend describes them (h3_character_sheet/knobs.py -> the node schema):
+// labels, groups, rows, bounds and the hint that is a tooltip unless it is short.
+const KNOBS = {
+    ok: true,
+    columns: 3,
+    groups: [
+        { group: "Sheet", knobs: [
+            { name: "output_name", label: "Sheet name", group: "Sheet", span: 2, row: 0, kind: "text",
+              hint: "%date:hhmmss% and %seed% are expanded" },
+            { name: "single_pass", label: "One-pass sheet", group: "Sheet", span: 1, row: 1, kind: "toggle",
+              hint: "one H3 render for the whole sheet; off = per-cell renders" },
+            { name: "keep_frames", label: "Keep frames", group: "Sheet", span: 1, row: 1, kind: "toggle",
+              hint: "every frame per cell, so a pick needs no re-render" },
+            { name: "export_video", label: "Export clips", group: "Sheet", span: 1, row: 1, kind: "toggle",
+              hint: "write each cell's clip next to its frames" },
+            { name: "sheet_layout", label: "Layout", group: "Sheet", span: 1, row: 2, kind: "select",
+              options: ["hero-left", "grid", "turnaround", "custom"] },
+            { name: "sheet_aspect", label: "Aspect", group: "Sheet", span: 1, row: 2, kind: "select",
+              options: ["3:2", "1:1", "4:3", "16:9", "21:9"] },
+            { name: "sheet_short_edge", label: "Sheet size (custom)", group: "Sheet", span: 1, row: 2,
+              kind: "number", min: 256, max: 4096, step: 16, hint: "the resolution buttons own this" },
+        ] },
+        { group: "Render", knobs: [
+            { name: "cell_size", label: "Cell size", group: "Render", span: 1, row: 0, kind: "number",
+              min: 256, max: 2048, step: 32, hint: "512-1536; 32px grid" },
+            { name: "frames_per_cell", label: "Frames per cell", group: "Render", span: 1, row: 0,
+              kind: "number", min: 5, max: 240, step: 1,
+              hint: "H3 renders 17k+5 frames; the sheet clips are short on purpose" },
+            { name: "steps", label: "Steps", group: "Render", span: 1, row: 0, kind: "number",
+              min: 1, max: 200, step: 1,
+              hint: "the turbo recipe wants 6-8 steps, and a non-turbo checkpoint wants 20-30 - it is one field, but it changes what the render costs" },
+            { name: "seed", label: "Seed", group: "Render", span: 1, row: 1, kind: "number", min: 0 },
+            { name: "control_after_generate", label: "Seed mode", group: "Render", span: 1, row: 1,
+              kind: "select", options: ["fixed", "increment", "decrement", "randomize"], frontend: true },
+            { name: "ref_scope", label: "References", group: "Render", span: 1, row: 1, kind: "select",
+              options: ["per framing", "every cell"] },
+            { name: "ref_image_size", label: "Reference sizing", group: "Render", span: 1, row: 2,
+              kind: "select", options: ["match", "max"] },
+            { name: "continuity", label: "Latent continuation", group: "Render", span: 1, row: 2,
+              kind: "select", options: ["off", "auto", "on"] },
+            { name: "verbose_logging", label: "Verbose log", group: "Render", span: 1, row: 2,
+              kind: "toggle", hint: "this pack's loggers at DEBUG for one run" },
+        ] },
+    ],
+};
+
+const state = core.readState(JSON.stringify({    name: "character sheet",
+    globalPrompt: "a woman in her thirties with copper hair, freckles and a thin scar through one eyebrow",
+    negativePrompt: "text, watermark, extra people",
+    refs: {
+        pictures: [
+            { file: "face.png", role: "face and hair" },
+            { file: "outfit.png", role: "body shape, clothing" },
+            { file: "pose.png", role: "pose reference", blurFace: "off" },
+        ],
+        videos: [{ file: "motion.mp4", role: "motion reference" }],
+        audio: [{ file: "voice.wav", role: "voice reference" }],
+    },
+    build: { views: ["face", "portrait", "front", "profile", "back"], poses: ["neutral"],
+             expressions: ["neutral"] },
+    render: { resolution: "1080p", preset: "balanced", layoutPreset: "hero-4" },
+}));
+
+// A PLACEHOLDER card art, drawn inline: the real panel asks the node for the newest sheet it
+// rendered with each layout (`gallery` -> sheet_store.gallery_art). This harness has no node, so
+// the two layouts below show a stand-in with the same shape (a page and its panels) - enough to
+// judge the rail, not a claim about your renders.
+const ART = "data:image/svg+xml;utf8," + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200">
+       <rect width="300" height="200" fill="#101018"/>
+       <rect x="10" y="10" width="120" height="180" rx="3" fill="#2b2b3a"/>
+       <rect x="140" y="10" width="75" height="88" rx="3" fill="#3a3a4d"/>
+       <rect x="225" y="10" width="65" height="88" rx="3" fill="#333343"/>
+       <rect x="140" y="104" width="150" height="86" rx="3" fill="#2f2f3e"/>
+     </svg>`);
+
+const panel = core.buildSheetInterface({
+    state,
+    hooks: {
+        status: (text) => say(`status: ${text}`),
+        stateChanged: (payload) => say(`payload <- ${payload.render.layoutPreset || payload.render.preset || "custom"} · `
+            + `${(payload.cells || []).length} cell(s) · suite ${JSON.stringify(payload.render.suite || [])}`),
+        readWidgets: (names) => {
+            const out = {};
+            for (const name of names || []) if (name in widgets) out[name] = widgets[name];
+            return out;
+        },
+        applyWidgets: async (values) => {
+            Object.assign(widgets, values || {});
+
+            say(`widgets <- ${Object.keys(values || {}).join(", ") || "nothing"}`);
+        },
+        listPresets: async () => ({ presets: PRESETS, resolutions: RESOLUTIONS, store: "preview" }),
+        listKnobs: async () => KNOBS,
+        listMedia: async () => ({ source: "preview", files: [] }),
+        listResults: async () => RESULTS,
+        listGallery: async () => ({ layouts: {
+            "hero-4": { url: ART, name: "preview hero run" },
+            "expressions-6": { url: ART, name: "preview expressions run" },
+        }, sheets: [] }),
+        listHelp: async () => ({ project: "preview", sections: [] }),
+        planCells: async () => ({ cells: [] }),
+        compose: async () => ({ ok: false, reason: "preview: no backend" }),
+        clearSheet: async () => ({ ok: true }),
+        retryCell: async () => ({ ok: false, reason: "preview: no backend" }),
+        pickFrame: async () => ({ ok: false, reason: "preview: no backend" }),
+        blurReference: async () => ({ ok: false, reason: "preview: blur needs ComfyUI" }),
+        upload: async () => ({ ok: false, reason: "preview: upload needs ComfyUI" }),
+        savePreset: async () => ({ ok: false, reason: "preview: presets need ComfyUI" }),
+        deletePreset: async () => ({ ok: false, reason: "preview: presets need ComfyUI" }),
+        assetUrl: (url) => {
+            const text = String(url || "");
+            if (!text.startsWith("/view")) return text;
+            if (/\.(mp4|webm|mov)/i.test(text) || /\.(wav|mp3|flac)/i.test(text)) return text;
+            return SAMPLE;
+        },
+    },
+});
+
+// The harness's own handle: driving the panel from the console is how the live stream (the
+// strip, the stage's live cell, the caption) gets looked at without waiting for a render.
+window.__mmxSheetPanel = panel;
+
+document.getElementById("stage").append(panel.container);
+document.getElementById("tabs").replaceChildren(
+    ...["references", "cells", "prompts", "results", "preview", "settings", "help"].map((key, index) => {
+        const node = document.createElement("button");
+        node.textContent = key;
+        node.className = index === 1 ? "on" : "";
+        node.addEventListener("click", () => {
+            panel.showTab(key);
+            [...node.parentElement.children].forEach((other) => other.classList.remove("on"));
+            node.classList.add("on");
+            say(`tab: ${key}`);
+        });
+        return node;
+    }),
+);
+panel.showTab("cells");
+say("mounted: the real panel module, no ComfyUI. Console shows every wiring call.");
+</script>
+</body>
+</html>

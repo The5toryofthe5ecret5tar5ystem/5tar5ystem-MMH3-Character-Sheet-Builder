@@ -348,3 +348,58 @@ def test_clear_removes_everything_it_wrote(store):
     assert not store.sheet_path.is_file()
     assert not store.picks_path.is_file()
     assert store.frame_files("c1") == []
+
+
+# --------------------------------------------------------------------------- #
+# card art (phase 2 of the redesign): the newest sheet per layout preset
+# --------------------------------------------------------------------------- #
+def _sheet_with(tmp_path, monkeypatch, name, layout, *, image="page.png", suite=None):
+    """A sheet folder on disk with a manifest that remembers its layout.
+
+    Written through the store's own writer, not by hand: the manifest file is named after the
+    folder (`<name>.json`), and a fixture that guesses the name tests nothing.
+    """
+    monkeypatch.setattr(store_mod, "output_root", lambda: tmp_path)
+    store = store_mod.SheetStore(name)
+    store.ensure()
+    if image:
+        (store.dir / image).write_bytes(b"png")
+    store.write_manifest({"spec": {"render": {"layoutPreset": layout, "suite": suite or []}}})
+    return store.dir
+
+
+def test_gallery_art_maps_each_layout_to_its_newest_render(tmp_path, monkeypatch):
+    _sheet_with(tmp_path, monkeypatch, "first hero", "hero-4")
+    newer = _sheet_with(tmp_path, monkeypatch, "second hero", "hero-4")
+    # Newest wins: the folder mtime is what orders them, like the Results tab.
+    import os
+
+    os.utime(newer, (newer.stat().st_atime + 10, newer.stat().st_mtime + 10))
+    art = store_mod.gallery_art()
+    # The folder name is sanitised ("second_hero"), which is what the panel draws from.
+    assert art["layouts"]["hero-4"]["name"] == "second_hero"
+    assert art["layouts"]["hero-4"]["url"].startswith("/view?filename=page.png")
+    assert "subfolder=" in art["layouts"]["hero-4"]["url"], "and /view loads it from its folder"
+    assert [entry["name"] for entry in art["sheets"]] == ["second_hero", "first_hero"], "newest first"
+
+
+def test_gallery_art_a_suite_informs_every_board_it_drew(tmp_path, monkeypatch):
+    _sheet_with(tmp_path, monkeypatch, "suite run", "refmod-suite",
+                suite=["hero-4", "expressions-6", "details-sfw", "details-nsfw"])
+    art = store_mod.gallery_art()
+    for board in ("hero-4", "expressions-6", "details-sfw", "details-nsfw"):
+        assert art["layouts"][board]["name"] == "suite_run", (
+            "the page a suite drew IS what each board looks like, so it is that board's art too"
+        )
+
+
+def test_gallery_art_ignores_folders_with_no_sheet_yet(tmp_path, monkeypatch):
+    _sheet_with(tmp_path, monkeypatch, "half rendered", "hero-4", image="")
+    art = store_mod.gallery_art()
+    assert art["layouts"] == {}, "no picture, no art - the card keeps the drawn arrangement"
+    assert art["sheets"] == []
+
+
+def test_gallery_art_is_empty_but_valid_with_no_sheets_at_all(tmp_path, monkeypatch):
+    monkeypatch.setattr(store_mod, "output_root", lambda: tmp_path / "nothing here")
+    assert store_mod.gallery_art() == {"layouts": {}, "sheets": []}

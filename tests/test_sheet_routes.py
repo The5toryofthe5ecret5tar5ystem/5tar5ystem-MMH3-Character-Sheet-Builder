@@ -85,7 +85,14 @@ def test_every_served_preset_has_the_fields_the_panel_reads():
     for entry in _call({"action": "presets"})["presets"]:
         for key in ("id", "label", "hint", "render", "sheet", "widgets", "build", "deviates"):
             assert key in entry, f"{entry['id']} is missing {key}"
-        assert isinstance(entry["widgets"], dict) and entry["widgets"], entry["id"]
+        assert isinstance(entry["widgets"], dict) and isinstance(entry["boards"], list)
+        if entry["kind"] == "suite":
+            # A suite arranges BOARDS, not the sheet: the arrangement comes from the layout preset
+            # each board names, so widgets of its own would be dead data (test_presets says so).
+            assert entry["boards"] and not entry["widgets"], entry["id"]
+        else:
+            assert entry["widgets"], entry["id"]
+            assert not entry["boards"], entry["id"]
 
 
 def test_the_help_action_is_registered_and_served():
@@ -159,3 +166,65 @@ def test_the_actions_the_panel_uses_are_all_registered():
     for action in ("list", "plan", "presets", "save-preset", "delete-preset",
                    "compose", "pick", "delete", "clear", "names"):
         assert action in sheet_routes._ACTIONS, action
+
+
+def test_the_blur_action_runs_the_clip_pass_for_a_reference_clip(monkeypatch):
+    """A clip is previewed with the clip pass - sampled detection, tracked box, re-encode.
+
+    The panel sends `kind`; a bare request is sniffed from the suffix, so a curl or an older
+    panel still asks for the right work instead of blurring a clip as if it were one still.
+    """
+    calls = []
+
+    def _clip(name, **kwargs):
+        calls.append(("clip", name, kwargs))
+        return {"ok": False, "reason": "no face detected in the clip"}
+
+    def _still(name, **kwargs):
+        calls.append(("still", name, kwargs))
+        return {"ok": False, "reason": "no face detected"}
+
+    monkeypatch.setattr(sheet_routes.face_blur, "blur_video_faces", _clip)
+    monkeypatch.setattr(sheet_routes.face_blur, "blur_image_faces", _still)
+
+    answer = _call({"action": "blur", "file": "h3_character_sheet/clip.mp4", "kind": "video"})
+    assert answer["ok"] is False and "clip" in answer["reason"]
+    assert calls[-1][0] == "clip", "the clip pass ran"
+
+    # No kind given: the suffix decides.
+    _call({"action": "blur", "file": "h3_character_sheet/clip.MP4"})
+    assert calls[-1][0] == "clip", "an upper-case suffix still reads as a clip"
+    _call({"action": "blur", "file": "h3_character_sheet/still.png"})
+    assert calls[-1][0] == "still", "a picture still goes through the picture pass"
+
+
+def test_the_blur_action_says_which_KIND_of_reference_applies():
+    """`applies` is read from the plan by kind, so a clip is reported by its own slot."""
+    payload = {
+        "refs": {
+            "pictures": [{"imageFile": "a.png", "role": "face and hair"}],
+            "videos": [{"videoFile": "b.mp4", "role": "clothing and body"}],
+        },
+        "cells": [{"id": "c", "view": "portrait"}],
+    }
+    answer = _call({"action": "blur", "file": "h3_character_sheet/b.mp4", "kind": "video",
+                    "slot": 0, "spec": payload})
+    assert answer["applies"] is True, "auto blurs the outfit clip of a second person"
+    # The same slot number on a picture is a different reference entirely.
+    answer = _call({"action": "blur", "file": "h3_character_sheet/a.png", "slot": 0, "spec": payload})
+    assert answer["applies"] is False, "the identity picture is left alone by auto"
+
+
+def test_the_plan_report_names_blurred_clips_too():
+    """A cell that gets a blurred clip must say so, or the panel cannot show it before a render."""
+    payload = {
+        "refs": {
+            "pictures": [{"imageFile": "a.png", "role": "face and hair"}],
+            "videos": [{"videoFile": "b.mp4", "role": "clothing and body"}],
+        },
+        "cells": [{"id": "c", "view": "portrait", "frames": 124}],
+    }
+    answer = _call({"action": "plan", "spec": payload})
+    assert answer["ok"] is True
+    blurred = [tag for cell in answer["cells"] for tag in cell["blurred"]]
+    assert "<Video 1>" in blurred, blurred

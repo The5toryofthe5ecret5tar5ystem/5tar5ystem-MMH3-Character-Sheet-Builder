@@ -152,7 +152,8 @@ def test_painting_adds_to_the_detected_faces():
     assert ss.blur_detects_faces(spec)[("picture", 1)] is True, "auto still detects here"
 
 
-def test_a_painted_video_is_reported_rather_than_half_done():
+def test_a_painted_clip_is_blurred_where_it_was_painted():
+    """Painting a clip is the same job: the area is held across the whole thing."""
     spec = ss.parse_sheet_spec(
         {
             "refs": {
@@ -162,7 +163,10 @@ def test_a_painted_video_is_reported_rather_than_half_done():
             "cells": [{"id": "c", "view": "portrait"}],
         }
     )
-    assert ss.blur_face_decisions(spec)[("video", 0)] == "unsupported"
+    decisions = ss.blur_face_decisions(spec)
+    detects = ss.blur_detects_faces(spec)
+    assert decisions[("video", 0)] == "blur"
+    assert detects[("video", 0)] is True, "the painted area is added to the detected faces"
 
 
 # --------------------------------------------------------------------------- #

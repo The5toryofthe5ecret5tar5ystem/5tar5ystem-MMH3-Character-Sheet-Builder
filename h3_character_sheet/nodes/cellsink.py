@@ -64,6 +64,16 @@ class H3SheetCellSink(io.ComfyNode):
                 ),
                 io.String.Input("cell_id", default="cell", tooltip="Which cell of the matrix these frames are."),
                 io.String.Input("name", default="character_sheet", tooltip="Sheet folder name."),
+                io.String.Input(
+                    "board",
+                    default="",
+                    optional=True,
+                    tooltip=(
+                        "Which sheet of a suite this is (see suite.py): the cell lands in "
+                        "name/<board>/ so each board is a complete sheet folder of its own. "
+                        "Empty for a normal run."
+                    ),
+                ),
                 io.Boolean.Input("keep_frames", default=True, tooltip="Write the frames (off = only the final sheet is kept)."),
             ],
             outputs=[io.Image.Output(display_name="images")],
@@ -76,6 +86,7 @@ class H3SheetCellSink(io.ComfyNode):
         sheet_data: str = "",
         cell_id: str = "cell",
         name: str = "character_sheet",
+        board: str = "",
         keep_frames: bool = True,
         clip: Any = None,
     ) -> io.NodeOutput:
@@ -86,7 +97,7 @@ class H3SheetCellSink(io.ComfyNode):
             return io.NodeOutput(images)
 
         spec.name = str(name or spec.name or "character_sheet")
-        store = SheetStore(spec.name).ensure()
+        store = SheetStore(spec.name, board=board or None).ensure()
         cell_key = str(cell_id or "cell")
         cells = {cell.id for cell in spec.enabled_cells}
         frames = flatten_image_batch(images)

@@ -3,13 +3,23 @@
 
 """MiniMax H3 Character Sheet Builder.
 
-One node that renders a whole character sheet and returns it. It owns no model
-code: it expands into **ComfyUI core MiniMax H3 nodes** (one short render per cell)
-and finishes with this pack's own grid node, which picks a frame per cell and
-composites the sheet. Everything that makes a *character sheet* special - the cell
-matrix, the reference roles, the frame picker, the layout - lives in this pack.
+One node that renders a whole character sheet and returns it. It owns no model code: it expands
+into **ComfyUI core MiniMax H3 nodes** and finishes with this pack's own nodes.
 
-Per cell the expansion is exactly the official reference-to-video chain::
+Two expansions, and the payload decides which:
+
+* **one-pass (default)** - ONE ``MiniMaxH3ReferenceToVideo`` call whose prompt describes every
+  panel, at H3's 5-frame minimum, then ``H3SheetOnePassSink`` keeps the sheet frame and slices the
+  panels back out of it. Cheap, and the panels agree by construction; the panels are guidance
+  rather than a promise. See ``one_pass.py``.
+* **per-cell** (``single_pass`` off) - one short render per cell through this pack's own grid node,
+  which picks a frame per cell and composites the sheet. Buys per-cell frames, clips, continuation
+  and a sheet that can be re-composited from its parts.
+
+Everything that makes a *character sheet* special - the cell matrix, the reference roles, the frame
+picker, the layout, the prompt vocabulary - is shared by both and lives in this pack.
+
+Per cell the per-cell expansion is exactly the official reference-to-video chain::
 
     MiniMaxH3ReferenceToVideo(clip, vae, audio_vae, prompt, ref_image_N...)
         -> conditioning + AV latent
@@ -32,6 +42,7 @@ from comfy_api.latest import io
 from comfy_execution.graph_utils import GraphBuilder
 
 from ..face_blur import blur_reference_plan
+from ..one_pass import one_pass_plan
 from ..planner import (
     CELL_GROUP,
     DEFAULT_CELL_SIZE,
@@ -58,6 +69,8 @@ from ..sheet_spec import (
     continuity_plan,
     parse_sheet_spec,
 )
+from ..sheet_store import SheetStore
+from ..suite import suite_boards, suite_lines, suite_manifest
 from ..verbosity import apply_verbose
 
 log = logging.getLogger("H3-Character-Sheet.sheet")
@@ -68,6 +81,11 @@ _MAX_WIDGET_CELLS = 24
 #: Where the exported clips go, under ComfyUI's output directory - the same folder the
 #: frames, the picks and the sheet composite live in, so one sheet is one folder.
 CLIP_FOLDER = "minimax_sheets"
+
+#: The cell id a one-pass render reports on its preview stream. It draws the whole sheet in ONE
+#: clip (see ``one_pass``), so there is no real cell to name - ``whole_sheet`` on the stream tells
+#: the panel that, and this id is only for the log and the report.
+ONE_PASS_CELL_ID = "one-pass"
 
 
 def build_sheet_graph(
@@ -81,6 +99,7 @@ def build_sheet_graph(
     refs: dict[str, list[dict[str, Any]]],
     payload: dict[str, Any],
     name: str,
+    board: str = "",
     keep_frames: bool = True,
     shift_video: float = 12.0,
     shift_audio: float = 3.0,
@@ -301,6 +320,7 @@ def build_sheet_graph(
             sheet_data=json.dumps(payload),
             cell_id=node_id,
             name=str(name),
+            board=str(board or ""),
             keep_frames=bool(keep_frames),
             **({} if cell_clip is None else {"clip": cell_clip}),
         ).out(0)
@@ -325,9 +345,281 @@ def build_sheet_graph(
     return grid.out(0), grid.out(1), grid.out(2), grid.out(3)
 
 
+def build_one_pass_graph(
+    graph: GraphBuilder,
+    *,
+    model: Any,
+    clip: Any,
+    video_vae: Any,
+    audio_vae: Any,
+    plan: dict[str, Any],
+    refs: dict[str, list[dict[str, Any]]],
+    payload: dict[str, Any],
+    name: str,
+    board: str = "",
+    keep_frames: bool = True,
+    shift_video: float = 12.0,
+    shift_audio: float = 3.0,
+    steps: int = DEFAULT_STEPS,
+    sampler_name: str = "res_multistep",
+    scheduler: str = "simple",
+    seed: int = 42,
+    ref_image_size: str = "match",
+    node_id: Any = None,
+    live_preview: bool = True,
+    comfy_preview: bool = False,
+    preview_frames: int = 24,
+    preview_fps: float = 12.0,
+) -> tuple[Any, Any, Any, Any]:
+    """The one-pass expansion: ONE H3 render that has to contain the whole sheet.
+
+    One cell's chain - reference-to-video, sigma shift, guider, sampler, decode - with two
+    differences: the prompt describes every panel at once (``one_pass.one_pass_plan``) and the
+    length is H3's 5-frame minimum. Everything the per-cell pass does per cell is absent because
+    there is only one pass: no order gates, no per-cell saver, no clips, no continuation. Returns
+    the same four outputs as the per-cell expansion, from the one-pass sink - whose second output
+    is the panels sliced back out of the sheet, i.e. exactly what a per-cell run hands over as its
+    ``cells`` batch.
+
+    The references are NOT filtered per framing here (``ref_scope`` is a per-cell policy): a
+    one-pass sheet shows every panel, so it is wired every reference the sheet has.
+
+    The preview plumbing is the per-cell pass's, unchanged: the pack streams its OWN frames to the
+    panel (``live_preview``) and mutes ComfyUI's per-step preview unless ``comfy_preview`` asks for
+    it. A one-pass render is the case where that stream matters most - it is one render, so without
+    it there is nothing on screen until the whole sheet is done - and it is marked
+    ``whole_sheet`` so the panel labels it as the sheet rather than as "cell 1".
+    """
+    if live_preview or not comfy_preview:
+        model = attach_sheet_preview(
+            model,
+            mute=not comfy_preview,
+            stream=live_preview,
+            name=str(name or ""),
+            cells_total=1,
+            node_id=node_id,
+            max_frames=int(preview_frames),
+            fps=float(preview_fps),
+            cell_ids=[ONE_PASS_CELL_ID],
+            whole_sheet=True,
+        )
+
+    shifted_model = graph.node(
+        "MiniMaxH3SigmaShift",
+        id="sigma_shift",
+        model=model,
+        shift_video=float(shift_video),
+        shift_audio=float(shift_audio),
+    ).out(0)
+
+    inputs: dict[str, Any] = {}
+    for item in refs.get("pictures", []):
+        inputs[item["slot"]] = graph.node(
+            "LoadImage", id=f"ref_image_{item.get('slot_id') or item['slot']}", image=item["file"]
+        ).out(0)
+    for item in refs.get("videos", []):
+        video = graph.node(
+            "LoadVideo", id=f"ref_video_src_{item.get('slot_id') or item['slot']}", file=item["file"]
+        ).out(0)
+        components = graph.node(
+            "GetVideoComponents", id=f"ref_video_parts_{item.get('slot_id') or item['slot']}", video=video
+        )
+        inputs[item["slot"]] = components.out(0)
+        inputs[item["audio_slot"]] = components.out(1)
+    for item in refs.get("audios", []):
+        inputs[item["slot"]] = graph.node(
+            "LoadAudio", id=f"ref_audio_{item.get('slot_id') or item['slot']}", audio=item["file"]
+        ).out(0)
+
+    conditioning = graph.node(
+        "MiniMaxH3ReferenceToVideo",
+        id="onepass_ref2va",
+        clip=clip,
+        vae=video_vae,
+        audio_vae=audio_vae,
+        prompt=str(plan.get("prompt") or ""),
+        width=int(plan["width"]),
+        height=int(plan["height"]),
+        length=int(plan["frames"]),
+        ref_image_size=str(ref_image_size or "match"),
+        **inputs,
+    )
+    sampler = graph.node(
+        "KSamplerSelect", id="onepass_sampler", sampler_name=str(sampler_name)
+    ).out(0)
+    sigmas = graph.node(
+        "BasicScheduler",
+        id="onepass_sigmas",
+        model=shifted_model,
+        scheduler=str(scheduler),
+        steps=int(steps),
+        denoise=1.0,
+    ).out(0)
+    guider = graph.node(
+        "BasicGuider", id="onepass_guider", model=shifted_model, conditioning=conditioning.out(0)
+    ).out(0)
+    noise = graph.node("RandomNoise", id="onepass_noise", noise_seed=int(seed)).out(0)
+    sampled = graph.node(
+        "SamplerCustomAdvanced",
+        id="onepass_sample",
+        noise=noise,
+        guider=guider,
+        sampler=sampler,
+        sigmas=sigmas,
+        latent_image=conditioning.out(1),
+    )
+    frames = graph.node(
+        "VAEDecode", id="onepass_decode", samples=sampled.out(1), vae=video_vae
+    ).out(0)
+    sink = graph.node(
+        "H3SheetOnePassSink",
+        id="onepass_sink",
+        images=frames,
+        sheet_data=json.dumps(payload),
+        name=str(name),
+        board=str(board or ""),
+        keep_frames=bool(keep_frames),
+    )
+    return sink.out(0), sink.out(1), sink.out(2), sink.out(3)
+
+
+def build_suite_graph(
+    *,
+    boards: list[Any],
+    model: Any,
+    clip: Any,
+    video_vae: Any,
+    audio_vae: Any,
+    name: str,
+    keep_frames: bool = True,
+    shift_video: float = 12.0,
+    shift_audio: float = 3.0,
+    steps: int = DEFAULT_STEPS,
+    sampler_name: str = "res_multistep",
+    scheduler: str = "simple",
+    cell_size: int | None = None,
+    ref_image_size: str = "1024",
+    ref_scope: str = "sheet",
+    node_id: Any = None,
+) -> tuple[dict[str, Any], tuple[Any, Any, Any, Any], list[str]]:
+    """Build one graph that renders every board of a suite, each into its own folder.
+
+    Returns ``(expand, hero_outputs, lines)``. Each board is built by the SAME builders a single
+    sheet uses - ``build_one_pass_graph`` or ``build_sheet_graph``, whichever the run's mode says -
+    in its OWN ``GraphBuilder``, and the finished graphs are merged. Separate builders are what
+    keeps the boards from sharing nodes: the ids they mint are prefixed per builder, so four boards
+    produce four independent renders rather than four wirings of one.
+
+    The run's quality axis (mode, steps, sampler, seed, resolution, references) is every board's:
+    a suite changes which cells render, never how. What does change per board is the cells, the
+    arrangement and the folder - so a RefMod export can point at any one of them.
+    """
+    lines: list[str] = []
+    merged: dict[str, Any] = {}
+    hero: tuple[Any, Any, Any, Any] | None = None
+
+    # ONE preview wrapper for the whole suite: the wrapper goes on the model every board samples
+    # through, so attaching it per board would stack four step clocks on one model. Built here,
+    # and the boards are then told not to attach their own (live preview off, ComfyUI's stream
+    # kept rather than muted a second time).
+    preview_on = bool(boards and boards[0].spec.render.live_preview)
+    comfy_preview = bool(boards and boards[0].spec.render.comfy_preview)
+    if preview_on or not comfy_preview:
+        model = attach_sheet_preview(
+            model,
+            mute=not comfy_preview,
+            stream=preview_on,
+            name=str(name or ""),
+            cells_total=sum(int(board.cells) for board in boards),
+            node_id=node_id,
+            whole_sheet=True,
+        )
+
+    for board in boards:
+        spec = board.spec
+        refs = reference_plan(spec)
+        spec.notes.extend(blur_reference_plan(spec, refs))
+        spec.notes.append(
+            f"Suite board '{board.id}': {board.label} - {board.cells} cell(s) in the "
+            f"{board.layout} layout, rendered into {name}/{board.folder}/."
+        )
+        payload = grid_payload(spec, name=str(name or spec.name))
+        sub = GraphBuilder()
+        if spec.render.single_pass:
+            outs = build_one_pass_graph(
+                sub,
+                model=model,
+                clip=clip,
+                video_vae=video_vae,
+                audio_vae=audio_vae,
+                plan=one_pass_plan(spec),
+                refs=refs,
+                payload=payload,
+                name=str(name or spec.name),
+                board=board.folder,
+                keep_frames=bool(keep_frames),
+                shift_video=float(shift_video),
+                shift_audio=float(shift_audio),
+                steps=int(steps),
+                sampler_name=str(sampler_name),
+                scheduler=str(scheduler),
+                seed=int(spec.render.seed),
+                ref_image_size=str(ref_image_size),
+                live_preview=False,
+                comfy_preview=True,
+            )
+        else:
+            work_items = cell_work_items(
+                spec, cell_size=cell_size, ref_image_size=ref_image_size, ref_scope=ref_scope
+            )
+            if not work_items:
+                raise ValueError(
+                    f"suite board '{board.id}' has no cells; clear it from the suite or give it "
+                    "a layout with views."
+                )
+            outs = build_sheet_graph(
+                sub,
+                model=model,
+                clip=clip,
+                video_vae=video_vae,
+                audio_vae=audio_vae,
+                work_items=work_items,
+                refs=refs,
+                payload=payload,
+                name=str(name or spec.name),
+                board=board.folder,
+                keep_frames=bool(keep_frames),
+                shift_video=float(shift_video),
+                shift_audio=float(shift_audio),
+                steps=int(steps),
+                sampler_name=str(sampler_name),
+                scheduler=str(scheduler),
+                export_video=bool(spec.render.export_video),
+                live_preview=False,
+                comfy_preview=True,
+            )
+        merged.update(sub.finalize())
+        if hero is None:
+            hero = outs
+        lines.append(
+            f"Suite board '{board.id}': {board.cells} cell(s), "
+            f"{'one render' if spec.render.single_pass else 'per-cell renders'} -> "
+            f"{name}/{board.folder}/"
+        )
+        for line in spec.warnings:
+            lines.append(f"  {board.id}: {line}")
+        log.info(
+            "Character sheet: suite board '%s' - %s cell(s) -> %s/%s/",
+            board.id, board.cells, name, board.folder,
+        )
+
+    if hero is None:  # pragma: no cover - suite_boards() never returns an empty list
+        raise ValueError("suite has no boards to render")
+    return merged, hero, lines
+
+
 class MiniMaxH3CharacterSheet(io.ComfyNode):
     """Render a character sheet from references plus a cell list."""
-
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
@@ -509,6 +801,27 @@ class MiniMaxH3CharacterSheet(io.ComfyNode):
                         "was picked from, and what a finished video edit cuts with."
                     ),
                 ),
+                # Appended last as well (positional widgets_values): the mode is a different
+                # expansion, not a tweak to the per-cell one.
+                io.Boolean.Input(
+                    "single_pass",
+                    default=True,
+                    tooltip=(
+                        "ONE-PASS SHEET (default): render the whole sheet from ONE H3 clip - "
+                        "one prompt describing every panel, H3's 5-frame minimum, the frame the "
+                        "model settles on as the sheet - then slice the panels back out of it at "
+                        "the boxes the prompt asked for, so per-view consumers (the RefMod "
+                        "export above all) work without a second render. About a twentieth of "
+                        "the sampling, and the panels agree by construction: one sampling "
+                        "context means identity, light and palette cannot drift between views. "
+                        "The price: one shared canvas per panel instead of a full render each, "
+                        "no per-cell frame picker, no clips, no continuation, and H3 treats the "
+                        "panel positions as guidance - it can reorder, merge or drop panels. "
+                        "Turn it OFF for the classic per-cell pass, which is what you want when "
+                        "a panel has to be exactly right, when you want each cell's clip, or "
+                        "when the sheet is going to be enlarged."
+                    ),
+                ),
             ],
             hidden=[io.Hidden.unique_id],
             outputs=[
@@ -556,6 +869,7 @@ class MiniMaxH3CharacterSheet(io.ComfyNode):
         ref_scope: str = DEFAULT_REF_SCOPE,
         continuity: str = DEFAULT_CONTINUITY,
         export_video: bool = True,
+        single_pass: bool = True,
     ) -> io.NodeOutput:
         apply_verbose(verbose_logging)
         # A tokenised output name ("%date:hhmmss%") is expanded here, once, so the
@@ -579,6 +893,7 @@ class MiniMaxH3CharacterSheet(io.ComfyNode):
                 "cell_aspect": cell_aspect,
                 "continuity": continuity,
                 "export_video": export_video,
+                "single_pass": single_pass,
             },
         )
         if uses_audio_references(spec) and audio_vae is None:
@@ -589,6 +904,144 @@ class MiniMaxH3CharacterSheet(io.ComfyNode):
         # Continuation is resolved once here, so its notes ("cell c4 has only 5 frames,
         # the hand-over would fill it") land in the same warning list the panel shows.
         continuity_plan(spec, warnings=spec.warnings)
+        if spec.render.single_pass:
+            # One pass: there is no previous cell to hand over from and no per-cell clip to
+            # encode. Say so, rather than leave two knobs looking like they did something.
+            if str(spec.render.continuity or DEFAULT_CONTINUITY).strip().lower() != "off":
+                spec.warnings.append(
+                    "one-pass sheet ignores continuation: it renders the whole sheet in ONE clip, "
+                    "so there is no previous cell to continue from (the knob applies to the "
+                    "per-cell pass)."
+                )
+            if spec.render.export_video:
+                spec.notes.append(
+                    "one-pass sheet writes no clips - each cell's clip comes from the per-cell "
+                    "pass (export clips)."
+                )
+
+        if spec.render.suite:
+            # A SUITE (see suite.py): several sheets for one character - a hero sheet, an
+            # expression board, the detail crops - rendered by one queue, each into its own folder
+            # under the run name. This run's own cells and arrangement are ignored on purpose:
+            # every board carries its own, and a suite that also rendered "the sheet you had"
+            # would be a fifth render nobody asked for.
+            boards, suite_warnings = suite_boards(spec)
+            spec.warnings.extend(suite_warnings)
+            for line in suite_warnings:
+                log.warning("Character sheet: %s", line)
+            if not boards:
+                raise ValueError(
+                    "Suite has no renderable board. Pick the boards in the preset "
+                    "(render.suite) - each names one of the panel's layout presets."
+                )
+            expand, (sheet, cells, report, sheet_dir), board_lines = build_suite_graph(
+                boards=boards,
+                model=model,
+                clip=clip,
+                video_vae=video_vae,
+                audio_vae=audio_vae,
+                name=str(sheet_name or spec.name),
+                keep_frames=bool(keep_frames),
+                shift_video=float(shift_video),
+                shift_audio=float(shift_audio),
+                steps=int(steps),
+                sampler_name=str(sampler_name),
+                scheduler=str(scheduler),
+                cell_size=int(cell_size) if cell_size else None,
+                ref_image_size=str(ref_image_size),
+                ref_scope=str(ref_scope),
+            )
+            # The suite's own record, in the run folder beside the boards: what rendered, where each
+            # board landed and how many cells it built. The panel lists the boards as ordinary
+            # sheets (each folder is a complete sheet), and this is what says they belong together.
+            store = SheetStore(str(sheet_name or spec.name)).ensure()
+            manifest = store.read_manifest()
+            manifest["suite"] = suite_manifest(boards, name=store.name)
+            store.write_manifest(manifest)
+            for line in suite_lines(boards, name=store.name) + board_lines:
+                log.info("Character sheet: %s", line)
+            log.info(
+                "Character sheet: suite - %s board(s), %s cell(s) in total; each board is a "
+                "complete sheet folder under %s.",
+                len(boards), sum(board.cells for board in boards), store.dir,
+            )
+            return io.NodeOutput(sheet, cells, report, sheet_dir, expand=expand)
+
+        refs = reference_plan(spec)
+        # Reference hygiene before anything is wired: a picture the prompt demoted to
+        # "must not supply a face" is handed over with that face blurred out, so the
+        # instruction and the pixels agree. Best effort - a failure keeps the original.
+        blur_lines = blur_reference_plan(spec, refs)
+
+        # What the node knows and the compositor cannot: which references were blurred, and
+        # whether the streams are on. Collected BEFORE the payload is serialised, because the
+        # grid and the one-pass sink both write report.txt from this payload - assembling a
+        # second report here is what used to leave the node's `report` output holding a
+        # Python list repr instead of the report.
+        preview_lines: list[str] = []
+        note_lines: list[str] = list(blur_lines)
+        if spec.render.single_pass:
+            note_lines.append(
+                "One-pass sheet: one H3 render for the whole sheet - one clip, so the panel's live "
+                "stream shows the whole sheet being denoised instead of one cell of it."
+            )
+        # The preview switches mean the same thing in both passes, so they are reported the same
+        # way and only the subject differs: one pass streams the sheet, a render streams each cell.
+        subject = "the sheet" if spec.render.single_pass else "each cell"
+        if spec.render.live_preview:
+            preview_lines.append(
+                f"Live preview: on - clips of up to {int(spec.render.preview_frames)} frame(s) "
+                f"at {float(spec.render.preview_fps):g}fps to the panel ('{PREVIEW_EVENT}' events), "
+                f"as much of {subject} as the decoder's CPU budget affords."
+            )
+        else:
+            preview_lines.append("Live preview: off (render.livePreview).")
+        preview_lines.append(
+            "ComfyUI's own preview: kept (render.comfyPreview)." if spec.render.comfy_preview
+            else "ComfyUI's own preview: muted - the panel shows the sheet and this stream."
+        )
+        note_lines.extend(preview_lines)
+        spec.notes.extend(note_lines)
+        for line in note_lines:
+            log.info("Character sheet: %s", line)
+
+        payload = grid_payload(spec, name=sheet_name)
+        graph = GraphBuilder()
+        if spec.render.single_pass:
+            # The one-pass sheet - the default: the whole sheet from one H3 clip (see one_pass).
+            # Built instead of the per-cell expansion, not on top of it - there is nothing
+            # per-cell here, which is exactly what makes it cheap. The sink slices the panels back
+            # out, so the `cells` output still carries one image per panel.
+            plan = one_pass_plan(spec)
+            sheet, cells, report, sheet_dir = build_one_pass_graph(
+                graph,
+                model=model,
+                clip=clip,
+                video_vae=video_vae,
+                audio_vae=audio_vae,
+                plan=plan,
+                refs=refs,
+                payload=payload,
+                name=str(sheet_name or spec.name),
+                keep_frames=bool(keep_frames),
+                shift_video=float(shift_video),
+                shift_audio=float(shift_audio),
+                steps=int(steps),
+                sampler_name=str(sampler_name),
+                scheduler=str(scheduler),
+                seed=int(spec.render.seed),
+                ref_image_size=str(ref_image_size),
+                live_preview=bool(spec.render.live_preview),
+                comfy_preview=bool(spec.render.comfy_preview),
+                preview_frames=int(spec.render.preview_frames),
+                preview_fps=float(spec.render.preview_fps),
+            )
+            log.info(
+                "Character sheet: one-pass sheet - %s panel(s) in one %sx%s render, %s frame(s).",
+                len(plan.get("panels") or []), plan.get("width"), plan.get("height"),
+                plan.get("frames"),
+            )
+            return io.NodeOutput(sheet, cells, report, sheet_dir, expand=graph.finalize())
 
         work_items = cell_work_items(
             spec, cell_size=cell_size, ref_image_size=ref_image_size, ref_scope=ref_scope
@@ -598,13 +1051,6 @@ class MiniMaxH3CharacterSheet(io.ComfyNode):
                 "Character sheet has no cells. Add cells in the Character Sheet panel "
                 "(Views / Poses / Expressions) or pass them in sheet_data."
             )
-        refs = reference_plan(spec)
-        # Reference hygiene before anything is wired: a picture the prompt demoted to
-        # "must not supply a face" is handed over with that face blurred out, so the
-        # instruction and the pixels agree. Best effort - a failure keeps the original.
-        blur_lines = blur_reference_plan(spec, refs)
-        payload = grid_payload(spec, name=sheet_name)
-        graph = GraphBuilder()
         sheet, cells, report, sheet_dir = build_sheet_graph(
             graph,
             model=model,
@@ -628,28 +1074,6 @@ class MiniMaxH3CharacterSheet(io.ComfyNode):
             preview_fps=float(spec.render.preview_fps),
         )
         for line in work_summary(spec, work_items):
-            log.info("Character sheet: %s", line)
-        for line in blur_lines:
-            log.info("Character sheet: %s", line)
-        if blur_lines:
-            report = f"{report}\n\n" + "\n".join(blur_lines)
-        # Say where to look while it runs: the panel's own preview is the only place a sheet
-        # render is visible before it finishes, and both halves are switches.
-        preview_lines = []
-        if spec.render.live_preview:
-            preview_lines.append(
-                f"Live preview: on - clips of up to {int(spec.render.preview_frames)} frame(s) "
-                f"at {float(spec.render.preview_fps):g}fps to the panel ('{PREVIEW_EVENT}' events), "
-                "as much of each cell as the decoder's CPU budget affords."
-            )
-        else:
-            preview_lines.append("Live preview: off (render.livePreview).")
-        preview_lines.append(
-            "ComfyUI's own preview: kept (render.comfyPreview)." if spec.render.comfy_preview
-            else "ComfyUI's own preview: muted - the panel shows the sheet and this stream."
-        )
-        report = f"{report}\n\n" + "\n".join(preview_lines)
-        for line in preview_lines:
             log.info("Character sheet: %s", line)
         return io.NodeOutput(sheet, cells, report, sheet_dir, expand=graph.finalize())
 
@@ -689,6 +1113,10 @@ def _spec_from_widgets(sheet_data: Any, widgets: dict[str, Any]):
     # Clip export is a render policy too: the widget wins over the payload.
     if widgets.get("export_video") is not None:
         spec.render.export_video = bool(widgets["export_video"])
+    # Which expansion runs is a render policy as well, so the widget wins here too: the panel
+    # writes the knob, and a headless run can say it in sheet_data.
+    if widgets.get("single_pass") is not None:
+        spec.render.single_pass = bool(widgets["single_pass"])
     if len(spec.cells) > _MAX_WIDGET_CELLS:
         spec.cells = spec.cells[:_MAX_WIDGET_CELLS]
     return spec
@@ -719,5 +1147,6 @@ __all__ = [
     "NODE_CLASS_MAPPINGS",
     "NODE_DISPLAY_NAME_MAPPINGS",
     "align_cell_size",
+    "build_one_pass_graph",
     "build_sheet_graph",
 ]

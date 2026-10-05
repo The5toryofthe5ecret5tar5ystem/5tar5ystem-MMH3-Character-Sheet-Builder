@@ -34,6 +34,7 @@ if not __package__:
 else:
     from .nodes.cellsink import H3SheetCellSink
     from .nodes.grid import H3SheetGrid
+    from .nodes.onepass import H3SheetOnePassSink
     from .nodes.ordergate import H3SheetOrderGate
     from .nodes.refmod import H3SheetRefMod
     from .nodes.sheet import MiniMaxH3CharacterSheet
@@ -44,6 +45,12 @@ else:
         # Internal: inserted by the sheet node between each cell and the grid so
         # frames land on disk (and in the panel) as each cell finishes.
         "H3SheetCellSink": H3SheetCellSink,
+        # Internal: the one-pass sheet's sink - one H3 render for the whole sheet, whose panels
+        # are sliced back out of it (see one_pass / nodes.onepass). This is the default path.
+        "H3SheetOnePassSink": H3SheetOnePassSink,
+        # The type this node had while the mode was called the draft pass. A prompt queued before
+        # the rename still names it, so the alias stays - it is the same class.
+        "H3SheetDraftSink": H3SheetOnePassSink,
         # Internal: sequences the cells so they render in list order.
         "H3SheetOrderGate": H3SheetOrderGate,
         # Optional: needs ComfyUI-MiniMaxH3Mod installed to actually run.
@@ -54,6 +61,7 @@ else:
         "MiniMaxH3CharacterSheet": "MiniMax H3 Character Sheet Builder",
         "H3SheetGrid": "H3 Character Sheet Grid",
         "H3SheetCellSink": "H3 Sheet Cell Saver (internal)",
+        "H3SheetOnePassSink": "H3 Sheet One-Pass Sink (internal)",
         "H3SheetOrderGate": "H3 Sheet Order Gate (internal)",
         "H3SheetRefMod": "H3 Sheet → RefMod",
     }

@@ -145,8 +145,9 @@ assert.ok(wiring.includes('body.append("subfolder", "h3_character_sheet")'),
     assert.ok(build, "the panel declares its build tag");
     assert.ok(wiring.includes(`?boot=${build[1]}`),
         `the import must carry the declared build (${build?.[1]}), not an older one`);
-    assert.ok(core.includes("className: \"mmx-muted mmx-build\""),
-        "and the header shows it, so a stale tab is visible");
+    assert.ok(core.includes("title: `Panel build ${PANEL_BUILD}"),
+        "and the header names it in its tooltip, so a stale tab is visible without a build string"
+        + " sitting next to the panel's title");
 }
 // The node's size is the USER's. The panel used to measure itself and snap the node to the
 // height its content wanted, which threw that size away on every page refresh (reproduced live:
@@ -219,6 +220,18 @@ assert.ok(!wiring.includes("PREVIEW_CHECK_MS"),
     "and NOT throttled: a late preview must not be drawn full size for even a frame or two");
 assert.ok(wiring.includes("onDrawBackground?.apply(this, arguments)"),
     "and it chains the frontend's own draw handler instead of replacing it");
+// A node dragged smaller than the panel can lay out would stack its two columns and scroll, so
+// the drag is clamped at the minimum - and only there: this is not the node resizing itself.
+assert.ok(wiring.includes("NODE_MIN_WIDTH") && wiring.includes("NODE_MIN_HEIGHT"),
+    "the wiring knows the panel's minimum size");
+assert.ok(wiring.includes("const clampNodeSize = (node) => {"),
+    "the clamp lives in one function");
+assert.ok(/nodeType\.prototype\.onResize = function \(\) \{\n\s*const result = onResize\?\.apply\(this, arguments\);\n\s*if \(this\._mmxSheet\) clampNodeSize\(this\);/.test(wiring),
+    "and runs on the user's own resize, chaining the frontend's handler");
+assert.ok(/node\.size = \[Math\.max\(width, NODE_MIN_WIDTH\), Math\.max\(height, NODE_MIN_HEIGHT\)\]/.test(wiring),
+    "pushing a too-small size back up, never shrinking one");
+assert.ok(!/scheduleFit|panelFitHeight/.test(wiring),
+    "nothing fits the node to its content: the clamp is the only size rule in the pack");
 assert.ok(wiring.includes("stopPreviewKeeper(this)"),
     "and the timer goes with the node (onRemoved), or it keeps a detached node alive");
 assert.ok(wiring.includes("document.hidden"),

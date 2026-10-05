@@ -237,6 +237,44 @@ VIEWS: tuple[SheetOption, ...] = (
         "all inside the frame, standing straight with the feet together and pointing "
         "toward the camera. No head and no face in shot.",
     ),
+    SheetOption(
+        "mouth",
+        "Mouth (close up)",
+        "Close-up of the mouth and chin only: lips, teeth if they show, and the chin "
+        "inside the frame, head level and facing the camera. The eyes are out of shot, so "
+        "no eye contact with the viewer is visible - this is the framing an expression is "
+        "read from.",
+    ),
+    SheetOption(
+        "feet",
+        "Feet (close up)",
+        "Close-up of both feet from the ankle down: the footwear if any, the toes and "
+        "the ankles inside the frame, feet together on the ground and pointing toward "
+        "the camera. No legs above the ankle, no face.",
+    ),
+    # --- the documented-but-explicit crops: the same idea for what an adult sheet also
+    # records. Framing only, in the same voice as every other view here - a sheet is a
+    # reference, so the prompt says where the camera is, not what to feel.
+    SheetOption(
+        "breasts",
+        "Breasts (close up)",
+        "Framed on the chest: both breasts inside the frame, straight on and fully "
+        "visible, nipples in shot, the collarbone above the frame. No face in shot.",
+    ),
+    SheetOption(
+        "groin",
+        "Groin (close up)",
+        "Framed on the groin and the top of the thighs: the genital area inside the "
+        "frame, straight on with the legs slightly apart, the waist above the frame. "
+        "No face in shot.",
+    ),
+    SheetOption(
+        "butt",
+        "Butt (close up, from behind)",
+        "Framed on the buttocks seen from directly behind at hip height: both cheeks "
+        "inside the frame, the lower back above the frame and the thighs below it. No "
+        "face in shot.",
+    ),
 )
 
 #: How far the camera is from the subject for each view, in three steps. Latent
@@ -256,6 +294,13 @@ FRAMING_DISTANCES: dict[str, str] = {
     "eyes": "close",
     "hands": "close",
     "legs": "close",
+    # The detail crops added for the closeup boards: all close, and none of them is the
+    # distance of the framing they were cut from (see the note above).
+    "mouth": "close",
+    "feet": "close",
+    "breasts": "close",
+    "groin": "close",
+    "butt": "close",
     "portrait": "medium",
     "front": "full",
     "three-quarter": "full",
@@ -273,14 +318,21 @@ POSE_FRAMINGS: tuple[str, ...] = (
     "high-angle", "low-angle", "over-shoulder",
 )
 
-#: Framings where the face is the subject: the expression is always stated.
-FACE_FRAMINGS: tuple[str, ...] = ("face", "portrait", "face-profile", "eyes")
+#: Framings where the face is the subject: the expression is always stated. The mouth crop
+#: counts: the expression IS the subject there, which is what a mouth board is for.
+FACE_FRAMINGS: tuple[str, ...] = ("face", "portrait", "face-profile", "eyes", "mouth")
 
 #: Framings seen from the side, where an expression only reads in profile.
 PROFILE_FRAMINGS: tuple[str, ...] = ("profile", "face-profile")
 
-#: Framings nobody can see a face in - an expression there would be a lie.
-NO_FACE_FRAMINGS: tuple[str, ...] = ("back", "three-quarter-back", "head-back", "hands", "legs")
+#: Framings nobody can see a face in - an expression there would be a lie. The body crops
+#: belong here for the same reason the hands and legs do: there is no mouth in a chest or
+#: groin close-up, so an expression option must not add a line about one. The mouth crop is
+#: deliberately NOT here - it is the framing an expression is READ from.
+NO_FACE_FRAMINGS: tuple[str, ...] = (
+    "back", "three-quarter-back", "head-back", "hands", "legs",
+    "feet", "breasts", "groin", "butt",
+)
 
 #: The framings whose own frame text says the subject is NOT looking at the viewer (a
 #: side view, a back view). Read from :data:`VIEWS` so the two can never drift apart: an
@@ -325,6 +377,14 @@ VIEW_VARIANTS: dict[str, str] = {
     "head-back": "single",
     "hands": "single",
     "legs": "single",
+    # The mouth crop carries an expression (that is what a mouth board is for); the feet and
+    # the body crops look the same whatever the face is doing, so multiplying them by an
+    # expression would only spend renders.
+    "mouth": "expression",
+    "feet": "single",
+    "breasts": "single",
+    "groin": "single",
+    "butt": "single",
 }
 
 
@@ -448,6 +508,18 @@ EXPRESSIONS: tuple[SheetOption, ...] = (
         "At the peak: eyes squeezed shut or rolled back, brows drawn up and together, "
         "mouth open wide in a gasp, jaw tense, whole face flushed and strained, neck "
         "cords visible.",
+    ),
+    SheetOption(
+        "tongue-out",
+        "Tongue out",
+        "Mouth open with the tongue out and the lips relaxed, chin lifted slightly, "
+        "eyes open and looking at the camera.",
+    ),
+    SheetOption(
+        "ahego",
+        "Ahego (eyes rolled up, tongue out)",
+        "Mouth wide open with the tongue out and the lips slack, cheeks flushed, brows "
+        "raised. The eyes roll up so the pupils are almost hidden when they are in frame.",
     ),
 )
 
@@ -599,9 +671,13 @@ DEFAULT_STEPS = 8
 
 DEFAULT_BLUR_MODE = "auto"
 
-#: Only pictures are blurred: a reference video would need per-frame detection and a
-#: re-encode, so an explicit ``on`` there is reported instead of half-done.
-BLUR_KINDS = ("picture",)
+#: What a reference can have removed from it. A picture is blurred in one pass; a reference
+#: clip is blurred frame by frame (``face_blur.blur_video_faces`` - detection is sampled and
+#: tracked, and the derived clip keeps its audio track); a sound reference cannot be
+#: *blurred* at all, so it is MUTED instead (``face_blur.mute_audio`` - the same length and
+#: channels with no voice in them), and painting one is reported as unsupported because a
+#: voice has no pixels to paint on.
+BLUR_KINDS = ("picture", "video", "audio")
 
 #: Tools the panel can paint with, and the limits of what a payload may carry.
 #: ``brush`` is a freehand stroke of a given radius; ``lasso`` is a closed outline filled
@@ -626,6 +702,50 @@ DEFAULT_BLUR_SCOPE = "hair"
 #: and nothing else - exporting it at a "nicer" rate would only change playback speed
 #: and drift against its own soundtrack.
 CLIP_FPS = 24.0
+
+# --------------------------------------------------------------------------- #
+# the one-pass sheet (the pack's primary render - see ``one_pass.py``)
+# --------------------------------------------------------------------------- #
+#: A one-pass render asks H3 for ONE clip that contains the whole sheet, instead of one clip
+#: per cell. 5 frames is H3's shortest grid and the cheapest thing it can sample, and a sheet
+#: of five cells sampled that way is ~110 frames of sampling against 5. The frames nobody
+#: keeps still cost almost nothing, so they are saved.
+ONE_PASS_FRAMES = 5
+#: Both edges of a one-pass canvas snap UP to this grid. H3 works on a 16px VAE grid and the
+#: pack composites on 16 (``sheet_layout.CANVAS_ALIGN``); a one-pass render is a single image
+#: rather than a composite, so it snaps to the coarser 32 - the grid the published H3 sheet
+#: workflows use - which keeps the panel count from landing on fractional tokens.
+ONE_PASS_ALIGN = 32
+#: Guidance ceiling for a one-pass canvas nobody chose deliberately. A one-pass render's cost IS
+#: its canvas - one clip, no second context to amortise it over - and 3.6 MP is about the biggest
+#: canvas the published H3 single-pass sheet workflows use (2816x1280). A canvas ABOVE this that
+#: came from the resolution control is honoured as-is (that is the user's choice); one that came
+#: from a hand-typed size is scaled down to fit, aspect preserved.
+ONE_PASS_MAX_PIXELS = 3_600_000
+#: Frame of the clip the sheet is taken from. H3 samples its 5-frame minimum as one moment, so
+#: the first frame is the one to keep - and the other four stay on disk, so a change of mind
+#: about the frame is a re-read, never a re-render.
+ONE_PASS_SHEET_FRAME = 0
+
+#: How many sheets one suite may render. Each is its own H3 render (or its own set of them), so
+#: this is a real cost ceiling, not a taste call: four is the RefMod suite and the most a bundle
+#: needs before its views start crowding the reference tokens.
+MAX_SUITE_BOARDS = 8
+
+#: The resolution control: ``(key, label, sheet short edge, cell short edge)``.
+#:
+#: One choice, two paired sizes. The sheet short edge is the canvas a one-pass render draws and
+#: the composite is built on; the cell short edge is what a per-cell render uses (and is unused by
+#: the one-pass path). Both edges land on the 32px grid the one-pass render snaps to, so 1080p is
+#: 1088 and 4K is 2176: the names are the class of display, not an exact pixel count (a 3:2 sheet
+#: at a 1440 short edge is 2160x1440 whatever you call it).
+RESOLUTION_CHOICES: tuple[tuple[str, str, int, int], ...] = (
+    ("1080p", "1080p", 1088, 1024),
+    ("1440p", "1440p", 1440, 1024),
+    ("4k", "4K", 2176, 2048),
+)
+RESOLUTION_KEYS = tuple(choice[0] for choice in RESOLUTION_CHOICES)
+RESOLUTION_LABELS = {choice[0]: choice[1] for choice in RESOLUTION_CHOICES}
 
 _ASPECTS = {
     "1:1": 1.0,
@@ -706,6 +826,11 @@ class SheetCell:
     pick_index: int | None = None
     aspect: str = ""
     enabled: bool = True
+    #: Which reference supplies THIS cell's likeness, as ``"<group>:<slot>"`` (``"pictures:1"``
+    #: = the second picture). Empty means "whoever claims the face", which is the run-wide
+    #: answer. It is the per-panel half of the sheet: the ticks build the default cross
+    #: product, and a panel can then take its face from another picture.
+    face_ref: str = ""
     place: dict[str, int] = field(default_factory=dict)
     #: Latent continuation for this cell: ``inherit`` (the render setting), ``on`` or
     #: ``off``. The first cell of a sheet never continues - there is nothing before it.
@@ -802,10 +927,33 @@ class SheetRenderSpec:
     #: cell you are looking at is re-rolled on its own, and the sheet is then recomposed from disk
     #: (see the compose route). Empty means the whole sheet, which is what a normal render is.
     only_cells: list[str] = field(default_factory=list)
+    #: One-pass sheet (the DEFAULT): ONE H3 render for the whole sheet instead of one per cell -
+    #: the panels are asked for in a single prompt over the sheet's own canvas, the frame the model
+    #: settles on becomes the sheet, and the panels are sliced back out of it so per-view consumers
+    #: (RefMod above all) still work. Roughly a twentieth of the sampling and consistent by
+    #: construction (one sampling context, so the panels cannot drift apart), at the price of
+    #: per-cell frames, clips, motion and the frame picker. Off = the classic per-cell pass
+    #: (see ``one_pass.py`` vs ``nodes/sheet.py``).
+    single_pass: bool = True
+    #: The resolution control's choice - ``""``, ``"1080p"``, ``"1440p"`` or ``"4k"`` (see
+    #: :data:`RESOLUTION_CHOICES`). It records that a size was CHOSEN, which is what lets a
+    #: one-pass render be bigger than :data:`ONE_PASS_MAX_PIXELS` without being scaled: the two
+    #: paired widget values travel with the payload, and this is the flag that says they are a
+    #: decision rather than a leftover.
+    resolution: str = ""
     #: Which recommended preset these settings came from (see ``presets.py``). A record, not
     #: a lock: applied presets write their values, and editing a knob afterwards leaves the
     #: id in place so a sheet can still say how it started.
     preset: str = ""
+    #: The LAYOUT preset this sheet's cells came from, recorded on its own axis: a layout and a
+    #: quality preset are separate decisions, so applying one must not erase where the other
+    #: started from. Empty means the cells were hand-authored (or the layout was cleared).
+    layout_preset: str = ""
+    #: SUITE: the layout presets to render, in order, each into its own sheet folder under this
+    #: run's name. Non-empty means this run is a suite (see ``suite.py``) and the single sheet's
+    #: own cells/layout are ignored - every board carries its own. This is what makes "a full
+    #: suite of sheets for RefMod" one queue instead of four.
+    suite: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -823,6 +971,11 @@ class SheetSpec:
     layout: SheetLayoutSpec = field(default_factory=SheetLayoutSpec)
     render: SheetRenderSpec = field(default_factory=SheetRenderSpec)
     warnings: list[str] = field(default_factory=list)
+    #: Lines the builder node knows and the compositor cannot compute - which references
+    #: were blurred, whether the panel's live preview is on, that the run was a draft.
+    #: They travel in the payload so every writer of ``report.txt`` appends the same text,
+    #: instead of the node composing a second report of its own.
+    notes: list[str] = field(default_factory=list)
 
     @property
     def pictures(self) -> list[SheetRef]:
@@ -858,6 +1011,7 @@ class SheetSpec:
                 "expressions": list(self.build.get("expressions") or []),
             },
             "warnings": list(self.warnings),
+            "notes": [str(note) for note in self.notes],
             "refs": {
                 "pictures": [
                     {
@@ -909,6 +1063,11 @@ class SheetSpec:
                 # cells were chained or independent.
                 "continuity": self.render.continuity,
                 "exportVideo": bool(self.render.export_video),
+                # The mode, not a preference: a one-pass run produces a different graph, so a
+                # saved workflow has to say which of the two it was. Written even at the default
+                # so a workflow that turned it off says so.
+                "singlePass": bool(self.render.single_pass),
+                "resolution": str(self.render.resolution),
                 # Round-trips so a run's own preview choice comes back with its settings.
                 "comfyPreview": bool(self.render.comfy_preview),
                 "livePreview": bool(self.render.live_preview),
@@ -916,6 +1075,8 @@ class SheetSpec:
                 "previewFps": float(self.render.preview_fps),
                 "onlyCells": list(self.render.only_cells),
                 "preset": self.render.preset,
+                "layoutPreset": self.render.layout_preset,
+                "suite": list(self.render.suite),
             },
             "cells": [
                 {
@@ -933,6 +1094,9 @@ class SheetSpec:
                     "aspect": c.aspect,
                     "place": dict(c.place),
                     "continuity": c.continuity,
+                    # The panel's own face source rides the manifest too: a saved spec has to
+                    # round-trip as the sheet that was run, panel choices included.
+                    **({"faceRef": c.face_ref} if c.face_ref else {}),
                 }
                 for c in self.cells
             ],
@@ -1143,6 +1307,49 @@ def _parse_cell_aspect(render_raw: dict[str, Any], warnings: list[str]) -> str:
     return value
 
 
+#: What people call the same three sizes: the display short edge, the display width, or the key
+#: the control uses. Anything else leaves the flag off, and the canvas then follows the widgets
+#: (or the guidance ceiling).
+_RESOLUTION_ALIASES: dict[str, str] = {
+    "1080p": "1080p", "1080": "1080p", "1920": "1080p", "fhd": "1080p",
+    "1440p": "1440p", "1440": "1440p", "2560": "1440p", "qhd": "1440p", "2k": "1440p",
+    "4k": "4k", "2160": "4k", "2160p": "4k", "3840": "4k", "uhd": "4k",
+}
+
+
+def _parse_resolution(render_raw: dict[str, Any]) -> str:
+    """The resolution control's choice - ``""`` means the size was set by hand.
+
+    The flag matters beyond bookkeeping: a chosen size is honoured as-is even when it is bigger
+    than :data:`ONE_PASS_MAX_PIXELS`, because it is a decision rather than a leftover (see
+    ``one_pass.one_pass_budget``).
+    """
+    key = str(render_raw.get("resolution") or "").strip().lower()
+    return _RESOLUTION_ALIASES.get(key, "")
+
+
+def _parse_suite(render_raw: dict[str, Any]) -> list[str]:
+    """The suite's board ids, in order (``render.suite``: a list, or a comma-separated run).
+
+    A board that is not a layout preset is dropped here rather than failing the run: the suite is
+    a convenience, and ``suite.py`` reports what it could not resolve instead of rendering a board
+    that would have been identical to this sheet.
+    """
+    raw = render_raw.get("suite")
+    if isinstance(raw, str):
+        items: list[Any] = [part for part in raw.replace(";", ",").split(",")]
+    elif isinstance(raw, (list, tuple)):
+        items = list(raw)
+    else:
+        return []
+    ordered: list[str] = []
+    for item in items:
+        key = str(item or "").strip().lower()
+        if key and key not in ordered:
+            ordered.append(key)
+    return ordered[:MAX_SUITE_BOARDS]
+
+
 def _parse_blur_scope(render_raw: dict[str, Any], warnings: list[str]) -> str:
     """How much of the head a blur covers, falling back to the default."""
     value = str(
@@ -1265,6 +1472,16 @@ def _parse_cells(raw: Any, render: SheetRenderSpec, warnings: list[str]) -> list
             )
             expression = "neutral"
 
+        # "<group>:<slot>", the way the payload writes it. Validated against the refs when the
+        # cell prompt is built (see cell_face_reference): a cell can outlive a deleted reference,
+        # and that must not break the run.
+        face_ref = str(item.get("faceRef", item.get("face_ref")) or "").strip()
+        if face_ref and ":" not in face_ref:
+            warnings.append(
+                f"cell {cell_id}: face reference {face_ref!r} is not '<group>:<slot>'; ignored."
+            )
+            face_ref = ""
+
         pick = str(item.get("pick") or "auto").strip().lower()
         pick_index = item.get("pickIndex", item.get("pick_index"))
         if pick not in PICKS:
@@ -1317,6 +1534,7 @@ def _parse_cells(raw: Any, render: SheetRenderSpec, warnings: list[str]) -> list
                 ),
                 aspect=str(item.get("aspect") or "").strip(),
                 enabled=_as_bool(item.get("enabled"), True),
+                face_ref=face_ref,
                 place=place,
                 continuity=_parse_cell_continuity(item, cell_id, warnings),
             )
@@ -1417,6 +1635,19 @@ def parse_sheet_spec(raw: Any) -> SheetSpec:
         export_video=_as_bool(
             render_raw.get("exportVideo", render_raw.get("export_video")), True
         ),
+        single_pass=_as_bool(
+            render_raw.get(
+                "singlePass",
+                render_raw.get(
+                    "single_pass",
+                    # The mode's first name, kept as an alias: payloads and notes written while
+                    # it was called the draft pass still say what they mean.
+                    render_raw.get("draft", render_raw.get("draftSheet", render_raw.get("draft_sheet"))),
+                ),
+            ),
+            True,
+        ),
+        resolution=_parse_resolution(render_raw),
         comfy_preview=_as_bool(
             render_raw.get("comfyPreview", render_raw.get("comfy_preview")), False
         ),
@@ -1431,6 +1662,10 @@ def parse_sheet_spec(raw: Any) -> SheetSpec:
         ))),
         only_cells=_parse_only_cells(render_raw),
         preset=str(render_raw.get("preset") or "").strip(),
+        layout_preset=str(
+            render_raw.get("layoutPreset", render_raw.get("layout_preset")) or ""
+        ).strip(),
+        suite=_parse_suite(render_raw),
     )
     sheet_raw = data.get("sheet") if isinstance(data.get("sheet"), dict) else {}
     layout_name = str(sheet_raw.get("layout") or "hero-left").strip().lower()
@@ -1475,6 +1710,7 @@ def parse_sheet_spec(raw: Any) -> SheetSpec:
     # Warnings raised by whoever resolved this payload (the sheet node's fallback
     # notices, for example) come first: they explain the cells that follow.
     inherited = [str(item).strip() for item in (data.get("warnings") or []) if str(item).strip()]
+    notes = [str(item).strip() for item in (data.get("notes") or []) if str(item).strip()]
 
     name = _clean_id(data.get("name"), "character_sheet")
     spec = SheetSpec(
@@ -1488,6 +1724,7 @@ def parse_sheet_spec(raw: Any) -> SheetSpec:
         layout=layout,
         render=render,
         warnings=inherited[:20] + warnings,
+        notes=notes[:40],
     )
     # The render scope decides which cells this run touches; it has to be applied before anyone
     # asks for `enabled_cells` (the work items, the saver, the grid), so it happens here.
@@ -1679,6 +1916,16 @@ ATTRIBUTES_HIDDEN_BY_VIEW: dict[str, tuple[str, ...]] = {
     # The same head, from the side: same ceiling on what the cell can contain.
     "face-profile": _HEAD_ONLY,
     "eyes": _HEAD_ONLY,
+    # The mouth crop is a head-only framing too (nothing below the collar is in frame), and
+    # it is the one head crop where the eyes are out of shot.
+    "mouth": _HEAD_ONLY + ("eyes",),
+    # A feet crop shows shoes, legwear and - at most - the hem of the clothing.
+    "feet": ("face", "eyes", "glasses", "hair", "body", "breasts", "intimate"),
+    # The body crops: no face in any of them, and what the framing cannot contain is
+    # dropped so a reference's claim about it does not get argued with.
+    "breasts": ("face", "eyes", "glasses", "body", "legwear", "shoes"),
+    "groin": ("face", "eyes", "glasses", "hair", "shoes"),
+    "butt": ("face", "eyes", "glasses", "shoes"),
     "portrait": ("intimate", "legwear", "shoes"),
     # A crop of the hands shows no body, but the sleeves are in frame - so clothing stays.
     "hands": ("body", "breasts", "intimate"),
@@ -1686,6 +1933,20 @@ ATTRIBUTES_HIDDEN_BY_VIEW: dict[str, tuple[str, ...]] = {
     # identity reference wired even when its only claim is the face.
     "legs": ("face", "eyes", "glasses"),
 }
+
+#: The angles a front-facing reference picture CANNOT show, and how to name them. A side or
+#: back view is the one place the model has to invent part of the head - and the second
+#: reference (usually a full-body outfit photo of somebody with their own hair) is right
+#: there with a plausible answer. Measured: a profile panel came back wearing the OTHER
+#: reference's dark hair while every view the reference covers kept the braids.
+_HAIR_HOLDS_BY_VIEW: dict[str, str] = {
+    "profile": "seen from the side",
+    "face-profile": "seen from the side",
+    "three-quarter-back": "seen from behind and to one side",
+    "back": "seen from behind",
+    "head-back": "seen from behind, the back of the head",
+}
+
 
 #: Attributes that decide *who* the person is. A reference that claims none of them
 #: is not an identity source no matter how much of a person is visible in it, which is
@@ -1698,8 +1959,9 @@ LIKENESS_ATTRIBUTES: tuple[str, ...] = ("face", "eyes", "hair")
 #: only" is too abstract for the model; naming the parts of a face it must not lend
 #: is what it can act on.
 _LIKENESS_BAN = (
-    "must not supply a face, a hairstyle, skin tone or facial features - the person "
-    "visible in it is not the identity, do not copy their face"
+    "must not supply a face, a hairstyle, hair colour, hair length, skin tone or facial "
+    "features - the person visible in it is not the identity, do not copy their face or "
+    "their hair"
 )
 
 
@@ -1778,6 +2040,41 @@ def _join(items: list[str]) -> str:
     return f"{', '.join(items[:-1])} and {items[-1]}"
 
 
+#: The payload's group names -> the reference kinds they hold (see REF_GROUPS in the panel).
+FACE_REF_KINDS = {"pictures": "picture", "videos": "video", "audios": "audio"}
+
+
+def cell_face_reference(cell: SheetCell, refs: Iterable[SheetRef]) -> SheetRef | None:
+    """The reference a CELL names as its likeness source (``cell.face_ref``), or ``None``.
+
+    ``"pictures:1"`` = the picture the prompt calls ``<Picture 2>`` - the number is the TAG
+    number, i.e. the position among the ENABLED references of that kind, which is the number
+    the user sees on the tile badge. It therefore shifts when a reference is unchecked, in
+    exactly the way ``<Picture N>`` in a prompt shifts; the panel's own badge tells the user
+    which number is which.
+
+    A cell can outlive the reference it points at (the tile was removed, or the slot was
+    cleared), which is why this is a lookup and not a promise: a name that matches nothing
+    leaves the cell on the run-wide identity source.
+    """
+    wanted = str(getattr(cell, "face_ref", "") or "").strip()
+    if ":" not in wanted:
+        return None
+    group, _, raw = wanted.partition(":")
+    kind = FACE_REF_KINDS.get(group)
+    if kind is None or not raw.lstrip("-").isdigit():
+        return None
+    slot = int(raw)
+    if slot < 0:
+        return None
+    for ref in refs:
+        if not ref.enabled or ref.kind != kind:
+            continue
+        if ref.index == slot or ref.source == slot:
+            return ref
+    return None
+
+
 def identity_reference(refs: Iterable[SheetRef]) -> SheetRef | None:
     """The reference the prompt names as the identity source (``None`` when unclear).
 
@@ -1793,7 +2090,13 @@ def identity_reference(refs: Iterable[SheetRef]) -> SheetRef | None:
     return None
 
 
-def attribution_lines(spec: SheetSpec, cell: SheetCell, *, refs: list[SheetRef] | None = None) -> list[str]:
+def attribution_lines(
+    spec: SheetSpec,
+    cell: SheetCell,
+    *,
+    refs: list[SheetRef] | None = None,
+    hidden: Iterable[str] | None = None,
+) -> list[str]:
     """Per-picture ownership, spelled out for THIS cell.
 
     H3 conditions on every reference at once, so a prompt that only says "keep the
@@ -1814,6 +2117,10 @@ def attribution_lines(spec: SheetSpec, cell: SheetCell, *, refs: list[SheetRef] 
     ``refs`` is the set this cell will actually be sent (see :func:`cell_references`);
     only those are named, so the prompt can never talk about a picture the run did not
     wire.
+
+    ``hidden`` defaults to what THIS cell's framing cannot show. A prompt that covers
+    several framings at once (the draft pass) passes what NONE of them can show, so an
+    attribute one panel does display is not quietly dropped from the whole prompt.
     """
     source = refs if refs is not None else spec.refs
     refs = [ref for ref in source if ref.enabled and ref.kind in ("picture", "video")]
@@ -1825,7 +2132,7 @@ def attribution_lines(spec: SheetSpec, cell: SheetCell, *, refs: list[SheetRef] 
         for attribute in reference_attributes(ref.role):
             supplied.setdefault(attribute, []).append(ref)
 
-    hidden = set(attributes_hidden_by(cell.view))
+    hidden = set(attributes_hidden_by(cell.view)) if hidden is None else set(hidden)
 
     # Group by owner: one picture per attribute reads as an instruction, a list of
     # "X from P1, Y from P1, Z from P1" reads as noise.
@@ -1893,6 +2200,19 @@ def attribution_lines(spec: SheetSpec, cell: SheetCell, *, refs: list[SheetRef] 
             "Wear the clothing exactly as in the reference: the same garment, fully "
             "dressed - nothing removed, opened, shortened or swapped for another top."
         )
+        # The outfit leak in the other direction: the identity picture is usually a whole
+        # person wearing something, and a reference has no per-picture weight - so the
+        # sheet kept coming out in the CLOTHES OF THE FACE PICTURE even with "the clothing
+        # comes only from <Picture 2>" in the prompt. Naming the picture that must be
+        # REPLACED is the missing half of that instruction.
+        if len(refs) > 1 and len(clothing_owners) == 1 and clothing_owners[0] is not identity:
+            lines.append(
+                f"The person in {identity.tag} is wearing something else: that outfit is "
+                f"replaced. The clothing of this image is the garment worn by the person in "
+                f"{clothing_owners[0].tag}, worn exactly as it is there - do not carry over the "
+                f"neckline, the cut, the length, the fabric or the colours of what the person "
+                f"in {identity.tag} is wearing, and do not mix the two garments."
+            )
     if "hair" in supplied and "hair" not in hidden:
         lines.append("Keep the hair exactly as in the reference: no added headwear or extra accessories.")
     if many:
@@ -1958,6 +2278,10 @@ def cell_references(
     be a silent change. If the filter would drop everything, the first enabled
     reference is kept so the person is still conditioned. ``scope="every cell"``
     turns the filter off and hands every enabled reference to every cell.
+
+    A cell that names its own face reference (``cell.face_ref``, the panel's drag-and-drop)
+    puts that reference first and gives it the face attribute, so the panel's prompt points
+    at it. See :func:`cell_face_reference`.
     """
     enabled = [ref for ref in spec.refs if ref.enabled]
     if str(scope or "").strip().lower() == "every cell":
@@ -1971,6 +2295,21 @@ def cell_references(
         kept.append(ref)
     if not kept:
         kept = enabled[:1]
+    # The cell's OWN face reference - a tile dropped on this panel - leads the list and is given
+    # the face attribute if its role did not already claim it. H3 has no per-reference weight, so
+    # "the likeness in THIS panel comes from that picture" is said by making it <Picture 1> and by
+    # letting the lines that name the identity owner (attribution, the closing reminder, the blur
+    # decision) find it. An explicit drop also outranks the framing filter: asking for that picture
+    # in this panel is a decision, not something to be quietly dropped because a face view cannot
+    # show a garment.
+    face = cell_face_reference(cell, enabled)
+    if face is not None:
+        role = str(face.role or "").strip()
+        if "face" not in reference_attributes(role):
+            role = f"{role}, face".strip(" ,") if role else "face"
+        face = replace(face, role=role)
+        kept = [face] + [ref for ref in kept if ref.file != face.file]
+
     counters: dict[str, int] = {}
     out: list[SheetRef] = []
     for ref in kept:
@@ -2148,19 +2487,40 @@ def continuity_plan(
     return plan
 
 
+def cell_face_slots(spec: SheetSpec) -> set[tuple[str, int]]:
+    """``{(kind, slot)}`` for every reference a CELL names as its face source.
+
+    A panel can take its likeness from a picture the run-wide rule would have blurred (the
+    outfit photo, for one panel). The prompt can say "the face comes from <Picture 2>" but the
+    pixels decide: a blurred copy of that picture cannot supply a face, so the panelled choice
+    protects it from ``auto`` - the same protection the run-wide identity source gets, and for
+    the same reason (see :func:`blur_face_decisions`).
+    """
+    slots: set[tuple[str, int]] = set()
+    enabled = [ref for ref in spec.refs if ref.enabled]
+    for cell in getattr(spec, "enabled_cells", []) or []:
+        ref = cell_face_reference(cell, enabled)
+        if ref is None:
+            continue
+        slots.add((ref.kind, ref.source if ref.source >= 0 else ref.index))
+    return slots
+
+
 def blur_face_decisions(spec: SheetSpec) -> dict[tuple[str, int], str]:
-    """``{(kind, source slot): "blur" | "keep" | "unsupported"}`` for the whole run.
+    """``{(kind, source slot): "blur" | "mute" | "keep" | "unsupported"}`` for the whole run.
 
     Run-wide on purpose. A reference is loaded once - one loader node per source slot,
     shared by every cell - so the clean copy is one file for the sheet, not a decision
     per framing.
 
-    ``auto`` (the default) blurs a picture that is NOT the run's identity source, and
+    ``auto`` (the default) blurs a picture or a clip that is NOT the run's identity source, and
     only when some other reference does claim the likeness. That is exactly the failure
     this exists for: an outfit photo that is a whole second person, whose face the model
     copies into every full-body cell - the prompt can forbid it, but a face that is in
     the pixels is a face the model can use. A reference whose role says nothing is left
-    alone, because blurring the only face in the run is not recoverable.
+    alone, because blurring the only face in the run is not recoverable. A clip that IS the
+    identity source is protected by the same rule, and it matters more there: an H3 run
+    whose motion comes from a clip usually takes its likeness from that clip.
 
     **A hand-painted area blurs whatever the mode says**: the mode chooses whether faces
     are *detected*, the painting is the user pointing at pixels. So
@@ -2174,22 +2534,38 @@ def blur_face_decisions(spec: SheetSpec) -> dict[tuple[str, int], str]:
         if identity is not None
         else None
     )
+    # A panel's own face source is protected exactly like the run-wide one: the two are the same
+    # promise ("this reference IS the likeness here"), and a blurred copy cannot keep it.
+    protected = cell_face_slots(spec)
+    if identity_slot is not None:
+        protected.add(identity_slot)
     decisions: dict[tuple[str, int], str] = {}
     for ref in enabled:
         slot = (ref.kind, ref.source if ref.source >= 0 else ref.index)
         painted = has_blur_paint(ref)
-        if ref.kind not in BLUR_KINDS:
-            # A video would need per-frame detection and a re-encode; "auto" says
-            # nothing about it, an explicit "on" is reported instead of half-done.
-            unsupported = ref.blur_face == "on" or painted
-            decisions[slot] = "unsupported" if unsupported else "keep"
+        if ref.kind == "audio":
+            # A voice has no pixels, so the removal is the whole sound: the decision is
+            # "mute", there is nothing to detect, and painting one is unsupported rather than
+            # silently ignored.
+            #
+            # "auto" KEEPS a sound, unlike a picture. A face in a photo leaks an identity that
+            # nobody asked for, which is why the rule is on by default there; a voice
+            # reference is put in the panel deliberately, and it is usually the performance
+            # itself. Muting one because another reference owns the face would break the run
+            # it was added for - so a voice is muted when the tile says "on", and not before.
+            if painted:
+                decisions[slot] = "unsupported"
+            elif ref.blur_face == "on":
+                decisions[slot] = "mute"
+            else:
+                decisions[slot] = "keep"
         elif painted:
             decisions[slot] = "blur"
         elif ref.blur_face == "off":
             decisions[slot] = "keep"
         elif ref.blur_face == "on":
             decisions[slot] = "blur"
-        elif identity is None or slot == identity_slot:
+        elif not protected or slot in protected:
             decisions[slot] = "keep"
         elif reference_attributes(ref.role):
             decisions[slot] = "blur"
@@ -2303,6 +2679,223 @@ def background_clause(spec: SheetSpec) -> str:
     return option.prompt or _BACKGROUND_BY_KEY["neutral"].prompt
 
 
+def attributes_hidden_by_all(cells: Iterable[SheetCell]) -> tuple[str, ...]:
+    """Attributes NO framing in this run can show - the intersection.
+
+    :func:`attributes_hidden_by` answers for one framing. A prompt that covers several
+    framings at once (the draft pass, see :func:`build_sheet_prompt`) may only drop an
+    attribute when every panel hides it: naming the outfit because the close-up cannot
+    show it would take the outfit away from the full-body panels too.
+    """
+    panels = [cell for cell in cells]
+    if not panels:
+        return ()
+    hidden = set(attributes_hidden_by(panels[0].view))
+    for cell in panels[1:]:
+        hidden &= set(attributes_hidden_by(cell.view))
+    return tuple(attribute for attribute in ATTRIBUTE_LABELS if attribute in hidden)
+
+
+#: What to call each column when there are three or fewer of them. The words matter more
+#: than the index: "the middle column, upper half" is a place H3 can act on, "column 2 of 3"
+#: is arithmetic it has to do.
+_COLUMN_WORDS = {1: ("the",), 2: ("the left", "the right"), 3: ("the left", "the middle", "the right")}
+
+
+def sheet_columns(rects: Sequence[tuple[int, int, int, int]] | None) -> list[list[int]]:
+    """Panel indexes grouped into columns, left to right and top to bottom within each.
+
+    Reading the geometry back out of the boxes is what lets the prompt SAY the arrangement
+    ("the middle column holds two panels stacked") instead of describing it in pixels and
+    hoping: a sheet the model lays out as one row of columns when four of its five panels
+    were meant to be stacked is the failure this is here to prevent.
+    """
+    if not rects:
+        return []
+    columns: list[list[int]] = []
+    for index, rect in enumerate(rects):
+        x = int(rect[0])
+        for column in columns:
+            if abs(int(rects[column[0]][0]) - x) <= 2:
+                column.append(index)
+                break
+        else:
+            columns.append([index])
+    for column in columns:
+        column.sort(key=lambda i: int(rects[i][1]))
+    columns.sort(key=lambda column: int(rects[column[0]][0]))
+    return columns
+
+
+def panel_place(columns: Sequence[Sequence[int]], index: int) -> str:
+    """Where panel ``index`` sits, in words (``"the middle column, upper half"``).
+
+    ``""`` when the boxes are unknown. "full height" is a claim about the sheet, not about
+    the box: a column that holds one panel is that panel's whole height.
+    """
+    total = len(columns)
+    for position, column in enumerate(columns):
+        if index not in column:
+            continue
+        rows = len(column)
+        if total == 1 and rows == 1:
+            # One panel on the sheet is not a column: it IS the frame.
+            return "the whole frame"
+        words = _COLUMN_WORDS.get(total)
+        where = f"{words[position]} column" if words else f"column {position + 1} of {total}"
+        if rows == 1:
+            return f"{where}, full height"
+        row = column.index(index)
+        if rows == 2:
+            return f"{where}, {'upper' if row == 0 else 'lower'} half"
+        if rows == 3:
+            return f"{where}, {('upper', 'middle', 'lower')[row]} third"
+        return f"{where}, row {row + 1} of {rows}"
+
+
+def sheet_arrangement(
+    spec: SheetSpec,
+    panels: Sequence[SheetCell],
+    rects: Sequence[tuple[int, int, int, int]] | None = None,
+) -> str:
+    """How the panels sit on the canvas, as one clause (``"4 panels in a row..."``)."""
+    count = len(panels)
+    many = f"{count} panel" + ("" if count == 1 else "s")
+    layout = str(spec.layout.layout or "").strip().lower()
+    if count == 1 or layout == "turnaround":
+        return f"{many} side by side in a single row, left to right"
+    if layout == "hero-left":
+        columns = sheet_columns(rects)
+        if columns:
+            shapes: list[str] = []
+            for column in columns:
+                if len(column) == 1:
+                    shapes.append("one tall panel that fills the full height")
+                elif len(column) == 2:
+                    shapes.append("two panels stacked one above the other")
+                else:
+                    shapes.append(f"{len(column)} panels stacked one above the other")
+            words = _COLUMN_WORDS.get(len(columns))
+            named = words is not None
+            described = "; ".join(
+                (f"{words[i]} column holds {shape}" if named else f"column {i + 1} holds {shape}")
+                for i, shape in enumerate(shapes)
+            )
+            plural = "columns" if len(columns) > 1 else "column"
+            return (
+                f"{many} in {len(columns)} {plural} of equal width - {described} - "
+                "with even gaps between the panels and a clear margin around the sheet"
+            )
+        return (
+            f"{many}: the first is larger and alone on the left, the rest fill a grid "
+            "to its right"
+        )
+    if layout == "grid":
+        columns = max(1, int(spec.layout.columns or 1))
+        rows = max(1, -(-count // columns))
+        if rows > 1:
+            return (
+                f"{many} in a {columns}-column, {rows}-row grid, filled left to right then "
+                "top to bottom"
+            )
+        return f"{many} in a {columns}-column grid, filled left to right then top to bottom"
+    return f"{many} laid out left to right"
+
+
+def panel_box(rects: Sequence[tuple[int, int, int, int]] | None, position: int) -> str:
+    """``" (x=24, y=24, 436x1488)"`` for the panel at ``position`` (1-based), else ""."""
+    if not rects or position < 1 or position > len(rects):
+        return ""
+    x, y, width, height = (int(value) for value in rects[position - 1])
+    return f" (x={x}, y={y}, {width}x{height})"
+
+
+def hair_holds_in_view(view: Any, refs: Iterable[SheetRef] | None = None) -> str:
+    """The "the camera does not restyle the hair" sentence, or ``""``.
+
+    Raised for the angles a front-facing picture cannot show (see ``_HAIR_HOLDS_BY_VIEW``) and
+    only when a picture or video reference is wired - without one there is no hairstyle being
+    held and the sentence would invent a claim about a reference that does not exist.
+    """
+    angle = _HAIR_HOLDS_BY_VIEW.get(str(view or "").strip().lower())
+    if not angle:
+        return ""
+    wired = [ref for ref in (refs if refs is not None else ()) if ref.enabled
+             and ref.kind in ("picture", "video")]
+    if not wired:
+        return ""
+    return (
+        "The hairstyle does not change with the camera: the same parting, the same length, the "
+        f"same colour and the same style as the reference picture, {angle} - do not give the "
+        "subject a different hairstyle because this view is a new angle."
+    )
+
+
+def cell_shot_lines(
+    spec: SheetSpec,
+    cell: SheetCell,
+    *,
+    refs: list[SheetRef] | None = None,
+) -> list[str]:
+    """The framing / pose / expression sentences for ONE cell.
+
+    Split out of :func:`build_cell_prompt` because a draft render asks for every panel at
+    once and has to describe each of them in the same words (see
+    :func:`build_sheet_prompt`): the view vocabulary keeps one definition, so a draft and
+    a cell can never disagree about what "left profile" means.
+    """
+    lines = [f"{cell.view_option.label}: {cell.view_option.prompt}"]
+    holds = hair_holds_in_view(cell.view, refs if refs is not None else spec.refs)
+    if holds:
+        lines.append(holds)
+    # A pose line always belongs on a full-body framing; on a face/portrait cell
+    # it is still honoured when the user picked something other than neutral, so
+    # unusual combinations (an angry full body, an A-pose close-up) survive.
+    if cell.view in POSE_FRAMINGS or cell.pose != "neutral":
+        lines.append(cell.pose_option.prompt)
+    if cell.view in FACE_FRAMINGS:
+        lines.append(cell.expression_option.prompt)
+    elif cell.view not in NO_FACE_FRAMINGS and cell.expression != "neutral":
+        # A whole-body framing still takes an expression - it steers the face - and a
+        # profile only reads one from the side. A framing with no face in it gets
+        # nothing: "smiling" in a hands crop just invents a face at the edge of frame.
+        # A framing whose own text says there is no eye contact gets the expression
+        # without its gaze clause (see expression_reads_in_view).
+        scope = " Visible in profile only." if cell.view in PROFILE_FRAMINGS else ""
+        lines.append(f"{expression_reads_in_view(cell.expression_option, cell.view)}{scope}")
+    return lines
+
+
+def cell_closing_lines(
+    spec: SheetSpec,
+    cell: SheetCell,
+    *,
+    refs: list[SheetRef] | None = None,
+) -> list[str]:
+    """The lines every prompt ends with: attribution, backdrop, identity restated."""
+    source = refs if refs is not None else spec.refs
+    wired = [ref for ref in source if ref.enabled and ref.kind in ("picture", "video")]
+    lines = list(attribution_lines(spec, cell, refs=refs))
+    if not wired:
+        # No picture/video reference, so nothing to attribute: say who the person is
+        # outright instead of naming references that are not wired in.
+        lines.append(
+            "Keep the same person across every image: identity, hair, body proportions "
+            "and clothing."
+        )
+    if spec.negative_prompt.strip():
+        lines.append(f"Do not include: {spec.negative_prompt.strip()}.")
+    lines.append(
+        f"Single person against {background_clause(spec)}, no text, no watermark, no extra people."
+    )
+    # Last line before the sampler: restate which reference owns the likeness. Cheap
+    # to add and the position that carries the most weight.
+    reminder = identity_reminder(spec, cell, refs=refs)
+    if reminder:
+        lines.append(reminder)
+    return lines
+
+
 def build_cell_prompt(spec: SheetSpec, cell: SheetCell, *, refs: list[SheetRef] | None = None) -> str:
     """Full prompt for one sheet cell.
 
@@ -2320,48 +2913,133 @@ def build_cell_prompt(spec: SheetSpec, cell: SheetCell, *, refs: list[SheetRef] 
     if legend:
         lines.append(legend)
 
-    frame_line = f"{cell.view_option.label}: {cell.view_option.prompt}"
-    body = [frame_line]
-    # A pose line always belongs on a full-body framing; on a face/portrait cell
-    # it is still honoured when the user picked something other than neutral, so
-    # unusual combinations (an angry full body, an A-pose close-up) survive.
-    if cell.view in POSE_FRAMINGS or cell.pose != "neutral":
-        body.append(cell.pose_option.prompt)
-    if cell.view in FACE_FRAMINGS:
-        body.append(cell.expression_option.prompt)
-    elif cell.view not in NO_FACE_FRAMINGS and cell.expression != "neutral":
-        # A whole-body framing still takes an expression - it steers the face - and a
-        # profile only reads one from the side. A framing with no face in it gets
-        # nothing: "smiling" in a hands crop just invents a face at the edge of frame.
-        # A framing whose own text says there is no eye contact gets the expression
-        # without its gaze clause (see expression_reads_in_view).
-        scope = " Visible in profile only." if cell.view in PROFILE_FRAMINGS else ""
-        body.append(f"{expression_reads_in_view(cell.expression_option, cell.view)}{scope}")
-
-    ref_keep = [
-        ref.tag
-        for ref in (refs if refs is not None else spec.refs)
-        if ref.enabled and ref.kind in ("picture", "video")
-    ]
-    body.extend(attribution_lines(spec, cell, refs=refs))
-    if not ref_keep:
-        # No picture/video reference, so nothing to attribute: say who the person is
-        # outright instead of naming references that are not wired in.
-        body.append("Keep the same person across every image: identity, hair, body proportions and clothing.")
-    if spec.negative_prompt.strip():
-        body.append(f"Do not include: {spec.negative_prompt.strip()}.")
-    body.append(
-        f"Single person against {background_clause(spec)}, no text, no watermark, no extra people."
-    )
-    # Last line before the sampler: restate which reference owns the likeness. Cheap
-    # to add and the position that carries the most weight.
-    reminder = identity_reminder(spec, cell, refs=refs)
-    if reminder:
-        body.append(reminder)
+    body = cell_shot_lines(spec, cell, refs=refs) + cell_closing_lines(spec, cell, refs=refs)
     lines.append(" ".join(body))
 
     if cell.extra_prompt.strip():
         lines.append(cell.extra_prompt.strip())
+    return "\n\n".join(lines)
+
+
+def build_sheet_prompt(
+    spec: SheetSpec,
+    cells: Sequence[SheetCell],
+    *,
+    size: tuple[int, int] | None = None,
+    rects: Sequence[tuple[int, int, int, int]] | None = None,
+    refs: list[SheetRef] | None = None,
+) -> str:
+    """The whole sheet as ONE prompt - what the draft pass samples (``draft_sheet.py``).
+
+    A draft render is a single H3 clip that has to contain every panel, so this is the
+    cell prompt turned inside out: the blocks that are the same for every cell - the
+    global description, the reference legend, the per-reference ownership rules, the
+    identity reminder and the negative - stay once, and each cell contributes only the
+    sentences that describe its own panel, prefixed with its place on the sheet.
+
+    ``size`` and ``rects`` are the canvas and the per-panel boxes from
+    ``sheet_layout.layout_rects``, i.e. the geometry the composite would use: a draft
+    describes the same layout the finished sheet will have, so the two can be compared.
+    Position and size are stated in pixels and H3 reads them as guidance rather than as a
+    hard constraint - which is exactly how they are meant (see the pack README).
+    """
+    panels = [cell for cell in cells if cell.enabled] or list(cells)
+    if not panels:
+        return ""
+    source = refs if refs is not None else spec.refs
+    wired = [ref for ref in source if ref.enabled and ref.kind in ("picture", "video")]
+    hidden = attributes_hidden_by_all(panels)
+
+    # H3's own prompt shape (subject_definitions / summary / retention_analysis /
+    # detailed_description / overall_soundscape / non_diegetic_music). The model is trained on
+    # this structure - the pack's own chains and every MiniMax caption are written in it - so the
+    # one sheet render that has to hold five panels at once is asked for in the same language
+    # a caption uses, and each block has the job its name says.
+    columns = sheet_columns(rects)
+    lines: list[str] = []
+    if spec.global_prompt.strip():
+        lines.append(spec.global_prompt.strip())
+
+    legend = reference_legend(spec, refs=wired or None, hidden=hidden)
+    if legend:
+        lines.append("subject_definitions:\n" + legend)
+
+    views = []
+    for cell in panels:
+        label = str(cell.view_option.label or cell.view)
+        if label not in views:
+            views.append(label)
+    lines.append(
+        "summary:\n"
+        f"[reference generation] Create ONE completed, static character sheet of one person "
+        f"showing only these {len(panels)} views at the same time: {', '.join(views)}. "
+        "Every panel is the same person, drawn once, in one image."
+    )
+
+    retain: list[str] = []
+    retain.extend(attribution_lines(spec, panels[0], refs=wired or None, hidden=hidden))
+    if not wired:
+        retain.append(
+            "Keep the same person across every panel: identity, hair, body proportions "
+            "and clothing."
+        )
+    retain.append(
+        "Across every panel the same person is shown, in the same light against the "
+        "same backdrop; only the view - and the pose or expression named for that panel "
+        "- changes."
+    )
+    reminder = identity_reminder(spec, panels[0], refs=wired or None)
+    if reminder:
+        retain.append(reminder)
+    lines.append("retention_analysis:\n" + " ".join(retain))
+
+    layout = [
+        f"A single character reference sheet of one person: "
+        f"{sheet_arrangement(spec, panels, rects)}, all on {background_clause(spec)}."
+    ]
+    if size:
+        layout.append(f"The whole image is {int(size[0])}x{int(size[1])} pixels.")
+    # H3 renders a clip: without this line the frames can drift into a turn or a pan, which is
+    # how a sheet loses panels between frame 0 and frame 4.
+    layout.append(
+        "The finished sheet is already complete in the first frame and stays completely "
+        "unchanged to the last frame - one still image, no motion, no camera movement, no "
+        "morphing or transition between the panels."
+    )
+    for position, cell in enumerate(panels, start=1):
+        shot = cell_shot_lines(spec, cell, refs=wired or None)
+        if cell.extra_prompt.strip():
+            shot.append(cell.extra_prompt.strip())
+        # The place in words first ("the middle column, upper half"), then the box in pixels:
+        # words are what H3 can act on, the numbers are the check.
+        box = panel_box(rects, position).strip()
+        where = "; ".join(part for part in (panel_place(columns, position - 1), box[1:-1] if box else "") if part)
+        head = f"- Panel {position} of {len(panels)} ({where})" if where else f"- Panel {position} of {len(panels)}"
+        layout.append(f"{head}: {' '.join(shot)}")
+    drawn = (f"All {len(panels)} panels are drawn" if len(panels) > 1 else "The panel is drawn")
+    layout.append(
+        f"{drawn}: none is merged with another, dropped, reordered, repeated or scaled up to fill "
+        "the sheet, and each panel keeps its own area and framing."
+    )
+    feet = [panel for panel in panels if panel.view in POSE_FRAMINGS]
+    if len(feet) > 1:
+        layout.append(
+            "Across the full-body panels keep one common figure scale, one common camera "
+            "height and one common ground line, so every figure stands on the same baseline "
+            "in the same order left to right."
+        )
+    if spec.negative_prompt.strip():
+        layout.append(f"Do not include: {spec.negative_prompt.strip()}.")
+    layout.append("No text, no letters, no caption, no panel border, no watermark, no extra people.")
+    lines.append("detailed_description:\n" + "\n".join(layout))
+
+    # A sheet is a still image: H3 decodes audio in the same pass, and naming the audio branch
+    # keeps it from spending the render on speech or music nobody asked for.
+    lines.append(
+        "overall_soundscape:\nNone. The sheet is a still image - no speech, no vocalisation, "
+        "no ambience, no sound effects."
+    )
+    lines.append("non_diegetic_music:\nNone.")
     return "\n\n".join(lines)
 
 
@@ -2415,6 +3093,20 @@ __all__ = [
     "ATTRIBUTE_LABELS",
     "ATTRIBUTES_HIDDEN_BY_VIEW",
     "attributes_hidden_by",
+    "attributes_hidden_by_all",
+    "build_cell_prompt",
+    "build_sheet_prompt",
+    "cell_closing_lines",
+    "cell_shot_lines",
+    "ONE_PASS_ALIGN",
+    "ONE_PASS_FRAMES",
+    "ONE_PASS_MAX_PIXELS",
+    "ONE_PASS_SHEET_FRAME",
+    "RESOLUTION_CHOICES",
+    "RESOLUTION_KEYS",
+    "RESOLUTION_LABELS",
+    "panel_box",
+    "sheet_arrangement",
     "POSE_FRAMINGS",
     "FACE_FRAMINGS",
     "PROFILE_FRAMINGS",

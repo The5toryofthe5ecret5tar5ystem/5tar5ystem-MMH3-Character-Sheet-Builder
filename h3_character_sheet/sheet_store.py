@@ -55,6 +55,11 @@ REPORT_NAME = "report.txt"
 FRAMES_DIR = "frames"
 CELLS_DIR = "cells"
 CLIPS_DIR = "clips"
+#: Frames of a one-pass render (the whole sheet from ONE H3 clip - see ``one_pass``).
+#: Kept next to the cells rather than in them: the pass has no per-cell reads of its own, and a
+#: manifest that claimed cells it never rendered is how a later compose would quietly replace the
+#: sheet with a composite of slices.
+PASS_DIR = "one_pass"
 PIPELINE = "character_sheet_v1"
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9 _-]+")
@@ -165,10 +170,17 @@ class SheetStore:
         node_id: Any = None,
         export_name: Any = None,
         fresh: bool = False,
+        board: Any = None,
     ) -> None:
         # Resolve first: a tokenised name has to reach sheet_dir() intact (it looks
         # up the newest run by pattern), and only then is it sanitised.
         resolved = sheet_dir(name)
+        # A SUITE renders several sheets under one run name, one per board (see ``suite.py``):
+        # the board is a folder INSIDE the run, so the run still has one place and every board is
+        # a complete sheet folder of its own (frames, cells, picks, report, manifest).
+        self.board = str(board or "").strip()
+        if self.board:
+            resolved = resolved / safe_sheet_name(self.board, "board")
         self.requested = str(name or "")
         self.name = resolved.name
         self.node_id = "" if node_id is None else str(node_id)
@@ -257,6 +269,64 @@ class SheetStore:
         self.frames_dir.mkdir(parents=True, exist_ok=True)
         self.cells_dir.mkdir(parents=True, exist_ok=True)
         return self
+
+    # ---------------------------------------------------------------- one-pass
+    @property
+    def pass_dir(self) -> Path:
+        """Where a one-pass render keeps the frames of its one H3 clip."""
+        return self.dir / PASS_DIR
+
+    def pass_frame_files(self) -> list[Path]:
+        try:
+            return sorted(self.pass_dir.glob("f*.png"))
+        except OSError:
+            return []
+
+    def read_one_pass(self) -> dict[str, Any]:
+        """The ``onePass`` block of the manifest (``{}`` after a per-cell render)."""
+        block = self.read_manifest().get("onePass")
+        return dict(block) if isinstance(block, dict) else {}
+
+    def save_pass_frames(self, arrays: Sequence[np.ndarray]) -> list[Path]:
+        """Persist every frame of the render (old pass frames are replaced)."""
+        directory = self.pass_dir
+        directory.mkdir(parents=True, exist_ok=True)
+        for stale in directory.glob("f*.png"):
+            try:
+                stale.unlink()
+            except OSError:
+                pass
+        paths: list[Path] = []
+        for position, array in enumerate(arrays):
+            path = directory / f"f{position:04d}.png"
+            try:
+                array_to_image(array).save(path)
+                paths.append(path)
+            except Exception as exc:  # noqa: BLE001 - a bad frame must not kill the run
+                log.warning("sheet: could not save pass frame %s (%s)", position, exc)
+        return paths
+
+    def save_sheet_still(self, array: np.ndarray | None, *, name: Any = None) -> Path | None:
+        """Write a one-pass sheet as THIS sheet's sheet file.
+
+        The render's chosen frame takes the sheet's own file name and slot on purpose: the panel,
+        the routes, a preview and a hand-off all read the sheet through ``sheet_path``, so a
+        one-pass sheet is visible everywhere a per-cell one is, with no second code path. The
+        frames it came from stay in ``one_pass/``, and the panelled slices stay in
+        ``cells/`` + ``frames/``, so a different frame or a different crop is a re-read.
+        """
+        if array is None:
+            return None
+        self.ensure()
+        target = self.dir / (str(name) if name else self.sheet_file)
+        try:
+            array_to_image(array).save(target)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("sheet: could not save the sheet still (%s)", exc)
+            return None
+        self._export_name = target.name
+        self._sheet_file = target.name
+        return target
 
     def cell_frame_dir(self, cell_id: str) -> Path:
         return self.frames_dir / safe_sheet_name(cell_id, "cell")
@@ -492,6 +562,7 @@ class SheetStore:
             entry["caption"] = str(meta.get("caption") or "")
 
         sheet_exists = self.sheet_path.is_file()
+        one_pass = manifest.get("onePass") if isinstance(manifest.get("onePass"), dict) else {}
         return {
             "name": self.name,
             "dir": str(self.dir),
@@ -502,6 +573,18 @@ class SheetStore:
                 "cells": len(cells),
                 "rendered": sum(1 for cell in cells if cell["rendered"]),
                 "frames": sum(int(cell["frameCount"]) for cell in cells),
+            },
+            # Present on every listing (empty after a per-cell render) so the panel can ask once
+            # instead of feature-detecting the manifest.
+            "onePass": {
+                "active": bool(one_pass),
+                "frames": [
+                    {"file": path.name, "url": _view_url(path, self.root)}
+                    for path in (self.pass_frame_files() if one_pass else [])
+                ],
+                "prompt": str(one_pass.get("prompt") or ""),
+                "panels": [str(panel) for panel in (one_pass.get("panels") or [])],
+                "size": [int(one_pass.get("width") or 0), int(one_pass.get("height") or 0)],
             },
             "manifest": manifest,
             "spec": spec_data,
@@ -545,6 +628,27 @@ class SheetStore:
         parsed = spec if hasattr(spec, "cells") else parse_sheet_spec(spec)
         requested_picks = picks if isinstance(picks, dict) else {}
         stored_picks = self.read_picks()
+        # A one-pass render wrote a sheet image and NO cell frames of its own (the panels it
+        # slices out live under ``cells/``, but ``cells`` in the manifest is empty on purpose -
+        # see one_pass.one_pass_manifest): there is nothing to re-composite, and composing anyway
+        # would write a canvas over a finished image. Answer with the sheet that is on disk.
+        one_pass = self.read_manifest().get("onePass")
+        if isinstance(one_pass, dict) and one_pass:
+            cells_before = [cell.id for cell in parsed.enabled_cells]
+            if cells_before and not any(self.frame_files(cell_id) for cell_id in cells_before):
+                picked = _load_rgb(self.sheet_path) if self.sheet_path.is_file() else None
+                return {
+                    "sheet": Image.fromarray(picked) if picked is not None else None,
+                    "path": self.sheet_path,
+                    "cells": {},
+                    "missing": cells_before,
+                    "size": (
+                        (int(picked.shape[1]), int(picked.shape[0]))
+                        if picked is not None
+                        else (0, 0)
+                    ),
+                    "onePass": True,
+                }
         # With latent continuation a cell's first frames are a re-render of the previous
         # cell's tail - they are a duplicate, so the picker starts after them. Computed
         # from the spec, so a re-composite makes the same choice the render did.
@@ -724,6 +828,58 @@ def list_sheet_names() -> list[str]:
     return [entry.name for entry in entries]
 
 
+def gallery_art(limit: int = 12) -> dict[str, Any]:
+    """The newest sheet rendered with each LAYOUT preset, for the preset cards' art.
+
+    The proposal this panel is built from calls this the real win: "which sheet do I want"
+    is answered by a picture of the sheet you got last time rather than by a diagram of the
+    arrangement. The folder already keeps every sheet, and each manifest keeps the payload
+    it was rendered with - so the art is a lookup, not a render.
+
+    A suite render informs every board it drew (each board gets that page as its art,
+    because the sheet on disk IS what that board looks like). Newest wins per id, and only
+    the newest ``limit`` folders are read: this runs on every panel mount.
+    """
+    root = sheets_root()
+    if not root.is_dir():
+        return {"layouts": {}, "sheets": []}
+    layouts: dict[str, dict[str, Any]] = {}
+    sheets: list[dict[str, Any]] = []
+    for name in list_sheet_names()[: max(1, int(limit))]:
+        folder = root / name
+        manifest = SheetStore(name).read_manifest()
+        spec = manifest.get("spec") if isinstance(manifest.get("spec"), dict) else {}
+        render = spec.get("render") if isinstance(spec.get("render"), dict) else {}
+        layout = str(render.get("layoutPreset") or "").strip().lower()
+        boards = [str(board).strip().lower() for board in (render.get("suite") or []) if board]
+        image = next(
+            (
+                path
+                for path in sorted(
+                    (path for path in folder.glob("*.png") if path.is_file()),
+                    key=lambda path: path.stat().st_mtime,
+                    reverse=True,
+                )
+            ),
+            None,
+        )
+        if image is None:
+            continue
+        entry = {
+            "name": name,
+            "file": image.name,
+            "url": _view_url(image, root),
+            "mtime": image.stat().st_mtime,
+            "layout": layout,
+        }
+        sheets.append(entry)
+        for key in ([layout] if layout else []) + boards:
+            existing = layouts.get(key)
+            if existing is None or entry["mtime"] > existing["mtime"]:
+                layouts[key] = entry
+    return {"layouts": layouts, "sheets": sheets}
+
+
 def layout_from_spec(spec: Any) -> SheetLayoutSpec:
     parsed = spec if hasattr(spec, "layout") else parse_sheet_spec(spec)
     return parsed.layout
@@ -735,6 +891,7 @@ __all__ = [
     "PIPELINE",
     "SHEETS_DIR_NAME",
     "SheetStore",
+    "gallery_art",
     "layout_from_spec",
     "list_sheet_names",
     "output_root",

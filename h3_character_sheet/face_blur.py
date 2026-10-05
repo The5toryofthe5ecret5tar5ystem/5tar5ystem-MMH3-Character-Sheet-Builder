@@ -112,6 +112,41 @@ SCOPE_SETTINGS: dict[str, dict[str, float]] = {
 #: The area used when nothing is said. Mirrors ``sheet_spec.DEFAULT_BLUR_SCOPE``.
 DEFAULT_SCOPE = "hair"
 
+#: How a reference CLIP is handled. Detecting on every frame is affordable but pointless:
+#: a face moves a few pixels between frames, so the clip is sampled, and every frame in
+#: between is measured in a window around where the face was last seen. ``VIDEO_MAX_GAP``
+#: caps how far apart two detections may be (in frames), and ``TRACK_SEARCH`` is how much
+#: room around the predicted patch the re-detection gets.
+VIDEO_SAMPLES = 12
+VIDEO_MAX_GAP = 30
+TRACK_SEARCH = 0.45
+
+#: Suffixes that make a reference a CLIP rather than a picture. Read by the preview route
+#: so a panel that previews a video reference gets the clip pass without having to say so.
+CLIP_SUFFIXES = (".mp4", ".webm", ".mov", ".mkv", ".m4v", ".avi")
+
+#: Suffixes that make a reference a SOUND. An audio reference is not blurred - a voice has
+#: no pixels - it is MUTED: the same length, the same channels, no voice.
+AUDIO_SUFFIXES = (".wav", ".mp3", ".flac", ".ogg", ".opus", ".m4a", ".aac")
+
+
+def is_clip_name(name: Any) -> bool:
+    """Whether a reference value names a clip (by suffix - nothing is opened here)."""
+    return str(name or "").strip().lower().endswith(CLIP_SUFFIXES)
+
+
+def is_audio_name(name: Any) -> bool:
+    """Whether a reference value names a sound (by suffix - nothing is opened here)."""
+    return str(name or "").strip().lower().endswith(AUDIO_SUFFIXES)
+
+
+#: The clip policy that goes into the cache key (a changed policy is a different file).
+VIDEO_POLICY: dict[str, float] = {
+    "samples": VIDEO_SAMPLES,
+    "max_gap": VIDEO_MAX_GAP,
+    "search": TRACK_SEARCH,
+}
+
 
 def settings_for_scope(scope: Any = DEFAULT_SCOPE) -> dict[str, float]:
     """The pixel knobs for a blur area (unknown names get the default preset)."""
@@ -181,13 +216,23 @@ def resolve_input_file(name: Any) -> Path | None:
     return path if path.is_file() else None
 
 
-def derived_path(source: Path, *, key: str, root: Path | None = None) -> Path:
-    """Where the blurred copy of ``source`` lives for a given cache ``key``."""
+def derived_path(
+    source: Path,
+    *,
+    key: str,
+    root: Path | None = None,
+    suffix: str = ".png",
+) -> Path:
+    """Where the blurred copy of ``source`` lives for a given cache ``key``.
+
+    The suffix matters: a picture is written as a PNG, a reference clip has to stay a
+    video the loader will open.
+    """
     base = root if root is not None else input_root()
     if base is None:
         raise RuntimeError("ComfyUI's input folder is not available.")
     stem = source.stem[:80]
-    return base.joinpath(*DERIVED_SUBDIR) / f"{stem}-blurface-{key}.png"
+    return base.joinpath(*DERIVED_SUBDIR) / f"{stem}-blurface-{key}{suffix}"
 
 
 def cache_key(
@@ -196,6 +241,7 @@ def cache_key(
     settings: dict[str, float] | None = None,
     model: Path | None = None,
     paint: Sequence[dict[str, Any]] | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> str:
     """Short stable key: the source as it is *now* plus everything that changes pixels.
 
@@ -215,6 +261,9 @@ def cache_key(
             "settings": dict(settings or SETTINGS),
             "model": str(model or ""),
             "paint": list(paint or []),
+            # Whatever else changes the pixels for this kind of source - a clip's
+            # sampling policy, say. Kept free-form so a new knob cannot forget the key.
+            "extra": dict(extra or {}),
         },
         sort_keys=True,
     )
@@ -552,6 +601,504 @@ def blur_image_faces(
     return report
 
 
+# --------------------------------------------------------------------------- #
+# reference clips
+# --------------------------------------------------------------------------- #
+def _ffmpeg_exe() -> str | None:
+    """An ffmpeg to carry a clip's audio track over, or ``None`` when there is none."""
+    import shutil
+
+    try:
+        import imageio_ffmpeg  # ships with the ComfyUI environment
+
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+        if exe:
+            return exe
+    except Exception:  # noqa: BLE001 - not installed, fall through to PATH
+        pass
+    return shutil.which("ffmpeg")
+
+
+def _mux_audio(video: Path, source: Path, target: Path) -> bool:
+    """Copy ``source``'s audio onto the blurred ``video``, as ``target``.
+
+    The blur itself is per-frame on the picture, so the clip's sound would be lost by a
+    plain re-encode. Reference audio matters to H3 (a clip reference carries its own
+    track), so it is copied across with ``-c:a copy`` - the pixels are what we changed.
+    """
+    import subprocess
+
+    exe = _ffmpeg_exe()
+    if exe is None:
+        return False
+    command = [
+        exe, "-y", "-hide_banner", "-loglevel", "error",
+        "-i", str(video), "-i", str(source),
+        "-map", "0:v:0", "-map", "1:a:0?",
+        "-c:v", "copy", "-c:a", "copy", "-shortest",
+        str(target),
+    ]
+    try:
+        done = subprocess.run(command, capture_output=True, timeout=600, check=False)
+    except Exception:  # noqa: BLE001 - no mux, no audio
+        return False
+    if done.returncode == 0 and target.is_file() and target.stat().st_size > 0:
+        return True
+    log.warning(
+        "Character sheet: could not carry the audio of %s (%s)",
+        source.name,
+        (done.stderr or b"").decode("utf-8", "replace").strip()[:200],
+    )
+    return False
+
+
+def _sample_positions(total: int, samples: int = VIDEO_SAMPLES) -> list[int]:
+    """Which frames of a ``total``-frame clip get a detection, ends included.
+
+    The count is raised when it has to be: a long clip with few samples would leave a
+    gap the tracker cannot bridge honestly, and the frames in between are then measured
+    rather than guessed.
+    """
+    import math
+
+    if total <= 0:
+        return []
+    if total == 1:
+        return [0]
+    count = max(1, min(int(samples), total))
+    if int(VIDEO_MAX_GAP) > 0 and total / count > int(VIDEO_MAX_GAP):
+        # ``count`` samples leave ``count - 1`` gaps over ``total - 1`` frames, so the count
+        # that keeps every gap at or under the limit is ``(total - 1) / gap + 1`` - NOT
+        # ``total / gap``, which is off by one and lands gaps one frame over the limit.
+        count = min(total, int(math.ceil((total - 1) / int(VIDEO_MAX_GAP))) + 1)
+    if count <= 1:
+        return [0]
+    step = (total - 1) / float(count - 1)
+    return sorted({int(round(index * step)) for index in range(count)})
+
+
+def _lerp_box(before: tuple[int, int, int, int], after: tuple[int, int, int, int], weight: float) -> tuple[int, int, int, int]:
+    """A box between two detections (``weight`` 0 = ``before``, 1 = ``after``)."""
+    return tuple(  # type: ignore[return-value]
+        int(round(a + (b - a) * float(weight))) for a, b in zip(before, after)
+    )
+
+
+def _predict_box(
+    frame_index: int,
+    detections: Sequence[tuple[int, tuple[int, int, int, int]]],
+) -> tuple[int, int, int, int] | None:
+    """Where the face is on ``frame_index``, from the detections around it.
+
+    Linear between the two nearest detections, held flat outside them. A detected box is
+    pinned exactly: the tracker is only ever asked about the frames it sampled.
+    """
+    if not detections:
+        return None
+    before: tuple[int, tuple[int, int, int, int]] | None = None
+    after: tuple[int, tuple[int, int, int, int]] | None = None
+    for index, box in detections:
+        if index == frame_index:
+            return box
+        if index < frame_index:
+            before = (index, box)
+        elif after is None:
+            after = (index, box)
+            break
+    if before is None:
+        return after[1] if after else None
+    if after is None:
+        return before[1]
+    span = max(1, after[0] - before[0])
+    return _lerp_box(before[1], after[1], (frame_index - before[0]) / float(span))
+
+
+def _refine_box(
+    frame: Any,
+    predicted: tuple[int, int, int, int],
+    *,
+    conf: float,
+    detector: Any,
+) -> tuple[int, int, int, int]:
+    """Re-detect inside a window around ``predicted``; the prediction stands if nothing is found.
+
+    This is the honest half of sampling: a frame between two detections is not blurred on
+    an interpolated guess if the model can see the face in the window it was told to look.
+    """
+    if detector is None:
+        return predicted
+    height, width = frame.shape[:2]
+    x1, y1, x2, y2 = predicted
+    box_w = max(8, x2 - x1)
+    box_h = max(8, y2 - y1)
+    pad_x = int(round(box_w * float(TRACK_SEARCH)))
+    pad_y = int(round(box_h * float(TRACK_SEARCH)))
+    left = max(0, x1 - pad_x)
+    top = max(0, y1 - pad_y)
+    right = min(width, x2 + pad_x)
+    bottom = min(height, y2 + pad_y)
+    if right - left < 16 or bottom - top < 16:
+        return predicted
+    window = frame[top:bottom, left:right]
+    try:
+        found = detect_faces(window, conf=conf, detector=detector)
+    except Exception:  # noqa: BLE001 - a tracker miss is not a render failure
+        return predicted
+    if not found:
+        return predicted
+    # Prefer the face the prediction already points at; a second person in the window
+    # must not steal the track.
+    def overlap(box: tuple[int, int, int, int]) -> float:
+        ax1, ay1, ax2, ay2 = box
+        ix = max(0, min(x2, left + ax2) - max(x1, left + ax1))
+        iy = max(0, min(y2, top + ay2) - max(y1, top + ay1))
+        return float(ix * iy)
+
+    best = max(found, key=overlap)
+    bx1, by1, bx2, by2 = best
+    return (left + bx1, top + by1, left + bx2, top + by2)
+
+
+def blur_video_faces(
+    name: Any,
+    *,
+    destination: Path | str | None = None,
+    conf: float = CONF,
+    scope: Any = DEFAULT_SCOPE,
+    settings: dict[str, float] | None = None,
+    paint: Sequence[dict[str, Any]] | None = None,
+    detect: bool | None = None,
+    detector: Any = None,
+    samples: int = VIDEO_SAMPLES,
+) -> dict[str, Any]:
+    """Blur the face in one reference CLIP and write the copy; never raises.
+
+    A clip is the same job as a picture repeated over time, so it is done the same way:
+    the frame is blurred through the same ``blur_boxes`` patch, with the same area preset,
+    and a painted area is held across the whole clip (paint once, on the frame the tile
+    shows, and it applies to every frame - which is what a painted region usually means
+    for a reference whose actor is only ever in one place).
+
+    Detection is sampled and tracked rather than run on every frame: see
+    :data:`VIDEO_SAMPLES`. The audio track is copied across, because H3 reads a clip
+    reference's sound as well as its pictures.
+
+    Returns the same report shape as :func:`blur_image_faces` plus ``frames``,
+    ``samples`` and ``audio``.
+    """
+    import time
+
+    strokes = list(paint or [])
+    report: dict[str, Any] = {
+        "ok": False,
+        "reason": "",
+        "file": "",
+        "boxes": [],
+        "painted": len(strokes),
+        "cached": False,
+        "scope": str(scope or DEFAULT_SCOPE),
+        "frames": 0,
+        "samples": 0,
+        "audio": False,
+    }
+    source = resolve_input_file(name)
+    root = input_root()
+    if source is None or root is None:
+        report["reason"] = f"{name!r} is not a file inside ComfyUI's input folder"
+        return report
+
+    model = model_path()
+    wants_detect = detect is not False
+    if wants_detect and detector is None and model is None:
+        if not strokes:
+            report["reason"] = (
+                "no face model found (models/ultralytics/bbox/face_yolov8m.pt) - "
+                "reference left unblurred"
+            )
+            return report
+        wants_detect = False
+
+    patch = settings if settings is not None else settings_for_scope(scope)
+    key = cache_key(
+        source,
+        settings=patch,
+        model=model if wants_detect else None,
+        paint=strokes,
+        extra={"kind": "video", "samples": int(samples), **VIDEO_POLICY},
+    )
+    target = (
+        Path(destination)
+        if destination is not None
+        else derived_path(source, key=key, root=root, suffix=".mp4")
+    )
+    try:
+        relative = target.relative_to(root).as_posix()
+    except ValueError:
+        relative = str(target)
+    try:
+        if target.is_file() and target.stat().st_size > 0:
+            report.update(ok=True, file=relative, cached=True, reason="already blurred")
+            return report
+    except OSError:
+        pass
+
+    started = time.time()
+    try:
+        import cv2
+        import numpy as np
+    except Exception as exc:  # noqa: BLE001 - no opencv, no blur
+        report["reason"] = f"opencv unavailable: {exc}"
+        return report
+
+    capture = cv2.VideoCapture(str(source))
+    if not capture.isOpened():
+        report["reason"] = f"{name!r} could not be opened as a clip"
+        return report
+    try:
+        fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
+        total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+
+        def read_all() -> list[Any]:
+            frames: list[Any] = []
+            while True:
+                ok, frame = capture.read()
+                if not ok or frame is None:
+                    break
+                frames.append(frame)
+            return frames
+
+        frames = read_all()
+        if not frames:
+            report["reason"] = f"{name!r} has no readable frames"
+            return report
+        total = len(frames)
+        if not width or not height:
+            height, width = frames[0].shape[:2]
+        report["frames"] = total
+
+        positions = _sample_positions(total, samples)
+        report["samples"] = len(positions)
+        detections: list[tuple[int, tuple[int, int, int, int]]] = []
+        first_box: tuple[int, int, int, int] | None = None
+        if wants_detect:
+            for position in positions:
+                try:
+                    found = detect_faces(frames[position], conf=conf, detector=detector)
+                except Exception as exc:  # noqa: BLE001 - a detector error is a warning
+                    if not strokes:
+                        report["reason"] = f"face detection failed: {exc}"
+                        return report
+                    log.warning("Character sheet: face detection failed, painting only: %s", exc)
+                    found = []
+                    wants_detect = False
+                    break
+                if not found:
+                    continue
+                if first_box is None:
+                    first_box = found[0]
+                detections.append((position, found[0]))
+        if not detections and not strokes:
+            report["reason"] = "no face detected in the clip - reference left unblurred"
+            return report
+
+        kwargs = _box_kwargs(settings, scope)
+        out_frames: list[Any] = []
+        for index, frame in enumerate(frames):
+            blurred = frame
+            predicted = _predict_box(index, detections)
+            if predicted is not None:
+                box = (
+                    predicted
+                    if index in {position for position, _ in detections}
+                    else _refine_box(frame, predicted, conf=conf, detector=detector)
+                )
+                blurred = blur_boxes(blurred, [box], **kwargs)
+            if strokes:
+                # Painted areas are held: one painting, every frame (the same region of
+                # the frame, which is what a reference clip's framing usually keeps).
+                blurred = blur_painted(blurred, strokes)
+            out_frames.append(blurred)
+
+        if not fps or fps <= 1.0:
+            fps = 24.0
+        target.parent.mkdir(parents=True, exist_ok=True)
+        silent = target.with_name(target.stem + "-video.mp4")
+        writer = cv2.VideoWriter(
+            str(silent), cv2.VideoWriter_fourcc(*"mp4v"), float(fps), (int(width), int(height))
+        )
+        if not writer.isOpened():
+            report["reason"] = "the blurred clip could not be encoded (no mp4 writer)"
+            return report
+        try:
+            for frame in out_frames:
+                writer.write(frame)
+        finally:
+            writer.release()
+        if not silent.is_file() or silent.stat().st_size <= 0:
+            report["reason"] = "the blurred clip came out empty"
+            return report
+        # The sound is part of the reference, so it is carried over rather than dropped.
+        if _mux_audio(silent, source, target):
+            report["audio"] = True
+            silent.unlink(missing_ok=True)
+        else:
+            silent.replace(target)
+    except Exception as exc:  # noqa: BLE001
+        report["reason"] = f"clip blur failed: {exc}"
+        return report
+    finally:
+        capture.release()
+
+    parts = []
+    if detections:
+        parts.append(f"{len(detections)} detection(s) across {len(positions)} sampled frame(s)")
+    if strokes:
+        parts.append(f"{len(strokes)} painted area(s)")
+    report.update(
+        ok=True,
+        file=relative,
+        boxes=[list(box) for _, box in detections[:12]],
+        reason=f"{' + '.join(parts)} blurred over {total} frame(s)"
+        + ("" if report["audio"] else ", audio not carried"),
+        seconds=round(time.time() - started, 2),
+    )
+    log.info(
+        "Character sheet: clip blur %s -> %s (%s, %.2fs)",
+        source.name,
+        relative,
+        report["reason"],
+        report.get("seconds", 0.0),
+    )
+    return report
+
+
+def _silence_with_ffmpeg(source: Path, target: Path) -> bool:
+    """A silent copy of ``source`` at the same length and channel count.
+
+    ``volume=0`` rather than ``-an``: dropping the stream would leave the file with no audio
+    track at all, which ``LoadAudio`` refuses - the reference has to stay a usable sound, it
+    just must not carry a voice.
+    """
+    import subprocess
+
+    exe = _ffmpeg_exe()
+    if exe is None:
+        return False
+    command = [
+        exe, "-y", "-hide_banner", "-loglevel", "error",
+        "-i", str(source), "-af", "volume=0", "-c:a", "pcm_s16le", str(target),
+    ]
+    try:
+        done = subprocess.run(command, capture_output=True, timeout=600, check=False)
+    except Exception:  # noqa: BLE001 - no ffmpeg, the wav path below still works
+        return False
+    if done.returncode == 0 and target.is_file() and target.stat().st_size > 0:
+        return True
+    log.warning(
+        "Character sheet: could not mute %s with ffmpeg (%s)",
+        source.name,
+        (done.stderr or b"").decode("utf-8", "replace").strip()[:200],
+    )
+    return False
+
+
+def _silence_wav(source: Path, target: Path) -> bool:
+    """The pure-Python fallback for a ``.wav``: same parameters, zeroed frames."""
+    import wave
+
+    try:
+        with wave.open(str(source), "rb") as reader:
+            params = reader.getparams()
+            frames = reader.readframes(reader.getnframes())
+    except Exception:  # noqa: BLE001 - anything else needs ffmpeg
+        return False
+    try:
+        with wave.open(str(target), "wb") as writer:
+            writer.setparams(params)
+            writer.writeframes(b"\x00" * len(frames))
+    except Exception:  # noqa: BLE001
+        return False
+    return target.is_file() and target.stat().st_size > 0
+
+
+def mute_audio(
+    name: Any,
+    *,
+    destination: Path | str | None = None,
+    **_: Any,
+) -> dict[str, Any]:
+    """Write a silent copy of one sound reference; never raises.
+
+    This is the audio half of the face blur, and it is deliberately the *same shape* of
+    decision: a reference whose role is not the identity must not hand the model a voice it
+    never asked for. A voice has no pixels, so the removal is the whole sound: the copy keeps
+    the source's length and channel count (it is silence, not a missing track), which keeps
+    the reference usable for pacing while supplying no timbre.
+
+    Extra keyword arguments are accepted and ignored (``paint``, ``detect``, ``scope``,
+    ``detector``, ``conf``) so the caller can treat every kind the same way.
+
+    Returns the same report shape as :func:`blur_image_faces`.
+    """
+    import time
+
+    report: dict[str, Any] = {
+        "ok": False,
+        "reason": "",
+        "file": "",
+        "boxes": [],
+        "painted": 0,
+        "cached": False,
+        "scope": "audio",
+        "muted": False,
+    }
+    source = resolve_input_file(name)
+    root = input_root()
+    if source is None or root is None:
+        report["reason"] = f"{name!r} is not a file inside ComfyUI's input folder"
+        return report
+
+    key = cache_key(source, extra={"kind": "audio", "job": "mute"})
+    target = (
+        Path(destination)
+        if destination is not None
+        else derived_path(source, key=key, root=root, suffix=".wav")
+    )
+    try:
+        relative = target.relative_to(root).as_posix()
+    except ValueError:
+        relative = str(target)
+    try:
+        if target.is_file() and target.stat().st_size > 0:
+            report.update(ok=True, file=relative, cached=True, muted=True, reason="already muted")
+            return report
+    except OSError:
+        pass
+
+    started = time.time()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    partial = target.with_name(target.stem + "-part.wav")
+    if _silence_with_ffmpeg(source, partial) or _silence_wav(source, partial):
+        partial.replace(target)
+        report.update(
+            ok=True,
+            file=relative,
+            muted=True,
+            reason="voice muted (silence at the source's own length)"
+            + ("" if _ffmpeg_exe() else ", no ffmpeg"),
+            seconds=round(time.time() - started, 2),
+        )
+        log.info("Character sheet: audio mute %s -> %s", source.name, relative)
+        return report
+    report["reason"] = (
+        "no ffmpeg and not a .wav, so this sound could not be muted - "
+        "reference left as it is"
+    )
+    return report
+
+
 def blur_reference_plan(
     spec: Any,
     plan: dict[str, list[dict[str, Any]]],
@@ -595,14 +1142,27 @@ def blur_reference_plan(
             if decision == "unsupported":
                 lines.append(
                     f"face blur: {item.get('file')!r} is a {kind} reference and is not "
-                    "blurred (only pictures are); its role still forbids the likeness in the prompt."
+                    "blurred; its role still forbids the likeness in the prompt."
                 )
                 continue
             if decision != "blur":
                 continue
             original = str(item.get("file") or "")
             strokes = painted.get((kind, index)) or []
-            report = blur_image_faces(
+            if kind == "audio":
+                # A voice is not blurred, it is muted - and it has no painting to do.
+                report = mute_audio(original)
+                if report.get("ok"):
+                    item["file"] = report["file"]
+                    lines.append(
+                        f"voice mute: {Path(original).name} -> {report['file']} "
+                        f"({report.get('reason', '')}{', cached' if report.get('cached') else ''})"
+                    )
+                else:
+                    lines.append(f"voice mute skipped for {original!r}: {report.get('reason', '')}")
+                continue
+            blur = blur_video_faces if kind == "video" else blur_image_faces
+            report = blur(
                 original,
                 scope=scope,
                 paint=strokes,
@@ -633,16 +1193,26 @@ __all__ = [
     "SCOPE_SETTINGS",
     "SETTINGS",
     "SIGMA",
+    "AUDIO_SUFFIXES",
+    "CLIP_SUFFIXES",
+    "TRACK_SEARCH",
+    "VIDEO_MAX_GAP",
+    "VIDEO_POLICY",
+    "VIDEO_SAMPLES",
     "blur_boxes",
     "blur_image_faces",
     "blur_painted",
     "blur_reference_plan",
+    "blur_video_faces",
     "cache_key",
     "derived_path",
     "detect_faces",
     "feather_mask",
     "input_root",
+    "is_audio_name",
+    "is_clip_name",
     "load_detector",
+    "mute_audio",
     "model_path",
     "PAINT_DEFAULT_RADIUS",
     "paint_mask",

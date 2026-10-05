@@ -201,7 +201,7 @@
       ],
       "size": [
         900,
-        702
+        800
       ],
       "flags": {
         "pinned": true
@@ -260,6 +260,8 @@
         }
       ],
       "properties": {
+        "aux_id": "The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder",
+        "ver": "ea569976c39f9f9866e6fd89827a1489b5e390bf",
         "Node name for S&R": "MiniMaxH3CharacterSheet",
         "ue_properties": {
           "widget_ue_connectable": {},
@@ -269,7 +271,7 @@
       },
       "widgets_values": [
         "",
-        "{\"version\":1,\"refs\":{\"pictures\":[],\"videos\":[],\"audios\":[]},\"cells\":[{\"id\":\"face-neutral-neutral\",\"view\":\"face\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"portrait-neutral-neutral\",\"view\":\"portrait\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"front-neutral-neutral\",\"view\":\"front\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"profile-neutral-neutral\",\"view\":\"profile\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"back-neutral-neutral\",\"view\":\"back\",\"pose\":\"neutral\",\"expression\":\"neutral\"}],\"build\":{\"views\":[\"face\",\"portrait\",\"front\",\"profile\",\"back\"],\"poses\":[\"neutral\"],\"expressions\":[\"neutral\"]},\"render\":{\"background\":\"tan\",\"blurScope\":\"hair\",\"continuity\":\"auto\",\"exportVideo\":true,\"preset\":\"full-fidelity\"},\"ui\":{\"compactKnobs\":true,\"nodePreviews\":\"panel\",\"panelPreview\":\"medium\",\"autoRefresh\":false}}",
+        "{\"version\":1,\"refs\":{\"pictures\":[],\"videos\":[],\"audios\":[]},\"cells\":[{\"id\":\"face-neutral-neutral\",\"view\":\"face\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"portrait-neutral-neutral\",\"view\":\"portrait\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"front-neutral-neutral\",\"view\":\"front\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"profile-neutral-neutral\",\"view\":\"profile\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"back-neutral-neutral\",\"view\":\"back\",\"pose\":\"neutral\",\"expression\":\"neutral\"}],\"build\":{\"views\":[\"face\",\"front\"],\"poses\":[\"neutral\"],\"expressions\":[\"neutral\"]},\"render\":{\"background\":\"neutral\",\"blurScope\":\"hair\",\"continuity\":\"off\",\"exportVideo\":true,\"resolution\":\"4k\"},\"ui\":{\"compactKnobs\":true,\"nodePreviews\":\"panel\",\"panelPreview\":\"medium\",\"autoRefresh\":false}}",
         "character_sheet",
         2048,
         22,
@@ -284,7 +286,7 @@
         "hero-left",
         2,
         "3:2",
-        3840,
+        2176,
         true,
         "#101014",
         "contain",
@@ -293,11 +295,12 @@
         "3:4",
         "per framing",
         "auto",
+        true,
         true
       ],
       "widgets_values_named": {
         "h3_character_sheet_ui": "",
-        "sheet_data": "{\"version\":1,\"refs\":{\"pictures\":[],\"videos\":[],\"audios\":[]},\"cells\":[{\"id\":\"face-neutral-neutral\",\"view\":\"face\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"portrait-neutral-neutral\",\"view\":\"portrait\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"front-neutral-neutral\",\"view\":\"front\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"profile-neutral-neutral\",\"view\":\"profile\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"back-neutral-neutral\",\"view\":\"back\",\"pose\":\"neutral\",\"expression\":\"neutral\"}],\"build\":{\"views\":[\"face\",\"portrait\",\"front\",\"profile\",\"back\"],\"poses\":[\"neutral\"],\"expressions\":[\"neutral\"]},\"render\":{\"background\":\"tan\",\"blurScope\":\"hair\",\"continuity\":\"auto\",\"exportVideo\":true,\"preset\":\"full-fidelity\"},\"ui\":{\"compactKnobs\":true,\"nodePreviews\":\"panel\",\"panelPreview\":\"medium\",\"autoRefresh\":false}}",
+        "sheet_data": "{\"version\":1,\"refs\":{\"pictures\":[],\"videos\":[],\"audios\":[]},\"cells\":[{\"id\":\"face-neutral-neutral\",\"view\":\"face\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"portrait-neutral-neutral\",\"view\":\"portrait\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"front-neutral-neutral\",\"view\":\"front\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"profile-neutral-neutral\",\"view\":\"profile\",\"pose\":\"neutral\",\"expression\":\"neutral\"},{\"id\":\"back-neutral-neutral\",\"view\":\"back\",\"pose\":\"neutral\",\"expression\":\"neutral\"}],\"build\":{\"views\":[\"face\",\"front\"],\"poses\":[\"neutral\"],\"expressions\":[\"neutral\"]},\"render\":{\"background\":\"neutral\",\"blurScope\":\"hair\",\"continuity\":\"off\",\"exportVideo\":true,\"resolution\":\"4k\"},\"ui\":{\"compactKnobs\":true,\"nodePreviews\":\"panel\",\"panelPreview\":\"medium\",\"autoRefresh\":false}}",
         "output_name": "character_sheet",
         "cell_size": 2048,
         "frames_per_cell": 22,
@@ -312,7 +315,7 @@
         "sheet_layout": "hero-left",
         "sheet_columns": 2,
         "sheet_aspect": "3:2",
-        "sheet_short_edge": 3840,
+        "sheet_short_edge": 2176,
         "sheet_captions": true,
         "sheet_background": "#101014",
         "sheet_fit": "contain",
@@ -321,7 +324,8 @@
         "cell_aspect": "3:4",
         "ref_scope": "per framing",
         "continuity": "auto",
-        "export_video": true
+        "export_video": true,
+        "single_pass": true
       },
       "color": "#332922",
       "bgcolor": "#593930"
@@ -331,7 +335,7 @@
       "type": "SaveImage",
       "pos": [
         1320,
-        530
+        570
       ],
       "size": [
         500,
@@ -384,7 +388,7 @@
       ],
       "size": [
         500,
-        440
+        480
       ],
       "flags": {
         "pinned": true
@@ -449,6 +453,8 @@
         }
       ],
       "properties": {
+        "aux_id": "The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder",
+        "ver": "ea569976c39f9f9866e6fd89827a1489b5e390bf",
         "Node name for S&R": "H3SheetRefMod",
         "ue_properties": {
           "widget_ue_connectable": {},
@@ -468,7 +474,9 @@
         true,
         "",
         "character_sheets",
-        ""
+        "",
+        16,
+        0
       ],
       "widgets_values_named": {
         "name": "elf_girl_test",
@@ -482,7 +490,9 @@
         "save": true,
         "sheet_dir": "",
         "subfolder": "character_sheets",
-        "description": ""
+        "description": "",
+        "video_frames": 16,
+        "video_start": 0
       },
       "color": "#323",
       "bgcolor": "#535"
@@ -575,14 +585,14 @@
   "extra": {
     "ue_links": [],
     "ds": {
-      "scale": 1.4864362802414384,
+      "scale": 1.0152559799477074,
       "offset": [
-        -625.4812273495444,
-        -4.302400484701778
+        194.37743272168072,
+        194.96976606379513
       ]
     },
     "links_added_by_ue": [],
-    "frontendVersion": "1.53.6",
+    "frontendVersion": "1.53.10",
     "VHS_latentpreview": true,
     "VHS_latentpreviewrate": 0,
     "VHS_MetadataImage": true,

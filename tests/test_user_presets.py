@@ -77,7 +77,7 @@ def test_a_saved_preset_has_the_same_shape_as_a_built_in_one():
     assert saved["custom"] is True
     assert built_in["custom"] is False, "only what the user saved is deletable"
     assert [entry["custom"] for entry in preset_mod.preset_list()] == [
-        False, False, False, False, False, False, False, True,
+        *[False] * len(preset_mod.PRESETS), True,
     ], "built-ins first, the user's own last"
 
 
@@ -230,11 +230,12 @@ def test_deleting_is_case_insensitive_like_every_other_lookup():
 
 def test_a_built_in_preset_cannot_be_deleted():
     """The pack's own recommendations are not the user's to remove."""
+    built_ins = len(preset_mod.PRESETS)
     for built_in in preset_mod.PRESETS:
         result = up.delete_preset(built_in.id)
         assert result["ok"] is False, built_in.id
         assert "built-in" in result["reason"]
-    assert len(preset_mod.PRESETS) == 7, "and nothing was removed on the way"
+    assert len(preset_mod.PRESETS) == built_ins, "and nothing was removed on the way"
 
 
 def test_deleting_something_that_is_not_there_says_so():

@@ -135,6 +135,10 @@ class H3SheetGrid(io.ComfyNode):
             lines.append("Empty cells (no frames): " + ", ".join(missing))
         for warning in spec.warnings:
             lines.append(f"Warning: {warning}")
+        # Lines the builder node knows and the grid cannot compute: which references were
+        # blurred, whether the panel's live preview is on, that this run was a draft. They
+        # ride in the payload so report.txt is ONE text, written here.
+        lines.extend(str(note) for note in spec.notes if str(note).strip())
         if result.get("size"):
             width, height = result["size"]
             lines.append(f"Sheet: {store.sheet_path} ({width}x{height})")

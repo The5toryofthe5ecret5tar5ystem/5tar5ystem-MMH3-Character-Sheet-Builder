@@ -42,7 +42,7 @@ from . import face_blur, sheet_media, sheet_spec, sheet_store, user_presets
 from . import planner as sheet_planner
 from .help import help_payload
 from .knobs import KNOB_COLUMNS, KNOB_GROUPS, knob_groups, knob_list
-from .presets import DEFAULT_PRESET_ID, preset_list
+from .presets import DEFAULT_LAYOUT_ID, DEFAULT_PRESET_ID, PRESET_KINDS, preset_list, resolution_list
 from .user_presets import delete_preset, save_preset
 from .sheet_store import SheetStore
 
@@ -50,7 +50,7 @@ log = logging.getLogger("ComfyUI-MiniMax-H3-Motion-Director.sheet.routes")
 
 BASE = "/h3-character-sheet"
 _ACTIONS = (
-    "list", "plan", "presets", "save-preset", "delete-preset", "knobs", "help", "blur",
+    "list", "plan", "presets", "save-preset", "delete-preset", "knobs", "help", "blur", "gallery",
     "compose", "pick", "delete", "clear", "names",
 )
 
@@ -146,14 +146,18 @@ async def sheet_action(request):
         # Pure computation on the payload: no sheet folder, no GPU, no render.
         return _plan_response(body)
     if action == "presets":
-        # The recommended whole-node settings. Served rather than duplicated in the panel:
-        # one definition, and the panel can only offer what the backend knows.
+        # The recommended settings, served rather than duplicated in the panel: one definition,
+        # and the panel can only offer what the backend knows. Two axes (layout / quality) plus
+        # the resolution control, which writes the two sizes no preset touches.
         return web.json_response(
             {
                 "ok": True,
                 "action": "presets",
                 "presets": preset_list(),
+                "kinds": [{"key": key, "label": label} for key, label in PRESET_KINDS],
                 "default": DEFAULT_PRESET_ID,
+                "defaultLayout": DEFAULT_LAYOUT_ID,
+                "resolutions": resolution_list(),
                 "store": str(user_presets.store_path()),
             }
         )
@@ -219,6 +223,12 @@ async def sheet_action(request):
     try:
         if action == "list":
             return web.json_response(_listing(store, action=action, extra={"picks": picks or {}}))
+
+        if action == "gallery":
+            # The panel's own last renders, one per LAYOUT preset - the card art (see
+            # sheet_store.gallery_art). Read-only and cheap: newest folders only.
+            payload = sheet_store.gallery_art()
+            return web.json_response({"ok": True, "action": "gallery", **payload})
 
         if action == "pick":
             cell_id = str(body.get("cell") or "").strip()
@@ -287,6 +297,16 @@ def _blur_response(body: dict[str, Any]) -> web.Response:
     name = str(body.get("file") or "").strip()
     if not name:
         return _json_error("blur needs the reference 'file'.")
+    # A clip is blurred by a different pass (sampled detection, tracked box, re-encode), so
+    # which one runs has to be decided here. The panel says which kind it is previewing; a
+    # suffix is the fallback, so an older panel (or a bare curl) still does the right thing.
+    kind = str(body.get("kind") or "").strip().lower()
+    if kind not in ("picture", "video", "audio"):
+        kind = (
+            "video" if face_blur.is_clip_name(name)
+            else "audio" if face_blur.is_audio_name(name)
+            else "picture"
+        )
     scope = str(body.get("scope") or "").strip().lower() or None
     paint = body.get("paint") if isinstance(body.get("paint"), list) else None
     detect = body.get("detect") if isinstance(body.get("detect"), bool) else None
@@ -298,29 +318,35 @@ def _blur_response(body: dict[str, Any]) -> web.Response:
             slot = int(str(body.get("slot", "")) or -1)
             decisions = sheet_spec.blur_face_decisions(spec)
             detects = sheet_spec.blur_detects_faces(spec)
+            label = {"picture": "Picture", "video": "Video", "audio": "Audio"}[kind]
             if slot >= 0:
-                applies = decisions.get(("picture", slot)) == "blur"
+                # "mute" is the audio half of the same decision, so both count as applying.
+                applies = decisions.get((kind, slot)) in ("blur", "mute")
                 if detect is None:
-                    detect = detects.get(("picture", slot), True)
+                    detect = detects.get((kind, slot), True)
                 if paint is None:
                     for ref in spec.refs:
                         origin = ref.source if ref.source >= 0 else ref.index
-                        if ref.kind == "picture" and origin == slot:
+                        if ref.kind == kind and origin == slot:
                             paint = [dict(stroke) for stroke in ref.blur_paint]
                             break
             else:
-                # No slot given: report the run's picture decisions by reference tag.
+                # No slot given: report this kind's decisions by reference tag.
                 applies = [
-                    f"<Picture {index + 1}>"
-                    for (kind, index), decision in sorted(decisions.items())
-                    if kind == "picture" and decision == "blur"
+                    f"<{label} {index + 1}>"
+                    for (decision_kind, index), decision in sorted(decisions.items())
+                    if decision_kind == kind and decision in ("blur", "mute")
                 ]
             scope = scope or spec.render.blur_scope
         except Exception as exc:  # noqa: BLE001 - a preview must not fail on a bad spec
             log.warning("blur preview could not read the spec: %s", exc)
-    report = face_blur.blur_image_faces(
-        name, scope=scope, paint=paint, detect=detect
-    )
+    if kind == "audio":
+        # A voice is muted, not blurred; the extra arguments do not apply to it (and the
+        # mute pass accepts and ignores them, so the call stays the same shape).
+        report = face_blur.mute_audio(name, paint=paint, detect=detect, scope=scope)
+    else:
+        blur = face_blur.blur_video_faces if kind == "video" else face_blur.blur_image_faces
+        report = blur(name, scope=scope, paint=paint, detect=detect)
     if not report.get("ok") and applies is False:
         # The detector was skipped on purpose (the render leaves this reference alone), so
         # "no face detected" would be a lie about what happened.
@@ -389,17 +415,23 @@ def _plan_response(body: dict[str, Any]) -> web.Response:
 
 
 def _blurred_tags(plan: dict[str, Any], decisions: dict[tuple[str, int], str]) -> list[str]:
-    """The tags in a cell's plan that will be wired as a blurred copy.
+    """The tags in a cell's plan that will be wired as a blurred or muted copy.
 
     Read from the plan rather than recomputed, so the answer matches what the render
     will do - the plan is the wiring, including the source slot each entry came from.
     """
     tags: list[str] = []
-    for index, item in enumerate(plan.get("pictures") or []):
-        slot = str(item.get("source_slot_id") or "")
-        source = int(slot.rsplit("_", 1)[-1]) if slot.rsplit("_", 1)[-1].isdigit() else index
-        if decisions.get(("picture", source)) == "blur":
-            tags.append(f"<Picture {index + 1}>")
+    groups = (
+        ("pictures", "picture", "Picture"),
+        ("videos", "video", "Video"),
+        ("audios", "audio", "Audio"),
+    )
+    for group, kind, label in groups:
+        for index, item in enumerate(plan.get(group) or []):
+            slot = str(item.get("source_slot_id") or "")
+            source = int(slot.rsplit("_", 1)[-1]) if slot.rsplit("_", 1)[-1].isdigit() else index
+            if decisions.get((kind, source)) in ("blur", "mute"):
+                tags.append(f"<{label} {index + 1}>")
     return tags
 
 

@@ -62,7 +62,8 @@ def test_an_explicit_on_and_off_beat_the_automatic_rule():
     assert decisions[("picture", 2)] == "keep"
 
 
-def test_a_video_is_never_blurred_but_an_explicit_on_is_reported():
+def test_a_clip_is_blurred_like_a_picture():
+    """A reference clip carries a face in its pixels exactly as a photo does."""
     spec = ss.parse_sheet_spec(
         {
             "refs": {
@@ -70,14 +71,96 @@ def test_a_video_is_never_blurred_but_an_explicit_on_is_reported():
                 "videos": [
                     {"videoFile": "b.mp4", "role": "clothing and body"},
                     {"videoFile": "c.mp4", "role": "clothing", "blurFace": "on"},
+                    {"videoFile": "d.mp4", "role": "motion"},
                 ],
             },
             "cells": [{"id": "c", "view": "portrait"}],
         }
     )
     decisions = ss.blur_face_decisions(spec)
-    assert decisions[("video", 0)] == "keep", "auto says nothing about a video"
-    assert decisions[("video", 1)] == "unsupported"
+    assert decisions[("video", 0)] == "blur", "auto blurs the outfit clip of a second person"
+    assert decisions[("video", 1)] == "blur", "and an explicit on needs no rule"
+    assert decisions[("video", 2)] == "keep", "a role that says nothing is left alone"
+
+
+def test_the_clip_that_is_the_identity_source_is_never_auto_blurred():
+    """An H3 run whose motion comes from a clip usually takes its likeness from that clip."""
+    spec = ss.parse_sheet_spec(
+        {
+            "refs": {
+                "videos": [
+                    {"videoFile": "hero.mp4", "role": "face and hair"},
+                    {"videoFile": "outfit.mp4", "role": "clothing and body"},
+                ],
+            },
+            "cells": [{"id": "c", "view": "portrait"}],
+        }
+    )
+    decisions = ss.blur_face_decisions(spec)
+    assert decisions[("video", 0)] == "keep", "the likeness lives in this clip - leave it alone"
+    assert decisions[("video", 1)] == "blur", "the second person's clip still goes"
+
+
+def test_a_sound_reference_is_muted_rather_than_blurred():
+    """A voice has no pixels, so the removal is the whole sound - and the decision says so."""
+    spec = ss.parse_sheet_spec(
+        {
+            "refs": {
+                "pictures": [{"imageFile": "a.jpg", "role": "face and hair"}],
+                "audios": [{"audioFile": "v.wav", "role": "voice", "blurFace": "on"}],
+            },
+            "cells": [{"id": "c"}],
+        }
+    )
+    assert ss.blur_face_decisions(spec)[("audio", 0)] == "mute"
+
+
+def test_auto_keeps_a_voice_and_only_an_explicit_on_mutes_it():
+    """A sound reference is added on purpose - unlike a face in a photo, it is not a leak.
+
+    So "auto" keeps every voice (the reference that carries the likeness included) and the
+    tile's "on" is how a voice is muted. Muting a second voice automatically would break the
+    run the reference was added for.
+    """
+    spec = ss.parse_sheet_spec(
+        {
+            "refs": {
+                "pictures": [{"imageFile": "a.jpg", "role": "face and hair"}],
+                "audios": [
+                    {"audioFile": "hero.wav", "role": "voice and likeness"},
+                    {"audioFile": "other.wav", "role": "voice"},
+                    {"audioFile": "third.wav", "role": "voice", "blurFace": "on"},
+                ],
+            },
+            "cells": [{"id": "c"}],
+        }
+    )
+    decisions = ss.blur_face_decisions(spec)
+    assert decisions[("audio", 0)] == "keep", "the identity reference keeps its voice"
+    assert decisions[("audio", 1)] == "keep", "and so does an ordinary second voice, by auto"
+    assert decisions[("audio", 2)] == "mute", "an explicit on mutes it"
+    # An explicit "off" says the same thing the default already did, which is what keeps the
+    # badge a real three-state cycle rather than two states and a no-op.
+    off = ss.blur_face_decisions(ss.parse_sheet_spec(
+        {"refs": {"audios": [{"audioFile": "v.wav", "role": "voice", "blurFace": "off"}]},
+         "cells": [{"id": "c"}]}
+    ))
+    assert off[("audio", 0)] == "keep"
+
+
+def test_painting_a_sound_is_still_reported_rather_than_half_done():
+    """There are no pixels in a voice: a painting on one has to be said out loud."""
+    spec = ss.parse_sheet_spec(
+        {
+            "refs": {
+                "pictures": [{"imageFile": "a.jpg", "role": "face and hair"}],
+                "audios": [{"audioFile": "v.wav", "role": "voice",
+                            "blurPaint": [{"tool": "brush", "points": [[0.5, 0.5]], "radius": 0.05}]}],
+            },
+            "cells": [{"id": "c"}],
+        }
+    )
+    assert ss.blur_face_decisions(spec)[("audio", 0)] == "unsupported"
 
 
 def test_the_mode_survives_the_payload_round_trip():
@@ -425,3 +508,422 @@ def test_nothing_is_touched_when_nothing_is_flagged(tmp_path, monkeypatch):
             "videos": [], "audios": []}
     assert fb.blur_reference_plan(spec, plan, detector=_FakeModel()) == []
     assert plan["pictures"][0]["file"] == "h3_character_sheet/ref.jpg"
+
+
+# --------------------------------------------------------------------------- #
+# the clip pass (fake detector, real video)
+# --------------------------------------------------------------------------- #
+class _BrightModel:
+    """A detector that finds a bright block wherever it actually is.
+
+    ``_FakeModel`` answers with a fixed box, which is fine for a still and useless for a
+    clip: the whole point of the clip pass is that the face MOVES, so this one reads the
+    picture it is handed and reports the brightest region. That makes the tracking test a
+    real test - the box it returns for a frame is derived from that frame.
+    """
+
+    def __init__(self, threshold=180, largest=False):
+        self.threshold = threshold
+        self.largest = largest
+        self.calls = 0
+
+    def predict(self, image, **_kwargs):  # noqa: ANN003 - mirrors ultralytics
+        self.calls += 1
+        grey = np.asarray(image)
+        grey = grey[..., 0] if grey.ndim == 3 else grey
+        ys, xs = np.where(grey >= self.threshold)
+        if len(xs) == 0:
+            return [_FakeResult([])]
+        # A round "face": the middle of the bright mass, a fixed size, so the box is a
+        # function of the frame and barely of its shape.
+        cx, cy = float(xs.mean()), float(ys.mean())
+        half_w = max(6.0, (xs.max() - xs.min() + 1) / 2.0)
+        half_h = max(6.0, (ys.max() - ys.min() + 1) / 2.0)
+        if self.largest:
+            half_w = min(half_w, 40.0)
+            half_h = min(half_h, 40.0)
+        box = [cx - half_w, cy - half_h, cx + half_w, cy + half_h]
+        return [_FakeResult([box])]
+
+
+def _clip_tree(tmp_path, monkeypatch, frames=40, size=(192, 192), with_audio=False):
+    """A fake install with one reference CLIP: a bright block walking across the frame.
+
+    The block is face-sized (56px in a 192px frame) on purpose: the blur patch is grown
+    from the box, so a tiny block would get a tiny sigma and the pass would barely change
+    its pixels - which would make the assertions below measure the geometry of the test
+    rather than the blur.
+    """
+    import cv2
+
+    root = tmp_path / "input"
+    refs = root / "h3_character_sheet"
+    refs.mkdir(parents=True)
+    target = refs / "ref.mp4"
+    writer = cv2.VideoWriter(
+        str(target), cv2.VideoWriter_fourcc(*"mp4v"), 12.0, (size[0], size[1])
+    )
+    box = []
+    for index in range(frames):
+        frame = np.full((size[1], size[0], 3), 30, dtype=np.uint8)
+        left = 16 + int(index * 2)
+        top = 70
+        frame[top:top + 56, left:left + 56] = 210  # the "face", moving right
+        # ...with detail on it: stripes a few pixels apart stand in for eyes and features.
+        # A blur cannot remove a flat patch's brightness, but it must remove this.
+        frame[top + 8:top + 48:8, left + 6:left + 50] = 45
+        frame[top + 20:top + 26, left + 12:left + 44] = 30
+        box.append((left, top, left + 56, top + 56))
+        writer.write(frame)
+    writer.release()
+    monkeypatch.setattr(fb, "input_root", lambda: root)
+    monkeypatch.setattr(fb, "model_path", lambda: target)
+    return root, target, box
+
+
+def _read_clip(path):
+    import cv2
+
+    capture = cv2.VideoCapture(str(path))
+    frames = []
+    while True:
+        ok, frame = capture.read()
+        if not ok or frame is None:
+            break
+        frames.append(frame)
+    fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
+    capture.release()
+    return frames, fps
+
+
+def _reencode(frames, path, fps=12.0):
+    """The control: the same frames through the same writer, with no blur.
+
+    A clip is written with a lossy codec, so "these pixels changed" is not evidence of
+    anything on its own. Re-encoding the source without the blur pass isolates it: what is
+    left is what the blur did.
+    """
+    import cv2
+
+    height, width = frames[0].shape[:2]
+    writer = cv2.VideoWriter(
+        str(path), cv2.VideoWriter_fourcc(*"mp4v"), float(fps), (width, height)
+    )
+    for frame in frames:
+        writer.write(frame)
+    writer.release()
+    return _read_clip(path)[0]
+
+
+def test_a_clip_is_blurred_frame_by_frame_and_keeps_its_length(tmp_path, monkeypatch):
+    root, target, box = _clip_tree(tmp_path, monkeypatch, frames=40)
+    source_frames, _ = _read_clip(target)
+    control = _reencode(source_frames, tmp_path / "control.mp4")
+    report = fb.blur_video_faces("h3_character_sheet/ref.mp4", detector=_BrightModel())
+
+    assert report["ok"] is True, report
+    assert report["file"].endswith(".mp4"), "a clip has to stay a clip"
+    assert report["frames"] == 40
+    written = root / report["file"]
+    frames, fps = _read_clip(written)
+    assert len(frames) == 40, "every frame is written back"
+    assert abs(fps - 12.0) < 0.5, "at the clip's own rate"
+    assert frames[0].shape == (192, 192, 3), "and its own size"
+    # The face really is blurred. A bright flat patch would survive any blur, so the
+    # measurement is the DETAIL inside it: the control (same codec, no pass) keeps it, the
+    # blurred clip does not.
+    face = (slice(72, 124), slice(62, 126))
+    detail_control = float(control[20][face].std())
+    detail_blurred = float(frames[20][face].std())
+    assert detail_control > 40.0, f"the fixture really carries detail ({detail_control:.1f})"
+    assert detail_blurred < detail_control * 0.6, (
+        f"the features are gone ({detail_blurred:.1f} vs {detail_control:.1f})"
+    )
+    # …and the blur stayed local: the background is not smeared by it.
+    assert float(frames[20][0:40, 0:40].std()) == pytest.approx(
+        float(control[20][0:40, 0:40].std()), abs=6.0
+    )
+    assert target.is_file(), "and the original clip is untouched"
+
+
+def test_the_clip_tracker_follows_the_face_instead_of_a_fixed_box(tmp_path, monkeypatch):
+    """The point of sampling + tracking: the blur walks with the face."""
+    import cv2
+
+    root, target, _ = _clip_tree(tmp_path, monkeypatch, frames=32)
+    source_frames, _ = _read_clip(target)
+    control = _reencode(source_frames, tmp_path / "control.mp4")
+    report = fb.blur_video_faces("h3_character_sheet/ref.mp4", detector=_BrightModel())
+    assert report["ok"] is True, report
+    first, last = report["boxes"][0], report["boxes"][-1]
+    assert last[0] > first[0] + 20, f"the tracked box moved right with the block: {first} -> {last}"
+
+    frames, _ = _read_clip(root / report["file"])
+    # On a late frame the block sits around x=72..128. A pass that blurred one fixed patch
+    # (the one frame 0 needed) would leave that place crisp - so this is the assertion that
+    # the blur followed the move rather than being applied once and repeated.
+    late = 28
+    moved_region = (slice(74, 122), slice(76, 124))
+    detail_control = float(control[late][moved_region].std())
+    assert detail_control > 40.0, "the block is really there in the control"
+    assert float(frames[late][moved_region].std()) < detail_control * 0.6, (
+        "the late frame is blurred where the block now is, not where it started"
+    )
+    # …and it did not smear the whole frame to get there: the background keeps its value.
+    assert float(frames[late][0:40, 0:40].mean()) == pytest.approx(
+        float(control[late][0:40, 0:40].mean()), abs=6.0
+    )
+    # The tracker is measured on the frames between the samples, so the derived clip is
+    # still a normal clip the loader will open.
+    assert cv2.VideoCapture(str(root / report["file"])).isOpened()
+
+
+def test_a_second_clip_pass_is_served_from_the_cache(tmp_path, monkeypatch):
+    root, _, _ = _clip_tree(tmp_path, monkeypatch, frames=20)
+    detector = _BrightModel()
+    first = fb.blur_video_faces("h3_character_sheet/ref.mp4", detector=detector)
+    calls = detector.calls
+    second = fb.blur_video_faces("h3_character_sheet/ref.mp4", detector=detector)
+    assert second["ok"] is True and second["cached"] is True
+    assert second["file"] == first["file"]
+    assert detector.calls == calls, "a cached clip costs no detection at all"
+
+
+def test_a_clip_with_no_face_is_left_alone_with_a_reason(tmp_path, monkeypatch):
+    root, _, _ = _clip_tree(tmp_path, monkeypatch, frames=12)
+
+    class _Blind:
+        def predict(self, image, **_kwargs):  # noqa: ANN003
+            return [_FakeResult([])]
+
+    report = fb.blur_video_faces("h3_character_sheet/ref.mp4", detector=_Blind())
+    assert report["ok"] is False
+    assert "no face detected in the clip" in report["reason"]
+    assert not any((root / "h3_character_sheet" / "derived").glob("*.mp4"))
+
+
+def test_a_clip_can_be_painted_without_a_detector(tmp_path, monkeypatch):
+    """Paint-only needs no model, and the painting is held across the whole clip."""
+    root, target, _ = _clip_tree(tmp_path, monkeypatch, frames=16)
+    source_frames, _ = _read_clip(target)
+    control = _reencode(source_frames, tmp_path / "control.mp4")
+    strokes = [{
+        "tool": "brush",
+        "radius": 0.08,
+        "points": [[0.2, 0.5], [0.8, 0.5]],
+    }]
+    report = fb.blur_video_faces(
+        "h3_character_sheet/ref.mp4", detect=False, paint=strokes, detector=None
+    )
+    assert report["ok"] is True, report
+    assert report["painted"] == 1 and report["boxes"] == []
+    frames, _ = _read_clip(root / report["file"])
+    # The stroke runs across the middle, where the face's features are: its detail drops on
+    # the FIRST and the LAST frame alike, which is what "the painting is held" means (an
+    # unheld painting would only soften the frame it was drawn on).
+    band = (slice(84, 108), slice(30, 150))
+    for index in (0, len(frames) - 1):
+        sharp = float(control[index][band].std())
+        soft = float(frames[index][band].std())
+        assert sharp > 40.0, f"frame {index}: the fixture really carries detail ({sharp:.1f})"
+        assert soft < sharp * 0.8, (
+            f"frame {index}: the painted band is softer ({soft:.1f} vs {sharp:.1f})"
+        )
+
+
+def test_the_clip_policy_is_part_of_the_cache_key(tmp_path, monkeypatch):
+    root, target, _ = _clip_tree(tmp_path, monkeypatch, frames=10)
+    base = fb.cache_key(target)
+    assert fb.cache_key(target, extra={"kind": "video", "samples": 12}) != base
+    assert fb.cache_key(target, extra={"kind": "video", "samples": 24}) != fb.cache_key(
+        target, extra={"kind": "video", "samples": 12}
+    )
+
+
+def test_the_sampling_leaves_no_gap_it_cannot_bridge():
+    assert fb._sample_positions(1) == [0]
+    assert fb._sample_positions(2) == [0, 1]
+    positions = fb._sample_positions(40)
+    assert positions[0] == 0 and positions[-1] == 39
+    assert positions == sorted(set(positions)), "each frame is sampled once"
+    gaps = [b - a for a, b in zip(positions, positions[1:])]
+    assert max(gaps) <= fb.VIDEO_MAX_GAP, f"gaps stay bridgeable: {gaps}"
+    # A long clip gets more samples rather than bigger gaps.
+    long = fb._sample_positions(900)
+    assert len(long) > fb.VIDEO_SAMPLES
+    assert max(b - a for a, b in zip(long, long[1:])) <= fb.VIDEO_MAX_GAP
+
+
+def test_a_video_reference_in_the_plan_is_rewritten_to_the_blurred_clip(tmp_path, monkeypatch):
+    root, target, _ = _clip_tree(tmp_path, monkeypatch, frames=16)
+    spec = ss.parse_sheet_spec(
+        {
+            "refs": {
+                "pictures": [{"imageFile": "a.jpg", "role": "face and hair"}],
+                "videos": [{"videoFile": "h3_character_sheet/ref.mp4", "role": "clothing",
+                            "blurFace": "on"}],
+            },
+            "cells": [{"id": "c"}],
+        }
+    )
+    plan = {"videos": [{"file": "h3_character_sheet/ref.mp4", "source_slot_id": "video_0"}]}
+    lines = fb.blur_reference_plan(spec, plan, detector=_BrightModel())
+    assert plan["videos"][0]["file"].endswith(".mp4")
+    assert plan["videos"][0]["file"] != "h3_character_sheet/ref.mp4"
+    assert (root / plan["videos"][0]["file"]).is_file(), "the plan points at a real file"
+    assert any("ref.mp4" in line for line in lines), lines
+
+
+# --------------------------------------------------------------------------- #
+# the sound pass (mute: a voice has no pixels)
+# --------------------------------------------------------------------------- #
+def _sound_tree(tmp_path, monkeypatch, seconds=0.5, rate=8000):
+    """A fake install with one reference sound: a real tone, not silence."""
+    import math
+    import wave
+
+    root = tmp_path / "input"
+    refs = root / "h3_character_sheet"
+    refs.mkdir(parents=True)
+    target = refs / "voice.wav"
+    frames = int(seconds * rate)
+    samples = bytearray()
+    for index in range(frames):
+        value = int(12000 * math.sin(2 * math.pi * 220 * index / rate))
+        samples += int(value).to_bytes(2, "little", signed=True)
+    with wave.open(str(target), "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(rate)
+        writer.writeframes(bytes(samples))
+    monkeypatch.setattr(fb, "input_root", lambda: root)
+    monkeypatch.setattr(fb, "model_path", lambda: target)
+    return root, target
+
+
+def test_a_sound_reference_is_muted_at_its_own_length(tmp_path, monkeypatch):
+    import wave
+
+    root, target = _sound_tree(tmp_path, monkeypatch)
+    report = fb.mute_audio("h3_character_sheet/voice.wav")
+
+    assert report["ok"] is True, report
+    assert report["muted"] is True
+    written = root / report["file"]
+    assert written.is_file() and written.suffix == ".wav"
+    with wave.open(str(target), "rb") as original, wave.open(str(written), "rb") as muted:
+        assert muted.getframerate() == original.getframerate(), "same rate"
+        assert muted.getnframes() == original.getnframes(), "same length - the reference stays usable"
+        assert muted.getnchannels() == original.getnchannels(), "same channels"
+        frames = muted.readframes(1024)
+    assert frames.count(b"\x00") == len(frames), "and it is silence"
+    assert report["file"] != "h3_character_sheet/voice.wav", "the original is not the thing wired"
+    assert "mute" in report["reason"] or "silence" in report["reason"], report["reason"]
+
+
+def test_a_second_mute_is_served_from_the_cache(tmp_path, monkeypatch):
+    root, _ = _sound_tree(tmp_path, monkeypatch)
+    first = fb.mute_audio("h3_character_sheet/voice.wav")
+    second = fb.mute_audio("h3_character_sheet/voice.wav")
+    assert second["cached"] is True and second["file"] == first["file"]
+
+
+def test_muting_accepts_the_arguments_the_other_passes_take(tmp_path, monkeypatch):
+    """The caller treats every kind the same way, so the mute pass must not choke on them."""
+    _sound_tree(tmp_path, monkeypatch)
+    report = fb.mute_audio(
+        "h3_character_sheet/voice.wav",
+        scope="hair",
+        paint=[{"tool": "brush", "points": [[0.5, 0.5]], "radius": 0.05}],
+        detect=True,
+        detector=object(),
+        conf=0.25,
+    )
+    assert report["ok"] is True, report
+
+
+def test_a_file_outside_the_input_folder_is_refused_for_a_sound_too(tmp_path, monkeypatch):
+    _sound_tree(tmp_path, monkeypatch)
+    report = fb.mute_audio("../voice.wav")
+    assert report["ok"] is False
+    assert "input folder" in report["reason"]
+
+# --------------------------------------------------------------------------- #
+# a panel's own face reference (the panel's drag-and-drop)
+# --------------------------------------------------------------------------- #
+def test_a_panel_can_take_its_face_from_a_reference_the_rule_would_blur():
+    """The panelled choice protects the picture it points at, the way the identity source is.
+
+    "This panel's likeness comes from Picture 2" is a promise the prompt makes; a blurred copy
+    of Picture 2 cannot keep it. Same protection the run-wide identity source gets, for the same
+    reason - just for one panel instead of the whole sheet.
+    """
+    spec = ss.parse_sheet_spec(
+        {
+            "refs": {"pictures": [
+                {"imageFile": "identity.jpg", "role": "face, hair"},
+                {"imageFile": "outfit.jpg", "role": "body and clothes"},
+            ]},
+            "cells": [
+                {"id": "c0", "view": "portrait"},
+                {"id": "c1", "view": "portrait", "faceRef": "pictures:1"},
+            ],
+        }
+    )
+    decisions = ss.blur_face_decisions(spec)
+    assert decisions[("picture", 0)] == "keep", "the identity photo is still protected"
+    assert decisions[("picture", 1)] == "keep", "and so is the picture a panel points at"
+    assert ss.cell_face_slots(spec) == {("picture", 1)}
+
+
+def test_the_panel_that_names_a_face_reference_leads_with_it():
+    """The cell's prompt hands it to H3 as <Picture 1> and gives it the face attribute."""
+    spec = ss.parse_sheet_spec(
+        {
+            "refs": {"pictures": [
+                {"imageFile": "identity.jpg", "role": "face, hair"},
+                {"imageFile": "outfit.jpg", "role": "body and clothes"},
+            ]},
+            "cells": [
+                {"id": "c0", "view": "portrait"},
+                {"id": "c1", "view": "portrait", "faceRef": "pictures:1"},
+            ],
+        }
+    )
+    by_id = {cell.id: cell for cell in spec.cells}
+    plain = ss.cell_references(spec, by_id["c0"])
+    assert [ref.file for ref in plain] == ["identity.jpg", "outfit.jpg"], "the default order"
+    own = ss.cell_references(spec, by_id["c1"])
+    assert [ref.file for ref in own] == ["outfit.jpg", "identity.jpg"], (
+        "the panel's own face reference leads, so it is the one <Picture 1> names"
+    )
+    assert "face" in own[0].role, "and it claims the face the prompt will point at"
+    assert ss.identity_reference(own) is own[0], "so the identity lines name that picture"
+
+
+def test_a_panel_face_reference_that_no_longer_exists_falls_back():
+    """A cell outlives a deleted tile: the name is a lookup, never a crash."""
+    spec = ss.parse_sheet_spec(
+        {
+            "refs": {"pictures": [{"imageFile": "identity.jpg", "role": "face"}]},
+            "cells": [{"id": "c0", "view": "portrait", "faceRef": "pictures:7"}],
+        }
+    )
+    cell = spec.cells[0]
+    assert ss.cell_face_reference(cell, spec.refs) is None, "no such slot"
+    assert [ref.file for ref in ss.cell_references(spec, cell)] == ["identity.jpg"]
+    assert ss.cell_face_slots(spec) == set(), "and nothing is protected on its behalf"
+
+
+def test_an_explicit_on_still_blurs_the_pictures_a_panel_points_at():
+    """The tile's own "always" is the more explicit instruction about those pixels."""
+    spec = ss.parse_sheet_spec(
+        {
+            "refs": {"pictures": [
+                {"imageFile": "identity.jpg", "role": "face, hair"},
+                {"imageFile": "outfit.jpg", "role": "body and clothes", "blurFace": "on"},
+            ]},
+            "cells": [{"id": "c0", "view": "portrait", "faceRef": "pictures:1"}],
+        }
+    )
+    assert ss.blur_face_decisions(spec)[("picture", 1)] == "blur"

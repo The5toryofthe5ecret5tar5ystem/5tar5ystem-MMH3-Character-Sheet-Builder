@@ -3,7 +3,7 @@
 **Repo**: [The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder](https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder) ·
 **License**: GPL-3.0 · **ComfyUI node**: `MiniMaxH3CharacterSheet` · **Installs as**: a
 custom-node folder (any name), typically `ComfyUI-H3-Character-Sheet`
-**Version**: 1.2.3 · [`CHANGELOG.md`](CHANGELOG.md) ·
+**Version**: 2.0.0 · [`CHANGELOG.md`](CHANGELOG.md) ·
 [releases](https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/releases) ·
 [`docs/civitai-post.md`](docs/civitai-post.md) is the short public writeup (features, model
 links, install steps)
@@ -43,8 +43,11 @@ the suppression list - straight from the pack's planner: no GPU, no queueing, no
 
 **Face blur for non-identity references.** Auto (blurs a reference whose role does not mention the
 face) / on / off per tile, three scopes (face, face + hair, whole head) and hand-painted areas for
-tattoos, logos or a second person. Blurred copies are written to
-`input/h3_character_sheet/derived/` and cached; your original file is never modified.
+tattoos, logos or a second person. It works on **pictures, reference clips and sounds** - a
+clip is detected on sampled frames, tracked between them, blurred frame by frame and written back
+with its audio track; a sound has no pixels, so it is **muted** instead (silence at its own length
+and channels). Blurred copies are written to `input/h3_character_sheet/derived/` and cached; your
+original file is never modified.
 
 **Latent continuation between cells** (*Auto* chains cells that share a camera distance, *On* / *Off*
 per cell) so a row reads as one take instead of unrelated frames.
@@ -130,11 +133,16 @@ the pixels and ~4.7x the wall clock (378 s vs 81 s). Those are single measuremen
 a slower GPU, more frames per cell, or a non-turbo checkpoint at 20-30 steps costs proportionally
 more - but the ratio between the two tiers is what to plan around.
 
+The **[one-pass sheet](#one-pass-sheet-the-default)** is the default render: one clip, 5 frames, the
+whole sheet inside it. It is a single wait instead of five, so the numbers above are the per-cell
+pass's - and the one-pass default is what you iterate a prompt with. The per-cell figures are what
+a sheet costs when a panel has to be exactly right.
+
 ## Nodes
 
 | Node | What it does |
 |---|---|
-| `MiniMax H3 Character Sheet Builder` | The whole feature: references + cells -> N short H3 renders -> `H3SheetGrid`. Outputs `sheet` (IMAGE), `cells` (IMAGE batch), `report` and `sheet_dir` (the folder the run wrote, for nodes that read the sheet's own files). |
+| `MiniMax H3 Character Sheet Builder` | The whole feature: references + cells -> ONE H3 render for the whole sheet (the default) or one short render per cell -> this pack's own sink / grid. Outputs `sheet` (IMAGE), `cells` (IMAGE batch - for a one-pass render, the panels sliced out of the sheet), `report` and `sheet_dir` (the folder the run wrote, for nodes that read the sheet's own files). |
 | `H3 Character Sheet Grid` | Composites a sheet from per-cell frames. Use it on its own to re-composite a finished sheet, or with any other H3 workflow. |
 | `H3 Sheet → RefMod` | Optional: exports the sheet as a [RefMod](https://github.com/Luisacaotica/ComfyUI-MiniMaxH3Mod) bundle - appearance members plus a voice member. Needs that pack for the VAE encoders; without it the node stops with the clone line. |
 
@@ -153,22 +161,36 @@ more - but the ratio between the two tiers is what to plan around.
    PNG *and* writes the RefMod bundle (cells + composite + the sheet's own reference voice),
    so a sheet you like is a mod you can use without a second pass.
 
-### Presets (top of the panel)
+### Presets (two axes, at the top of the panel)
 
-The **Preset** selector at the top of the panel sets the whole node at once. The list is
-served by the backend (`h3_character_sheet/presets.py`), so the panel can only offer what the
-node implements, and each preset declares where it departs from a fresh node's defaults - the
-bar prints that as *"Changes: Continuity, …"* rather than changing settings silently.
+Both axes are **card rails**: each card is a picture of what it does - the layout cards draw the
+cells they build, the quality cards draw one frame or a filmstrip, the suite card draws its four
+boards - and clicking the picture applies it. Hover a card for the sentence that used to sit in a
+hint bar; the line under the rails is just the fact ("One pass (default) · Hero + 4 panels — 5
+cell(s)"). An implementation detail that is also a promise: the cards are drawn from each preset's
+own ticks, so a card cannot show something different from what applying it does.
 
-| Preset | What it sets |
+The **Layout** axis says *what to draw*: the cells, their arrangement and the cell shape. The
+**Quality** axis says *how to sample it*: the mode, the step count, reference sizing, continuation,
+clip export. Neither touches a size - the [resolution buttons](#resolution-the-three-buttons) own
+those, so applying a layout can never undo a 4K choice. Both lists are served by the backend
+(`h3_character_sheet/presets.py`), so the panel can only offer what the node implements, and each
+preset declares where it departs from a fresh node's defaults.
+
+| Layout preset | The cells it builds |
 | --- | --- |
-| **Balanced (recommended)** | 1024px cells, 22 frames, 8 steps, `per framing` references, continuation `auto` (chains only where the camera distance matches), clips exported. What this pack is tuned for. |
-| **Full Character Sheet - Balanced** | The finished article, 1024px cells on a 1536px sheet: headshot, chest-up portrait, full body front, full body 90-degree side and full body from behind - neutral expression, neutral pose, on a flat neutral tan backdrop. **~81 s for the five cells** (RTX 5090, 8 steps). |
-| **Full Character Sheet - Fidelity** | The same five cells and the same neutral tan backdrop at print resolution: 2048px cells on a 3840px sheet. **~378 s for the same five cells** and a very large PNG - for a sheet that will be enlarged or cut out. |
-| **Fast look (no chains, no clips)** | 768px cells at H3's 5-frame minimum, every cell independent, nothing encoded - to find the framing, not to keep the result. |
-| **Max identity fidelity** | The 2048px reference pipeline (several times slower) with independent cells, 2048px cells on a 3840px sheet. |
-| **Turnaround (chained full body)** | Front -> profile -> back in one row, chained: the subject turns inside the first frames of each cell and settles, and the picked frame comes from that settled tail (watch the clips, not just the sheet). Needs a reference that shows the body - an outfit/body role such as "body and clothes" - because the full-body cells re-pose what a chest-up or face reference cannot; without one the plan warns. |
-| **Expression sheet (chained face)** | Five face close-ups in one row: identical framing, so the chain carries the light and the head position while only the expression changes. |
+| **Hero + 4 panels (5 cells)** | The finished article: headshot, chest-up portrait, full body front, 90-degree side and from behind - neutral expression and pose, with the headshot as a tall hero panel on the left and the other four in a 2x2 block beside it, on the pack's flat neutral tan backdrop. |
+| **Expressions 2x3 (6 cells)** | Six face close-ups in a 2x3 grid: neutral, eyes closed, smile, anger, crying and pleasure - the same framing every time, so the sheet compares expressions rather than angles. Square cells on a 3:2 sheet. |
+| **Turnaround (3 in a row)** | Front, 90-degree side and back in one row on an ultrawide canvas: the classic turnaround strip. |
+| **Closeups 2x2 (SFW)** | Four detail crops in a 2x2 square grid: eyes, mouth, hands, feet - see [Detail crops](#detail-crops). |
+| **Closeups 2x2 (NSFW)** | The same board for the explicit detail a sheet also documents: breasts, groin, butt from behind, and the mouth with the **ahego** expression. |
+| **RefMod suite (4 sheets)** | Not one sheet - four, in one queue: a hero + 4 panel sheet, the 2x3 expression board, the SFW detail crops and the NSFW ones. Each renders into its own folder under the run name, and each stays a complete sheet (cells, picks, report). See [The RefMod suite](#the-refmod-suite-four-sheets-one-queue). |
+
+| Quality preset | What it sets |
+| --- | --- |
+| **One-pass sheet (default)** | The node's own defaults, spelled out: one H3 render for the whole sheet, 8 steps, `per framing` references. The sizes come from the resolution buttons and the cells from a layout. |
+| **Per-cell renders (classic)** | One render per cell, with continuation `auto` - chains the cells only where the camera distance already matches. Pair it with the turnaround layout to get the chained turn (the subject turns inside each clip and settles, and the picked frame comes from that settled tail - watch the clips, not just the sheet). Needs a reference that shows the body: an outfit/body role such as "body and clothes", because the full-body cells re-pose what a chest-up or face reference cannot; without one the plan warns. |
+| **Max identity fidelity** | The 2048px reference pipeline (several times slower) with independent cells, per-cell - that pipeline only pays off on a render that is about one panel. |
 
 **Every preset samples at 8 steps** (and so does a fresh node). The community TURBO H3
 checkpoints bake the turbo delta into the weights, and their own recipe for the
@@ -187,6 +209,166 @@ settings-only ones) leaves an existing cell list alone, and *Clear cells* still 
 Editing a knob afterwards is expected; the applied preset id is recorded in the payload
 (`render.preset`) so a saved workflow can say how its numbers started, and picking *Custom (no
 preset)* only clears that record.
+
+### The RefMod suite (four sheets, one queue)
+
+A [RefMod bundle](#exporting-the-sheet-as-a-refmod-appearance--voice) is better the more views it
+carries, and the views a character needs are not one sheet's worth: the hero sheet reads identity at
+a glance, the expression board says what the face can do, and the detail crops document what no
+full-body framing shows. Rendering those as four separate queues is four times the waiting - and
+four times the chance to forget one.
+
+The **RefMod suite (4 sheets)** preset is in the **Layout** selector (it answers the same question a
+layout does: *which sheets render*). One click builds and queues all four boards:
+
+| Board | Cells | What it is |
+| --- | --- | --- |
+| `hero-4` | 5 | Hero + 4 panels - the sheet from the first table above. |
+| `expressions-6` | 6 | The 2x3 expression board (neutral, eyes closed, smile, anger, crying, pleasure). |
+| `details-sfw` | 4 | The SFW detail crops: eyes, mouth, hands, feet. |
+| `details-nsfw` | 4 | The NSFW board: breasts, groin, butt, and the mouth with **ahego**. |
+
+How it behaves:
+
+* **One queue, one graph.** The node expands the board list into one graph per board and merges
+them, so the whole suite is a single Queue press. In the default mode that is **four H3 renders
+of 5 frames** - not 19 per-cell clips - because the suite states its mode (`singlePass`). Turn
+one-pass off and it renders all 19 cells instead, which is the honest cost of 19 views.
+* **Each board is a folder.** Everything lands under `<output>/minimax_sheets/<run name>/<board>/`
+and every board is a complete sheet folder: `frames/`, `cells/`, `picks/`, its own `report.txt`
+and `manifest.json`. The Results pane lists them as ordinary sheets, and a `suite.json` in the run
+folder records which boards belong together (with their labels and cell counts).
+* **The quality axis is the run's.** Reference sizing, steps, seed, sampler, resolution chips,
+continuation and clip export are whatever the node says - the suite changes which cells render,
+never how. The suite preset only sets the mode.
+* **The boards are the layouts you already have.** Each board is a layout preset by id, so a board
+cannot drift from the layout the panel offers on its own; the run's own cell list is ignored while
+a suite is active (a fifth render nobody asked for), and an unknown or non-layout board id is
+reported in the warnings instead of rendering an empty sheet.
+* **Exporting it to RefMod.** Each board's folder *is* a sheet folder, so *H3 Sheet → RefMod* takes
+`<run>/<board>/` and exports that board as its own bundle - four bundles for a suite, each with its
+own appearance (and voice/video) members. A single merged bundle whose members are named per board
+(`hero-4_views`, `hero-4_sheet`, `expressions-6_views`, …) is the next step for this preset, not
+something this build does yet.
+
+Picking a single layout after the suite returns to one sheet - the boards go with the layout they
+replaced. Switching the quality preset leaves the suite alone.
+
+### The panel's frame: an icon rail, a stage, and a size you can read
+
+The panel is laid out the way the **preview-first studio** direction was drawn (proposal B in
+`web/mockups/panel-redesign-proposals.html`):
+
+* **A narrow icon rail down the left** holds the seven tabs - References, Cells, Prompt, Results,
+  **Preview**, Settings, Help - as 17px line icons instead of a strip of words: no numeral badges
+  (they read as unread-message counters), just the icon and a tooltip naming the tab and its count,
+  so the rail costs 32px of width and the panel reads as a studio rather than a form.
+* **The live stream has its own tab.** While a render works, its frames are on **Preview** at the
+  size of the stage, and that tab's icon lights up in the accent colour and pulses until the run
+  ends - "there is something happening in here" from anywhere in the panel, without a strip taking
+  a row from every tab. The tab says what it is for while it is idle.
+* **Two equal halves, on the tabs that decide something.** On **Cells** and **References** the stage
+  (the sheet, the picture) and the control column are halves of the panel; a new node opens at
+  **1080×700** - the size those halves were chosen for, so the sheet grid, the tile wall and the
+  tick rows are visible without scrolling. The node also has a **floor of 760×620**: the halves
+  stack into one column under 640px of panel, and the node is 20px wider than its panel, so 760 is
+  the smallest node that leaves each column ~356px - the room the tile wall and the glyph rows
+  need. A resize that tries to go below the floor is clamped up to it (raising only - dragging a
+  larger node is left alone).
+* **The other five tabs have no column at all.** Prompt, Results, Preview, Settings and Help are
+  read-outs of the render, and a second half holding nothing is a wide empty box beside the thing
+  you came to read: those tabs give the stage the whole panel, so a prompt, a frames list or the
+  live picture is as wide as the node. That is the proposal's own shape - its rail, then *one*
+  full-width body - and at 1080px the difference is 506px vs 1020px of paper.
+* **A wider node does not make the sheet cards taller.** In the column the layout cards' art is a
+  **fixed 62px** rather than a 3:2 box: with the box, a wider node made every card taller and
+  pushed the size cards and the mode row down the column and out of sight. The cards may get
+  wider; they may not get taller.
+* **The header is one line**: the panel's name on the left, and on the right a chip saying what
+  will be drawn and at what size (`Hero + 4 panels · 1080p`). The build tag lives in that title's
+  tooltip - it is a diagnostic, not a headline.
+* **The three sizes are cards**, each carrying its own numbers (`1080p / 1088px sheet / 1024px
+  cells`), so what a size costs is legible without hovering anything. The active card is the only
+  one that says "this is what the render will use"; a size typed in Settings reads as **Custom**.
+  The line under them is the one fact that does not fit on a card.
+* **The references tab splits by kind of work**: the stage half is the picture you are working on
+  (with its paint tools, its Original/Blurred bar and the blur-area chips), and the column half is
+  what you type or pick from (the reference list, the identity brief).
+* **One picture, at the size of its column.** The stage shows the reference you are working on and
+  nothing else: the Original/Blurred buttons switch *that* picture between the file and the copy
+  the render wires, and the sentence beside them says which one is on screen and whether the render
+  would blur it at all. There is no second and third thumbnail under it - a pair of copies of the
+  picture the reader is already looking at cost a third of the column's height and answered the
+  same question the buttons do, so the picture takes the room instead.
+* **The control column is scoped to the tab.** On **Cells** it holds the sheet decisions - the
+  SHEETS tile wall, the sizes, *One pass | Per cell | Max identity* with its steps chip, and the
+  references the sheet will be built from as small avatars that jump to where they are edited. On
+  **References** it holds the reference list. A column of sheet options while you are painting a
+  reference is the one thing the mockup does not do, and the two tabs that decide are the two that
+  get one (see above). The blur area is chips under the picture rather than a dropdown in the
+  list's header - it is a setting about the picture on screen, so it sits with it.
+* **The mode segment says which mode the node is in.** A fresh node renders **one-pass** (that is
+  the `single_pass` widget's own default), so *One pass* is lit before anything is clicked - the
+  segment reads the node's knob through the payload, not the panel's record of a preset, and a
+  preset the user picked still wins. The steps chip beside it never falls off the side of the node:
+  the buttons may shrink and the row may wrap.
+* **The accent is the proposal's orange.** ComfyUI's own primary is blue and the panel used to take
+  it, which made **Render** blue where the mockup draws it orange (`#ffb347`, with dark text on it).
+  The mockup's blue is its *second* colour - the ring on a hand-picked frame - and orange is what
+  it uses to mean "this is the action": the primary button, the lit chips and segments, the ticked
+  glyphs, the active layout card and the pulsing live tab.
+* **The primary action is pinned at the bottom of the panel**, in a bar of its own under the halves,
+  beside the status line it acts on: Clear sheet, the auto-refresh switch, **Re-compose**,
+  **Refresh**, then **Render** on the right - one place to press, on every tab, including the five
+  that have no column. Render is ComfyUI's own queue
+  (`app.queuePrompt(0, 1)` through the wiring's `queue` hook) - the panel writes the node's
+  widgets, so what it queues is exactly the graph on screen. It is disabled with a reason, not
+  broken, where there is no queue to press (the standalone harness, or a bare module). The header
+  is a name and a fact and **no buttons**: a strip of plumbing above the panel is what made the
+  first pass read as a form instead of as a studio, so Browse / Add Media / Clear live in the
+  references card's own head, where they act on something you can see.
+* **Every panel takes its own framing, pose, expression and face.** The ticks are the sheet's
+  *default* (the cross product the layout asks for), and each box on the stage is a drop target:
+  drag a framing glyph, a pose, an expression, or a reference tile onto a panel and that panel
+  alone changes - "a turnaround, except this close-up is a smile taken from the other picture".
+  A panel that differs from the ticks is marked (dashed edge) with a small **×** to put it back on
+  the default. A reference dropped on a panel makes that panel's likeness come from it: the
+  prompt hands that picture to H3 as `<Picture 1>`, names it as the identity owner for that cell,
+  and the face-blur rule protects it there (a blurred copy cannot supply a face).
+* **The ticks still own the list.** The boxes on the stage *are* the ticks: untick *back* and its
+  panel is gone from the sheet and from the payload, tick *Back of head* and a panel for it appears
+  where the ticks put it, in the arrangement's own order. A panel you edited by hand (a dropped
+  pose, face or expression) keeps its edit across those changes - it is a choice about a panel,
+  not a copy of the plan, so re-ticking its row does not throw it away.
+* **The stage shows the sheet itself.** The Cells tab draws the sheet being built - one box per
+  cell, in the arrangement the picked layout gives - because "what am I about to make" is a
+  question about a picture, not about a list of cell ids. The boxes carry the framing each cell
+  will hold and the vocabulary that fills them scrolls underneath; while a render runs, the cell
+  being drawn wears the live frame, so the sheet fills in panel by panel rather than only in the
+  filmstrip below. The arrangement comes from the same `artShape` the layout cards draw, so the
+  card you picked and the sheet you get are the same shape - one function, two places.
+* **The layout cards keep their drawn cells.** What a card has to answer is "which sheet, and how
+  many cells", and the drawing is that answer - so a card wears the drawn arrangement even for a
+  layout you have already rendered. The **your renders** switch in the Sheets head puts your own
+  last render of each sheet on the cards instead, with a small `yours` badge naming the run (the
+  panel asks for them through `gallery`, see `sheet_store.gallery_art`; a suite render informs every
+  board it drew). The picture is a lookup - nothing is rendered to make the rail.
+* **A one-pass sheet stays out of the panels.** A one-pass stream sends the WHOLE sheet, so it is
+  shown in the live strip and on the **Preview** tab - never painted into a panel's box (where it
+  would put five panels inside panel 1, and leave that box wearing the sheet after the run). A
+  per-cell stream still marks the panel it is drawing: that one *is* the cell.
+* **The References tab is the studio**: the picture's stage on the left, the reference tile wall on
+  the right, the card's own head across the top. It is a **container query** rather than a guess at
+  the window size - the panel's width *is* the node's width, and under 640px the places stack into
+  one column again. The paint surface measures the STAGE for its width (that column) and
+  the pane for its height, and a stage is never taller than its own width, so a tall node cannot
+  turn the preview into an unreadable column.
+
+Two small things that came out of looking at it on a real page: the preset hint line kept a
+row-era `flex: 1 1 240px` after the presets row became a column, which rendered as a **240px band
+of dead space** in the middle of the panel; and the reference box's height floor moved from an
+inline style into the stylesheet, because an inline style cannot be raised by the studio's tile
+column.
 
 ### Saving your own presets ("Save..." next to the selector)
 
@@ -260,7 +442,8 @@ setting nobody chose.
      and the box gets the whole row because it is the thing you type into;
    * a picture tile carries its **Blur** state in the bottom-left corner of the
      picture (`Blur auto` / `Blur on` / `Blur off`, one click to cycle) - the corner the
-     filename used to take, so the name moves to the tile tooltip;
+     filename used to take, so the name moves to the tile tooltip. A **clip** tile carries
+     the same badge next to its filename (which stays, because which clip this is matters);
    * the **Character** card at the top takes the identity/style text that leads every
      cell prompt ("young woman with long silver hair, blue eyes, petite") and a
      **Suppress** line that is appended as *Do not include: ...* ("text, watermark,
@@ -274,13 +457,14 @@ setting nobody chose.
      90 deg side, full body from behind, **3/4 front**, **3/4 back**, **full body from
      above (high angle)**, **full body from below (low angle)**, **over the shoulder**,
      **head profile**, **back of the head and hair**, **hands**, **eyes**, **legs and
-     footwear**
+     footwear**, **mouth**, **feet**, **breasts**, **groin**, **butt** - the last five are the
+     detail crops, see [Detail crops](#detail-crops)
    * Poses: neutral, A-pose, T-pose, **sitting, kneeling, crouching, lying on the back,
      walking, contrapposto, hands on hips, arms crossed, reach to camera (POV), hand
      through hair**
    * Expressions: neutral, smile, smirk, frown, anger, fear, surprised, embarrassed,
      crying, **eyes closed, lips parted, laugh, pout, wink, disgust, determined, pain,
-     aroused, pleasure, orgasm (peak)**
+     aroused, pleasure, orgasm (peak)**, **tongue out, ahego (eyes rolled up, tongue out)**
    Pick which axis a view expands along by which ticks you leave on: a whole-body framing
    gets one cell per ticked pose, a facial framing one per ticked expression, and a detail
    crop (hands / legs / back of the head) exactly one neutral cell - it looks the same
@@ -325,6 +509,16 @@ space) - so 24 knobs cost roughly 500px of node height that the grid fits into ~
   one is the control the schema asks for (number box with the node's own `min`/`max`/`step`,
   a dropdown with the node's own list, a checkbox, a text box). Values are read from the node
   when the tab mounts, so a workflow always shows what it will render with.
+* **A bounded number is a slider as well as a box.** Cell size, steps, frames, the sheet edge:
+  any knob whose schema gives both a `min` and a `max` is drawn as a range next to its box, so a
+  value costs one drag instead of a keyboard. The box stays the control - it is what clamps, and
+  what you can type into - and the two move together in both directions. A range with four stops,
+  or one so fine that dragging cannot land on a value (more than 400 steps), gets no slider: a
+  slider that lies about the range is worse than a box. `tests/h3sheet_core.test.mjs` exercises
+  the rule directly (`numberSlider`) as well as the wiring.
+* Each group header shows **how many fields are under it** (`Render · 4`), so the tab can be
+  scanned by shape. The `N knob(s) · 3 columns` line under the header is the count; the reason
+  the grid exists at all is on it as a tooltip.
 * Every field also carries a **row** - which line of its group it sits on - declared in
   `knobs.py` next to the label. A flowing grid puts the next field wherever the previous ones
   happen to end, which is how *Seed* and the *Seed mode* that governs it ended up on different
@@ -345,6 +539,16 @@ space) - so 24 knobs cost roughly 500px of node height that the grid fits into ~
   knobs it cannot draw.
 
 ### Node previews (the same Settings tab)
+
+#### The Results tab: the sheet in a card, with a filmstrip
+
+The sheet is what the run is *for*, so it gets the same treatment the reference canvas has: a card
+whose **head** names the file and offers **Open** (the sheet at full size in a new tab), then the
+sheet itself at the *Panel preview* size you chose, then a **filmstrip** - one frame per cell, in
+cell order, each showing the frame the sheet actually uses (the cell's pick, not frame 0). Clicking
+a filmstrip frame jumps to that cell's row and flashes it, which is the short path from "that panel
+is wrong" to the row whose thumbnails decide it. The per-cell rows below are unchanged: every frame
+of every clip, click one to use it, plus *new seed* to render just that cell again.
 
 ComfyUI's own output previews under the node are sized by the frontend, and two of them stack into a
 very tall node. The **previews** selector next to *Compact node* decides what happens to them:
@@ -538,20 +742,45 @@ or gerund ending: `topic` is not `top` and `titles` is not `tit`.
   cell whose framing cannot show its whole role (an outfit for a face close-up, a nude body for
   a close-up), and *Blur auto* blurs a picture whose role does not claim the face.
 
-## Face blur on reference pictures
+## Face blur on reference pictures and clips
 
 H3 conditions on every reference it is given at once and has **no per-reference
 weight**. A prompt can therefore *ask* for "identity from `@image1`, clothing from
 `@image2`", but it cannot stop the model reading a face that is present in the pixels -
 and a full-body outfit photo is a whole second person, so it is a whole second identity.
-The prompts name that outright ("`<Picture 2>` must not supply a face, a hairstyle, skin
-tone or facial features - the person visible in it is not the identity"). The **face
+The prompts name that outright ("`<Picture 2>` must not supply a face, a hairstyle, hair
+colour, hair length, skin tone or facial features - the person visible in it is not the
+identity, do not copy their face or their hair"). The **face
 blur** removes it instead of arguing with it.
 
-Every picture tile carries its blur state in the bottom-left corner of the picture -
-click to cycle `auto` -> `on` -> `off`. The corner already held the filename, so the
-button replaced it rather than adding another layer to the thumbnail; the role box
-underneath keeps its full width, because that is the field with typing in it.
+**A side or back view holds the hairstyle.** A front-facing identity picture says nothing about
+the side or the back of a head, and the second reference - usually a full-body photo of somebody
+with their own hair - is right there with a plausible answer: a profile panel came back wearing the
+other reference's dark hair while every angle the reference covers kept the braids. So the views
+that have to *invent* the head (90-degree profile, 135-degree back, from behind, the back-of-head
+crop) now carry one sentence - "the same parting, the same length, the same colour and the same
+style as the reference picture, seen from the side" - and the views the reference already covers
+keep the prompt they had.
+
+Every picture tile carries its blur state as a small badge in the bottom-left corner of the
+picture - click the badge to cycle `blur auto` -> `blur on` -> `blur off`, hover it for the
+sentence behind the state (auto: "blur this reference unless it is the identity reference"). The
+corner already held the filename, so the badge replaced it rather than adding another layer to
+the thumbnail; the role box underneath keeps its full width, because that is the field with typing
+in it. A **clip tile** carries the same badge, with its filename kept beside it (which clip this
+is matters at a glance, and the two fit on the row). A third badge is **`N painted`** when areas
+have been painted out by hand (see below). A **sound tile** carries the same badge with the honest word on it - `mute auto` / `mute on` /
+`mute off` - and keeps its filename in that row (the row replaces the caption a tile without a
+thumbnail used to have). **Auto keeps a voice**: a face in a photo leaks an identity nobody asked
+for, while a sound reference is added on purpose and is usually the performance itself, so a voice
+is muted when its tile says `on` and not before.
+
+**Clicking a tile loads it into the canvas** at the top of the tab: the reference at the size the
+column allows, with its blur state, blur area, paint surface and its Original/Blurred bar on the
+picture itself. The canvas is the same code the Preview overlay mounts (one builder, two homes), so
+there is nothing to learn twice - and the loaded tile is ringed so "which one am I looking at"
+needs no header. **Replace...** on the canvas head changes the file; the tiles are the index of
+everything the run sends.
 
 | Mode | What happens |
 | --- | --- |
@@ -598,17 +827,51 @@ are the only thing that gets blurred:
 | `Blur auto` / `on` | + painted areas | painted areas **plus** detected faces |
 | `Blur off` | + painted areas | **only** what you painted |
 
-A tile with painting shows it in its label (`Blur auto + paint`). Painting is a
-picture-only tool, like the rest of the face blur: a video would need per-frame work.
+A tile with painting shows it in its label (`Blur auto + paint`). **Painting a clip works the
+same way**: open it in the canvas, mark the area once, and the engine holds that region across
+every frame - which is what a logo, a watermark or a tattoo on a clip that keeps its framing
+needs. A clip whose performer walks around it needs per-frame masks, which is not what a single
+painting is.
 
 ### Seeing it before you render
 
-The **eyeball** on a picture tile opens the preview, and for a picture with the blur in
+The **eyeball** on a reference tile opens the preview, and for a reference with the blur in
 play it previews **the copy the render will wire**, with an **Original / Blurred** toggle
-to compare. The bar underneath says which it is showing and whether the render would blur
+to compare (a clip included - the toggle swaps the player's source). The bar underneath says which it is showing and whether the render would blur
 that reference at all - a picture the render leaves alone says so instead of showing an
 edit that will not happen. The blur is computed on demand by the same route the render
 uses (~0.4 s once, cached after).
+
+### Sound references: muted, not blurred
+
+A voice has no pixels, so there is nothing to blur - the removal is the whole sound. A sound whose
+tile says `mute on` is written as a silent copy at the source's own rate, length and channel count
+(`<name>-blurface-<key>.wav`): the reference stays a usable sound in the graph, it just carries no
+timbre. That is deliberately **not** a dropped audio track - a file with the stream removed is one
+`LoadAudio` refuses. `volume=0` does it through ffmpeg; without ffmpeg a `.wav` is still muted
+(the same parameters, zeroed frames) and any other format reports why it could not be. Painting is
+not offered on a sound (there is nothing to paint), and a painted sound in a payload is reported as
+unsupported rather than silently ignored.
+
+### Reference clips: the same job over time
+
+A clip is a picture per frame, so it is done in the same way and with the same knobs, with one
+extra problem: the face **moves**. Detecting on every frame of a 10-second reference would be
+affordable but pointless, so the clip is *sampled* (`VIDEO_SAMPLES`, 12 frames, ends included)
+and every frame in between is measured in a window around where the face was last seen
+(`TRACK_SEARCH`, `_refine_box`: a re-detection inside that window, with the interpolated
+prediction standing when the model finds nothing). The gap between two samples is capped
+(`VIDEO_MAX_GAP`, 30 frames) - a longer clip gets *more samples* rather than a longer guess. The
+derived clip is written next to the others as `<name>-blurface-<key>.mp4`, at the source's own
+size and rate, and **its audio track is copied across** (`-c:a copy`): H3 reads a clip reference's
+sound as well as its pictures, and the pixels are the only thing that changed. If no ffmpeg is
+available the clip is still written - the note says the audio was not carried.
+
+The named reports say what happened: `N detection(s) across M sampled frame(s) blurred over K
+frame(s), audio not carried` when there was no muxer, and `no face detected in the clip -
+reference left unblurred` when there was nothing to blur (the original is then wired, as for a
+picture). Everything is cached by source mtime + settings + the sampling policy, so a re-render
+never re-blurs a clip, and the preview's **Original / Blurred** toggle is the same route.
 
 Detection uses the YOLO face model already used by ComfyUI's detector nodes
 (`models/ultralytics/bbox/face_yolov8m.pt`; the panel reports if it is missing),
@@ -726,6 +989,95 @@ Three things worth knowing before you spend a render on it:
   count on *Load H3 RefMods* that fixes it (`copies 3` on a 0.5% member = 1.6%; ten
   copies of a 1s clip is still thin, so a longer reference clip beats every other knob).
 
+## One-pass sheet (the default)
+
+The sheet is rendered by **one H3 clip**: one prompt describing every panel, H3's 5-frame minimum,
+and the frame the model settles on becomes the sheet. The toggle is the **One-pass sheet** switch
+(Settings tab); turning it off gives the classic **per-cell** pass - one short render per cell, with
+per-cell frames, clips, the frame picker and latent continuation.
+
+* **One prompt, in H3's own shape.** The prompt is written the way H3's captions are -
+  `subject_definitions` (which reference is the sole source of what), `summary` ("Create ONE
+  completed, static character sheet of one person showing only these 5 views at the same time: …"),
+  `retention_analysis` (the ownership and preservation rules, including that the identity picture's
+  own outfit is replaced when another reference owns the clothing), `detailed_description` (the
+  layout), `overall_soundscape: None` and `non_diegetic_music: None` (a sheet is silent). The blocks
+  the per-cell prompt shares stay once; each cell contributes exactly one line.
+* **The layout is said in words, not only in pixels.** The arrangement is spelled out column by
+  column - "5 panels in 3 columns of equal width - the left column holds one tall panel that fills
+  the full height; the middle column holds two panels stacked one above the other; …" - and every
+  panel line carries its own place: `- Panel 2 of 5 (the middle column, upper half; x=1101, y=24,
+  1061x1034): …`. Pixel boxes alone were not enough for H3: a hero + 4 sheet came back as three
+  full-height columns with two panels missing. The prompt also states that all panels are drawn
+  (none merged, dropped, reordered or stretched), that the full-body panels share one figure scale
+  and one ground line, and that the sheet is a **still** - complete in the first frame and unchanged
+  to the last - so the clip's frames cannot drift into a turntable.
+* **The sheet's own geometry.** The canvas is the layout you already set (`sheet_layout`,
+  `sheet_aspect`, and the size the **resolution control** picked) snapped up to a 32px grid. The
+  panel boxes handed to H3 are the composite's own rects, computed on this render's canvas,
+  and read back into column/row words by `sheet_spec.sheet_columns` / `panel_place`.
+* **5 frames.** H3's shortest grid (`17k+5`). Frame 0 becomes the sheet; the other four are kept
+  under `one_pass/`, so a different frame is a re-read, never a re-render.
+* **The panels are sliced back out.** Each panel is cut from the sheet at the box the prompt asked
+  for and written where a per-cell render writes its cell (`cells/<id>.png`, `frames/<id>/f0000.png`).
+  That is what makes this mode the *default* rather than a preview: the panel's Results tab shows the
+  panels, and per-view consumers - the [RefMod export](#exporting-the-sheet-as-a-refmod-appearance--voice)
+  above all - work with no second render.
+
+**Why it is the default:** about a twentieth of the sampling - 5 frames against 110 for a five-cell
+sheet at 22 frames - and the panels agree by construction, because identity, lighting, palette and
+style cannot drift between views when a single sampling context draws them all.
+
+**What it gives up, honestly:**
+
+| | One-pass sheet | Per-cell pass |
+| --- | --- | --- |
+| Sampling | one clip, 5 frames | one clip per cell, 5-425 frames each |
+| Resolution per panel | its share of one canvas | a full render each |
+| Frame picker, clips, audio, continuation | no | yes |
+| Panel placement | **guidance** - H3 can reorder, merge or drop panels | each cell is its own render, so its framing is the framing you asked for |
+| Per-panel fidelity | the whole sheet shares one sampling context | you can re-roll, re-pick or enlarge a single panel |
+
+Panel positions are stated to H3 in pixels AND in the words a person would use, and H3 still treats
+both as semantic guidance rather than a hard constraint - which is the honest way to describe any
+single-pass multi-panel prompt, and why the prompt now names the panels' places, forbids merging or
+dropping them and asks for a still sheet. Check the sheet; when a panel has to be exactly right, or
+the sheet will be enlarged, turn the switch off and render per cell.
+
+A one-pass render streams to the panel's LIVE strip like any other run - labelled *whole sheet* -
+so you watch it being denoised instead of waiting for the finished image; its per-cell re-roll button
+stands down, because a one-pass seed is the node's own. Everything above is reported in the sheet's
+`report.txt`.
+
+### Resolution (the three buttons)
+
+The **resolution control** above the presets is the only thing that moves a size. One click sets two
+paired sizes: the sheet canvas a one-pass render draws, and the cell size a per-cell render uses. No
+preset touches either, so applying a layout can never silently undo a 4K choice - and a size typed
+by hand in the Settings tab reads as **Custom**, which is also what makes the one-pass guidance
+ceiling apply again.
+
+| Choice | Sheet short edge | Cell short edge | A 3:2 sheet renders | The pass, modelled |
+| --- | --- | --- | --- | --- |
+| **1080p** | 1088 | 1024 | 1632 x 1088 (~1.8 MP) | ~3.5k latent tokens - the 16 GB tier |
+| **1440p** | 1440 | 1024 | 2160 x 1440 (~3.1 MP) | ~6k tokens - comfortable at 24 GB |
+| **4K** | 2176 | 2048 | 3264 x 2176 (~7.1 MP) | ~14k tokens - the 32 GB tier |
+
+**These are modelled, not measured** (the pack's own numbers: int8 DiT ~10.5 GB plus the nvfp4 text
+encoder ~5 GB resident, and activations scaling with latent tokens ~ (w/32)(h/32) x latent frames).
+The counter-intuitive part is worth knowing before you pick: **a 4K one-pass render (~14k tokens) is
+cheaper than a single 2048px cell at 22 frames (~18k)**, because the 5-frame grid is so short. What
+to plan around:
+
+| Card | One-pass sheet | Per-cell pass | Notes |
+| --- | --- | --- | --- |
+| **16 GB** | 1080p | `cell_size` 768, 5-8 frames, `--lowvram --reserve-vram 2` | the text encoder and the DiT will not both stay resident, so expect swapping |
+| **24 GB** | 1440p comfortably; 4K likely fits | `cell_size` 1024 comfortably; 2048 is tight | clip export is fine at 1024 |
+| **32 GB** | 4K comfortably | `cell_size` 2048 | the classic Fidelity-style sheet |
+
+A false reading costs a re-render rather than anything worse, so if a card is borderline: drop the
+resolution one chip, keep the one-pass default (it is the cheaper mode), and turn clip export off.
+
 ## How a cell is rendered
 
 Per cell the expansion is the official reference-to-video chain:
@@ -837,6 +1189,30 @@ that is what the model reads first and where "her feet were cut off" is won:
 
 If a full-body cell still comes back zoomed in, it is usually because it **continued**
 a closer cell - set that cell (or the sheet) to `auto`.
+
+### Detail crops
+
+A full-body view cannot show a nail, a shoe or the inside of a mouth, so the pack carries the
+crops a sheet is actually used for - and the two **Closeups 2x2** layouts build them in one click:
+
+| View | What the prompt asks for | Board |
+| --- | --- | --- |
+| Hands (close up) | Both hands beside the chest, palms to camera, fingers spread: knuckles, nails and thumbs inside the frame. No face. | Closeups 2x2 (SFW) |
+| Eyes (close up) | Eyes, lashes, brows and the bridge of the nose only, looking into the lens. No mouth, no chin. | Closeups 2x2 (SFW) |
+| Mouth (close up) | Lips, teeth if they show, and the chin inside the frame - the framing an expression is read from. The eyes are out of shot. | Closeups 2x2 (SFW + NSFW) |
+| Feet (close up) | From the ankle down: footwear, toes and ankles, feet together on the ground. No legs above the ankle. | Closeups 2x2 (SFW) |
+| Breasts (close up) | Framed on the chest, both fully visible, collarbone above the frame. No face. | Closeups 2x2 (NSFW) |
+| Groin (close up) | Framed on the groin and the top of the thighs, legs slightly apart. No face. | Closeups 2x2 (NSFW) |
+| Butt (close up, from behind) | Both cheeks from directly behind at hip height. No face. | Closeups 2x2 (NSFW) |
+
+Two expressions go with the mouth crop: **Tongue out** (mouth open, tongue out, eyes on the
+camera) and **Ahego** (mouth wide open, tongue out, cheeks flushed, the eyes rolling up when they
+are in frame - which is why the wording works on a mouth-only crop as well as on a face).
+
+A crop is its own **camera distance** (`close`), not the distance of the framing it was cut from,
+so a mouth cell cannot chain onto a full-body one. The body crops are also in the pack's
+"no face in frame" set: an expression option cannot put a line about a mouth into a groin
+close-up, and a reference whose whole role is the eyes is not claimed for a mouth crop.
 
 ## HTTP routes
 

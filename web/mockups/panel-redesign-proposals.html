@@ -1,0 +1,783 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Character Sheet panel - three visual directions</title>
+<style>
+  :root {
+    --ink: #e9e9f1; --muted: #9797a8; --dim: #6e6e80;
+    --bg: #0f0f14; --panel: #1b1b22; --panel2: #23232c; --line: #32323e;
+    --accent: #ffb347; --accent2: #7fd1ff; --ok: #6ee7a8; --danger: #ff7b72;
+    --node: #14141a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 22px 22px 60px; background: var(--bg); color: var(--ink);
+    font: 13px/1.45 "Inter", "Segoe UI", system-ui, sans-serif;
+  }
+  h1 { font-size: 19px; margin: 0 0 4px; font-weight: 650; letter-spacing: .2px; }
+  h2 { font-size: 15px; margin: 0 0 2px; font-weight: 650; }
+  h3 { font-size: 11px; margin: 0 0 8px; font-weight: 700; letter-spacing: .12em;
+       text-transform: uppercase; color: var(--dim); }
+  p { margin: 0 0 10px; color: var(--muted); max-width: 900px; }
+  .top { max-width: 1010px; margin: 0 auto 18px; }
+  .switcher { display: flex; gap: 8px; margin: 14px 0 6px; }
+  .switcher button {
+    font: inherit; font-weight: 600; color: var(--muted); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 9px; padding: 8px 13px; cursor: pointer;
+  }
+  .switcher button.is-active { color: #17171c; background: var(--accent); border-color: var(--accent); }
+  .switcher button small { display: block; font-weight: 500; opacity: .75; font-size: 11px; }
+  .stage { max-width: 1010px; margin: 0 auto; }
+  .wrap { display: none; }
+  .wrap.is-active { display: block; }
+
+  /* ---- the node shell: everything below mimics the in-node DOM widget at 960px ---- */
+  .node { width: 968px; max-width: 100%; background: var(--node); border: 1px solid #3a3a48;
+          border-radius: 12px; box-shadow: 0 14px 40px #0008; overflow: hidden; }
+  .node-head { display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+               background: linear-gradient(#2b2b36, #23232c); border-bottom: 1px solid var(--line); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
+  .node-title { font-weight: 650; font-size: 12.5px; letter-spacing: .2px; }
+  .node-sub { color: var(--dim); font-size: 11px; margin-left: auto; }
+  .panel { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+  .row { display: flex; gap: 10px; align-items: center; }
+  .grow { flex: 1; }
+  .muted { color: var(--muted); } .dim { color: var(--dim); }
+  .tiny { font-size: 11px; }
+  .btn { font: inherit; font-weight: 600; font-size: 12px; border-radius: 9px; padding: 7px 12px;
+         cursor: pointer; border: 1px solid var(--line); background: var(--panel2); color: var(--ink); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #17171c; }
+  .btn.ghost { background: transparent; }
+  .btn.icon { padding: 6px 9px; }
+  .seg { display: inline-flex; background: var(--panel2); border: 1px solid var(--line);
+         border-radius: 10px; padding: 2px; gap: 2px; }
+  .seg span { padding: 6px 11px; border-radius: 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  .seg span.on { background: #3a3a48; color: var(--ink); }
+
+  /* wireframe arrangements (the "picture" of a sheet) */
+  .arr { display: grid; gap: 3px; background: #0c0c11; border: 1px solid var(--line);
+         border-radius: 6px; padding: 3px; aspect-ratio: 3 / 2; width: 100%; }
+  .arr > i { background: #2a2a35; border-radius: 3px; display: block; }
+  .arr > i.hot { background: #4a3a22; outline: 1px solid #6b5430; }
+  .arr.hero { grid-template-columns: 1.35fr 1fr 1fr; grid-template-rows: 1fr 1fr; }
+  .arr.hero > i:first-child { grid-row: span 2; }
+  .arr.g6 { grid-template-columns: repeat(3, 1fr); grid-template-rows: 1fr 1fr; }
+  .arr.g4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+  .arr.row3 { grid-template-columns: repeat(3, 1fr); }
+  .arr.suite { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 4px; }
+  .arr.suite > i { padding: 0; background: #0c0c11; border: 1px solid var(--line);
+                   display: grid; gap: 2px; padding: 2px; }
+  .arr.suite > i.a1 { grid-template-columns: 1.3fr 1fr; grid-template-rows: 1fr 1fr; }
+  .arr.suite > i.a2 { grid-template-columns: repeat(3, 1fr); grid-template-rows: 1fr 1fr; }
+  .arr.suite > i.a3, .arr.suite > i.a4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+  .arr.suite b { background: #2a2a35; border-radius: 2px; }
+  .arr.suite > i.a1 b:first-child { grid-row: span 2; }
+
+  /* tiles that stand in for a sheet arrangement */
+  .tiles { display: flex; gap: 9px; flex-wrap: wrap; }
+  .tiles.rail6 { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .tiles.wall3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; }
+  .tiles.railrow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .tiles.railcol3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+  .tiles.railcol3 .tile { padding: 6px; }
+  .tiles.railcol3 .tile .name { font-size: 11px; }
+  .tile { width: 100%; border: 1px solid var(--line); border-radius: 11px; padding: 7px;
+          background: var(--panel); cursor: pointer; position: relative; }
+  .tile .arr { aspect-ratio: 3 / 2; }
+  .tiles.wall3 .tile .arr { aspect-ratio: 16 / 10; }
+  .tile.on { border-color: var(--accent); box-shadow: 0 0 0 2px #ffb34733, 0 0 0 1px var(--accent) inset; }
+  .tile.on::after { content: "✓"; position: absolute; top: 5px; right: 7px; font-size: 11px;
+                    color: var(--accent); font-weight: 700; }
+  .tile .name { font-size: 11.5px; font-weight: 620; margin-top: 6px; }
+  .tile .meta { font-size: 10.5px; color: var(--dim); }
+  .tile:hover { border-color: #4a4a5c; }
+
+  /* size chips: the box is drawn to scale, so "bigger" is visible */
+  .sizes { display: flex; gap: 9px; align-items: flex-end; }
+  .size { border: 1px solid var(--line); background: var(--panel); border-radius: 10px;
+          padding: 8px 10px 7px; display: flex; flex-direction: column; gap: 6px; align-items: center;
+          cursor: pointer; width: 92px; }
+  .size.on { border-color: var(--accent); box-shadow: 0 0 0 2px #ffb34733; }
+  .size .box { background: #2a2a35; border-radius: 3px; }
+  .size .lbl { font-size: 11.5px; font-weight: 640; }
+  .size .sub { font-size: 10px; color: var(--dim); }
+  .size.custom .box { background: repeating-linear-gradient(45deg, #2a2a35 0 4px, #23232c 4px 8px); }
+
+  /* glyph toggles (framings / expressions / detail crops) */
+  .glyphs { display: flex; flex-wrap: wrap; gap: 7px; }
+  .glyph { width: 62px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+           padding: 6px 4px 5px; display: flex; flex-direction: column; align-items: center; gap: 3px;
+           cursor: pointer; }
+  .glyph.on { border-color: var(--accent); background: #2b2318; }
+  .glyph svg { width: 30px; height: 30px; display: block; }
+  .glyph .lbl { font-size: 10px; color: var(--muted); text-align: center; line-height: 1.15; }
+  .glyph.on .lbl { color: var(--ink); }
+  .glyph.wide { width: 74px; }
+  .strip { display: flex; gap: 4px; align-items: center; }
+  .thumb { width: 54px; height: 32px; border-radius: 5px; border: 1px solid var(--line);
+           background: linear-gradient(135deg, #2c2c38, #22222b); }
+  .thumb.pick { border-color: var(--accent2); }
+  .avatar { width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--line);
+            background: linear-gradient(140deg, #3a3a48, #26262f); display: grid; place-items: center;
+            font-size: 10px; color: var(--muted); }
+  .avatar.add { border-style: dashed; }
+  .swatch { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line); cursor: pointer; }
+  .swatch.on { box-shadow: 0 0 0 2px var(--accent); }
+  .rail { display: flex; flex-direction: column; gap: 6px; width: 46px; }
+  .tabbar { display: flex; gap: 3px; border-bottom: 1px solid var(--line); }
+  .tabbar span { padding: 7px 11px; font-size: 12px; font-weight: 620; color: var(--muted);
+                 border-bottom: 2px solid transparent; }
+  .tabbar span.on { color: var(--ink); border-bottom-color: var(--accent); }
+  .section { border: 1px solid var(--line); border-radius: 11px; background: #191920; padding: 10px; }
+  .notes { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .note { border: 1px solid var(--line); border-radius: 11px; padding: 11px 12px; background: var(--panel); }
+  .note h4 { margin: 0 0 6px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); }
+  .note ul { margin: 0; padding-left: 16px; color: var(--muted); }
+  .note li { margin: 3px 0; }
+  .kv { display: grid; grid-template-columns: 190px 1fr; gap: 6px 12px; }
+  .kv b { font-weight: 620; color: var(--ink); }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .1em; }
+  .tag { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .06em;
+         padding: 2px 6px; border-radius: 20px; text-transform: uppercase; }
+  .tag.now { background: #23324a; color: #9ec5ff; }
+  .tag.new { background: #2b3a24; color: var(--ok); }
+  .hoverline { border-top: 1px dashed var(--line); padding-top: 7px; font-size: 11.5px; color: var(--dim); }
+
+  /* ---- references: tiles, badges, the painter, the compare bar (proposal B, 2nd view) ---- */
+  .reftile { position: relative; border: 1px solid var(--line); border-radius: 11px; overflow: hidden;
+             background: var(--panel); cursor: pointer; }
+  .reftile.on { border-color: var(--accent); box-shadow: 0 0 0 2px #ffb34733; }
+  .reftile .art { aspect-ratio: 1 / 1; background: linear-gradient(150deg, #3c3c4a, #24242e);
+                  display: grid; place-items: center; }
+  .reftile .art svg { width: 62%; height: 62%; }
+  .reftile.video .art { background: linear-gradient(150deg, #34344215, #24242e), repeating-linear-gradient(90deg,#2c2c38 0 22%, #212129 22% 25%); }
+  .reftile.audio .art { background: #1d1d25; align-items: center; }
+  .reftile .cap { padding: 5px 6px; font-size: 10.5px; color: var(--muted); display: flex; gap: 4px;
+                  align-items: center; justify-content: space-between; }
+  .reftile .cap b { color: var(--ink); font-weight: 600; font-size: 11px; }
+  .badge { font-size: 9.5px; font-weight: 700; letter-spacing: .04em; border-radius: 20px;
+           padding: 2px 6px; border: 1px solid var(--line); background: #191920; }
+  .badge.blur { color: #9fd0ff; border-color: #3d5f86; }
+  .badge.blur.on { color: #ffb4a2; border-color: #7a4a3c; }
+  .badge.blur.off { color: var(--dim); }
+  .badge.paint { color: var(--accent); border-color: #6b5430; }
+  .badge.id { color: var(--ok); border-color: #2f5c44; }
+  .badge.warn { color: var(--danger); border-color: #6e3a37; }
+  .badge.build { color: #d9b3ff; border-color: #4d3d66; }
+  .reftile .corner { position: absolute; top: 4px; left: 4px; display: flex; gap: 3px; }
+  .reftile .corner2 { position: absolute; top: 4px; right: 4px; display: flex; gap: 3px; }
+  .wave { display: flex; align-items: center; gap: 1.5px; height: 100%; width: 100%; padding: 0 6px; }
+  .wave i { flex: 1; background: #4b4b5c; border-radius: 1px; }
+  .paint-stage { position: relative; border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+                 background: #101015; }
+  .paint-stage .who { position: absolute; inset: 0; display: grid; place-items: center; opacity: .5; }
+  .paint-stage .who svg { width: 46%; height: 46%; }
+  .paint-stage .veil { position: absolute; inset: 0; background: radial-gradient(120% 90% at 50% 40%, #0000, #0009); }
+  .paint-stage .toolbar { position: absolute; left: 8px; right: 8px; bottom: 8px; display: flex; gap: 8px;
+                          align-items: center; background: #12121ae6; border: 1px solid var(--line);
+                          border-radius: 10px; padding: 7px 9px; backdrop-filter: blur(3px); }
+  .chip { font-size: 11px; font-weight: 600; color: var(--muted); border: 1px solid var(--line);
+          background: var(--panel2); border-radius: 20px; padding: 4px 9px; }
+  .chip.on { color: #17171c; background: var(--accent); border-color: var(--accent); }
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .compare figure { margin: 0; border: 1px solid var(--line); border-radius: 9px; overflow: hidden;
+                    background: #131319; }
+  .compare .art { aspect-ratio: 16 / 9; display: grid; place-items: center; background: #22222b; }
+  .compare .art svg { width: 34%; height: 34%; opacity: .65; }
+  .compare figcaption { font-size: 10.5px; color: var(--dim); padding: 4px 7px; }
+</style>
+</head>
+<body>
+
+<!-- ---------------------------------------------------------------- glyph sprite -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="g-face" viewBox="0 0 32 32">
+    <rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="#8f8fa3" stroke-width="1.4"/>
+    <ellipse cx="16" cy="16" rx="7.5" ry="9.5" fill="#2f2f3b" stroke="#b9b9c8" stroke-width="1.2"/>
+    <circle cx="13" cy="14" r="1.1" fill="#b9b9c8"/><circle cx="19" cy="14" r="1.1" fill="#b9b9c8"/>
+    <path d="M14 20.5c1.4 1 2.6 1 4 0" stroke="#b9b9c8" stroke-width="1.1" fill="none"/>
+  </symbol>
+  <symbol id="g-portrait" viewBox="0 0 32 32">
+    <rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="#8f8fa3" stroke-width="1.4"/>
+    <circle cx="16" cy="11" r="4.6" fill="#2f2f3b" stroke="#b9b9c8" stroke-width="1.2"/>
+    <path d="M8.5 28c1.5-6 4.5-9 7.5-9s6 3 7.5 9" fill="#2f2f3b" stroke="#b9b9c8" stroke-width="1.2"/>
+  </symbol>
+  <symbol id="g-front" viewBox="0 0 32 32">
+    <rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="#8f8fa3" stroke-width="1.4"/>
+    <circle cx="16" cy="7.5" r="3" fill="#2f2f3b" stroke="#b9b9c8" stroke-width="1.1"/>
+    <path d="M16 10.5v9M11.5 13.5h9M16 19.5l-3 8M16 19.5l3 8" stroke="#b9b9c8" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="g-side" viewBox="0 0 32 32">
+    <rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="#8f8fa3" stroke-width="1.4"/>
+    <circle cx="18" cy="7.5" r="3" fill="#2f2f3b" stroke="#b9b9c8" stroke-width="1.1"/>
+    <path d="M17 10.5v9M17 13.5h-4M17 19.5l-2.5 8M17 19.5l2.5 8" stroke="#b9b9c8" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="g-back" viewBox="0 0 32 32">
+    <rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="#8f8fa3" stroke-width="1.4"/>
+    <circle cx="16" cy="7.5" r="3" fill="#2f2f3b" stroke="#b9b9c8" stroke-width="1.1"/>
+    <path d="M16 10.5v9M11.5 12.5h9M16 19.5l-3 8M16 19.5l3 8" stroke="#b9b9c8" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="g-eyes" viewBox="0 0 32 32">
+    <rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="#8f8fa3" stroke-width="1.4"/>
+    <path d="M7 16c2.5-4 5-4 7 0-2 4-4.5 4-7 0Z" fill="#2f2f3b" stroke="#b9b9c8" stroke-width="1.1"/>
+    <path d="M18 16c2.5-4 5-4 7 0-2 4-4.5 4-7 0Z" fill="#2f2f3b" stroke="#b9b9c8" stroke-width="1.1"/>
+    <circle cx="10.5" cy="16" r="1.2" fill="#b9b9c8"/><circle cx="21.5" cy="16" r="1.2" fill="#b9b9c8"/>
+  </symbol>
+  <symbol id="g-mouth" viewBox="0 0 32 32">
+    <rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="#8f8fa3" stroke-width="1.4"/>
+    <path d="M9 16c3.5-4.5 10.5-4.5 14 0-3.5 4.5-10.5 4.5-14 0Z" fill="#2f2f3b" stroke="#b9b9c8" stroke-width="1.1"/>
+    <path d="M10.5 16h11" stroke="#b9b9c8" stroke-width="1" />
+  </symbol>
+  <symbol id="g-hands" viewBox="0 0 32 32">
+    <rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="#8f8fa3" stroke-width="1.4"/>
+    <path d="M11 21V10.5a1.6 1.6 0 013.2 0V16m0-7.5a1.6 1.6 0 013.2 0V16m0-6a1.6 1.6 0 013.2 0v9c0 3-2 5-5 5h-2c-3 0-5-2-4.6-5l.8-6Z"
+          fill="#2f2f3b" stroke="#b9b9c8" stroke-width="1.1"/>
+  </symbol>
+  <symbol id="g-feet" viewBox="0 0 32 32">
+    <rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="#8f8fa3" stroke-width="1.4"/>
+    <path d="M11 9v9c0 5 1 7 4 7 2 0 3-2 3-6v-10c0-3-7-3-7 0Z" fill="#2f2f3b" stroke="#b9b9c8" stroke-width="1.1"/>
+    <path d="M21 11v7c0 4 .8 5.5 2.4 5.5 1.3 0 2-1.6 2-4.6V11c0-2.4-4.4-2.4-4.4 0Z" fill="#2f2f3b" stroke="#b9b9c8" stroke-width="1.1"/>
+  </symbol>
+  <symbol id="g-torso" viewBox="0 0 32 32">
+    <rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="#8f8fa3" stroke-width="1.4"/>
+    <path d="M11 12c0-4 2.2-6 5-6s5 2 5 6v7c0 3-2 4-5 4s-5-1-5-4Z" fill="#2f2f3b" stroke="#b9b9c8" stroke-width="1.1"/>
+    <path d="M13 16h6" stroke="#b9b9c8" stroke-width="1"/>
+  </symbol>
+  <symbol id="g-lower" viewBox="0 0 32 32">
+    <rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="#8f8fa3" stroke-width="1.4"/>
+    <path d="M10 10c0 6 1.5 12 6 12s6-6 6-12" fill="#2f2f3b" stroke="#b9b9c8" stroke-width="1.1"/>
+    <path d="M13 12v8M19 12v8" stroke="#b9b9c8" stroke-width="1"/>
+  </symbol>
+  <symbol id="g-rear" viewBox="0 0 32 32">
+    <rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="#8f8fa3" stroke-width="1.4"/>
+    <circle cx="12.5" cy="16" r="4.6" fill="#2f2f3b" stroke="#b9b9c8" stroke-width="1.1"/>
+    <circle cx="21" cy="16" r="4.6" fill="#2f2f3b" stroke="#b9b9c8" stroke-width="1.1"/>
+  </symbol>
+  <symbol id="g-silent" viewBox="0 0 32 32">
+    <rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="#8f8fa3" stroke-width="1.4"/>
+    <circle cx="14" cy="15" r="5" fill="#2f2f3b" stroke="#b9b9c8" stroke-width="1.1"/>
+    <path d="M8 26c1.4-4 3.4-6 6-6s4.6 2 6 6" fill="none" stroke="#b9b9c8" stroke-width="1.2"/>
+    <path d="M23 8l4 4M27 8l-4 4" stroke="#6e6e80" stroke-width="1.3"/>
+  </symbol>
+</svg>
+
+<div class="top">
+  <h1>Character Sheet panel — three visual directions</h1>
+  <p>Same panel, same data, same payload — only the presentation changes. Click through them and
+     pick one (or mix: they are not exclusive). Everything below is drawn with wireframes so you are
+     judging <b>layout and information hierarchy</b>, not art. Real sheet renders can become the card
+     art later (phase 2), which is why the tiles are sized to hold a picture.</p>
+  <div class="switcher" role="tablist">
+    <button class="is-active" data-show="a">A · Sheet cards<small>rail of arrangement pictures</small></button>
+    <button data-show="b">B · Preview-first studio<small>big sheet, icon rail</small></button>
+    <button data-show="b2">B′ · the same studio, on References<small>blur + paint on the big pane</small></button>
+    <button data-show="c">C · Tile wall<small>no dropdowns anywhere</small></button>
+  </div>
+</div>
+
+<div class="stage">
+
+<!-- =========================================================== A: sheet cards -->
+<section class="wrap is-active" data-wrap="a">
+  <div class="node">
+    <div class="node-head"><span class="dot"></span>
+      <span class="node-title">Character Sheet Builder</span>
+      <span class="node-sub">one-pass · 1080p · 5 cells</span></div>
+    <div class="panel">
+
+      <div class="row">
+        <button class="btn primary">▸ Render</button>
+        <button class="btn icon" title="re-roll the sheet">↻</button>
+        <span class="grow"></span>
+        <span class="tiny muted" id="a-note">Hero + 4 panels · 5 cells · one render of 5 frames</span>
+      </div>
+
+      <div>
+        <h3>What to draw</h3>
+        <div class="tiles rail6">
+          <div class="tile on"><div class="arr hero"><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="name">Hero + 4 panels</div><div class="meta">5 cells · 3:2</div></div>
+          <div class="tile"><div class="arr g6"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="name">Expressions 2x3</div><div class="meta">6 cells · faces</div></div>
+          <div class="tile"><div class="arr row3"><i></i><i></i><i></i></div>
+            <div class="name">Turnaround</div><div class="meta">3 cells · 21:9</div></div>
+          <div class="tile"><div class="arr g4"><i></i><i></i><i></i><i></i></div>
+            <div class="name">Closeups SFW</div><div class="meta">4 cells · 1:1</div></div>
+          <div class="tile"><div class="arr g4"><i class="hot"></i><i class="hot"></i><i class="hot"></i><i class="hot"></i></div>
+            <div class="name">Closeups NSFW</div><div class="meta">4 cells · explicit</div></div>
+          <div class="tile"><div class="arr suite"><i class="a1"><b></b><b></b><b></b><b></b><b></b></i><i class="a2"><b></b><b></b><b></b><b></b><b></b><b></b></i><i class="a3"><b></b><b></b><b></b><b></b></i><i class="a4"><b></b><b></b><b></b><b></b></i></div>
+            <div class="name">RefMod suite</div><div class="meta">4 sheets · 19 cells</div></div>
+        </div>
+      </div>
+
+      <div class="row" style="gap:18px; align-items:flex-end;">
+        <div>
+          <h3>How big</h3>
+          <div class="sizes">
+            <div class="size on"><span class="box" style="width:52px;height:35px"></span>
+              <span class="lbl">1080p</span><span class="sub">1.1 MP sheet</span></div>
+            <div class="size"><span class="box" style="width:64px;height:43px"></span>
+              <span class="lbl">1440p</span><span class="sub">2.1 MP</span></div>
+            <div class="size"><span class="box" style="width:80px;height:54px"></span>
+              <span class="lbl">4K</span><span class="sub">7.1 MP</span></div>
+            <div class="size custom"><span class="box" style="width:58px;height:39px"></span>
+              <span class="lbl">Custom</span><span class="sub">1536 px</span></div>
+          </div>
+        </div>
+        <div>
+          <h3>How</h3>
+          <div class="seg"><span class="on">One pass</span><span>Per cell</span></div>
+          <div class="tiny dim" style="margin-top:6px">one render of the whole sheet</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>Which cells · tap a picture</h3>
+        <div class="row" style="align-items:flex-start; gap:14px;">
+          <div>
+            <div class="tiny dim" style="margin-bottom:5px">Framings</div>
+            <div class="glyphs">
+              <div class="glyph on"><svg><use href="#g-face"/></svg><span class="lbl">Face</span></div>
+              <div class="glyph on"><svg><use href="#g-portrait"/></svg><span class="lbl">Portrait</span></div>
+              <div class="glyph on"><svg><use href="#g-front"/></svg><span class="lbl">Front</span></div>
+              <div class="glyph on"><svg><use href="#g-side"/></svg><span class="lbl">Side 90°</span></div>
+              <div class="glyph on"><svg><use href="#g-back"/></svg><span class="lbl">Back</span></div>
+              <div class="glyph"><svg><use href="#g-eyes"/></svg><span class="lbl">Eyes</span></div>
+              <div class="glyph"><svg><use href="#g-mouth"/></svg><span class="lbl">Mouth</span></div>
+              <div class="glyph"><svg><use href="#g-hands"/></svg><span class="lbl">Hands</span></div>
+              <div class="glyph"><svg><use href="#g-feet"/></svg><span class="lbl">Feet</span></div>
+            </div>
+          </div>
+          <div>
+            <div class="tiny dim" style="margin-bottom:5px">Expressions</div>
+            <div class="glyphs">
+              <div class="glyph on"><svg><use href="#g-face"/></svg><span class="lbl">Neutral</span></div>
+              <div class="glyph"><svg><use href="#g-silent"/></svg><span class="lbl">Eyes shut</span></div>
+              <div class="glyph"><svg><use href="#g-mouth"/></svg><span class="lbl">Smile</span></div>
+              <div class="glyph"><svg><use href="#g-mouth"/></svg><span class="lbl">Anger</span></div>
+              <div class="glyph"><svg><use href="#g-silent"/></svg><span class="lbl">Crying</span></div>
+              <div class="glyph"><svg><use href="#g-mouth"/></svg><span class="lbl">Pleasure</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="hoverline">Hover a picture for its one-line meaning — the sentence that used to
+          sit in the hint bar lives here now, so the panel is quiet until asked.</div>
+      </div>
+
+      <div class="row">
+        <div class="strip">
+          <span class="thumb"></span><span class="thumb pick"></span><span class="thumb"></span>
+          <span class="thumb"></span><span class="thumb"></span>
+        </div>
+        <span class="grow"></span>
+        <span class="tiny dim">live frames · click to pick</span>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================== B: preview-first -->
+<section class="wrap" data-wrap="b">
+  <div class="node">
+    <div class="node-head"><span class="dot"></span>
+      <span class="node-title">Character Sheet Builder</span>
+      <span class="node-sub">Hero + 4 panels · 1080p</span></div>
+    <div class="panel">
+      <div class="row" style="align-items:stretch; gap:12px;">
+        <div class="rail">
+          <button class="btn icon" title="References">◧</button>
+          <button class="btn icon is-active" style="border-color:#ffb347" title="Cells">▦</button>
+          <button class="btn icon" title="Look">◐</button>
+          <button class="btn icon" title="Results">▤</button>
+          <button class="btn icon" title="Help">?</button>
+        </div>
+
+        <div class="grow" style="display:flex; flex-direction:column; gap:8px;">
+          <div class="arr hero" style="aspect-ratio:3/2; padding:6px; gap:6px;">
+            <i style="background:linear-gradient(150deg,#3a3a48,#24242e)"></i>
+            <i style="background:linear-gradient(150deg,#3a3a48,#24242e)"></i>
+            <i style="background:linear-gradient(150deg,#3a3a48,#24242e)"></i>
+            <i style="background:linear-gradient(150deg,#3a3a48,#24242e)"></i>
+            <i style="background:linear-gradient(150deg,#3a3a48,#24242e)"></i>
+          </div>
+          <div class="row">
+            <span class="tiny dim">live · step 6 of 8</span>
+            <span class="grow"></span>
+            <span class="tiny muted">the sheet appears here as it denoises</span>
+          </div>
+          <div class="strip">
+            <span class="thumb"></span><span class="thumb"></span><span class="thumb pick"></span>
+            <span class="thumb"></span><span class="thumb"></span><span class="thumb"></span>
+            <span class="grow"></span><button class="btn icon" title="re-roll this cell">↻</button>
+          </div>
+        </div>
+
+        <div style="width:330px; display:flex; flex-direction:column; gap:10px;">
+          <div>
+            <h3>Sheets</h3>
+            <div class="tiles railcol3">
+              <div class="tile on"><div class="arr hero" style="gap:2px"><i></i><i></i><i></i><i></i><i></i></div>
+                <div class="name">Hero+4</div><div class="meta">5 cells</div></div>
+              <div class="tile"><div class="arr g6" style="gap:2px"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                <div class="name">Faces</div><div class="meta">6 cells</div></div>
+              <div class="tile"><div class="arr row3" style="gap:2px"><i></i><i></i><i></i></div>
+                <div class="name">Turn</div><div class="meta">3 cells</div></div>
+              <div class="tile"><div class="arr g4" style="gap:2px"><i></i><i></i><i></i><i></i></div>
+                <div class="name">SFW</div><div class="meta">4 cells</div></div>
+              <div class="tile"><div class="arr g4" style="gap:2px"><i class="hot"></i><i class="hot"></i><i class="hot"></i><i class="hot"></i></div>
+                <div class="name">NSFW</div><div class="meta">4 cells</div></div>
+              <div class="tile"><div class="arr suite" style="gap:2px"><i class="a1"><b></b><b></b><b></b><b></b></i><i class="a2"><b></b><b></b><b></b><b></b><b></b><b></b></i><i class="a3"><b></b><b></b><b></b><b></b></i><i class="a4"><b></b><b></b><b></b><b></b></i></div>
+                <div class="name">Suite</div><div class="meta">4 sheets</div></div>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="sizes" style="gap:6px">
+              <div class="size on" style="width:70px"><span class="box" style="width:34px;height:23px"></span><span class="lbl">1080p</span></div>
+              <div class="size" style="width:70px"><span class="box" style="width:42px;height:28px"></span><span class="lbl">1440p</span></div>
+              <div class="size" style="width:70px"><span class="box" style="width:52px;height:35px"></span><span class="lbl">4K</span></div>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="seg"><span class="on">One pass</span><span>Per cell</span></div>
+            <span class="grow"></span>
+            <button class="btn icon" title="steps">8 steps</button>
+          </div>
+
+          <div>
+            <h3>References</h3>
+            <div class="row">
+              <div class="avatar">face</div><div class="avatar">body</div><div class="avatar">fit</div>
+              <div class="avatar add">+</div>
+            </div>
+          </div>
+
+          <button class="btn primary" style="width:100%">▸ Render</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================== C: tile wall -->
+<section class="wrap" data-wrap="c">
+  <div class="node">
+    <div class="node-head"><span class="dot"></span>
+      <span class="node-title">Character Sheet Builder</span>
+      <span class="node-sub">19 cells queued · suite</span></div>
+    <div class="panel">
+
+      <div>
+        <h3>1 · Sheets</h3>
+        <div class="tiles wall3">
+          <div class="tile on"><div class="arr hero"><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="name">Hero + 4 panels</div></div>
+          <div class="tile"><div class="arr g6"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="name">Expressions 2x3</div></div>
+          <div class="tile"><div class="arr row3"><i></i><i></i><i></i></div>
+            <div class="name">Turnaround</div></div>
+          <div class="tile"><div class="arr g4"><i></i><i></i><i></i><i></i></div>
+            <div class="name">Closeups SFW</div></div>
+          <div class="tile"><div class="arr g4"><i class="hot"></i><i class="hot"></i><i class="hot"></i><i class="hot"></i></div>
+            <div class="name">Closeups NSFW</div></div>
+          <div class="tile on"><div class="arr suite"><i class="a1"><b></b><b></b><b></b><b></b><b></b></i><i class="a2"><b></b><b></b><b></b><b></b><b></b><b></b></i><i class="a3"><b></b><b></b><b></b><b></b></i><i class="a4"><b></b><b></b><b></b><b></b></i></div>
+            <div class="name">RefMod suite (4 sheets)</div></div>
+        </div>
+      </div>
+
+      <div class="row" style="align-items:flex-end; gap:20px">
+        <div>
+          <h3>2 · Size</h3>
+          <div class="sizes">
+            <div class="size on"><span class="box" style="width:58px;height:39px"></span><span class="lbl">1080p</span><span class="sub">fast</span></div>
+            <div class="size"><span class="box" style="width:72px;height:48px"></span><span class="lbl">1440p</span><span class="sub">sharp</span></div>
+            <div class="size"><span class="box" style="width:90px;height:60px"></span><span class="lbl">4K</span><span class="sub">huge</span></div>
+          </div>
+        </div>
+        <div>
+          <h3>3 · Motion</h3>
+          <div class="row" style="gap:6px">
+            <div class="glyph on" style="width:86px"><svg viewBox="0 0 32 32"><rect x="2" y="6" width="28" height="20" rx="3" fill="none" stroke="#b9b9c8" stroke-width="1.4"/><rect x="6" y="10" width="8" height="12" fill="#4a3a22" stroke="#ffb347" stroke-width="1"/><rect x="16" y="10" width="4" height="12" fill="#2a2a35"/><rect x="22" y="10" width="4" height="12" fill="#2a2a35"/></svg><span class="lbl">One pass</span></div>
+            <div class="glyph" style="width:86px"><svg viewBox="0 0 32 32"><rect x="2" y="6" width="28" height="20" rx="3" fill="none" stroke="#b9b9c8" stroke-width="1.4"/><rect x="5" y="9" width="6" height="14" fill="#2a2a35"/><rect x="13" y="9" width="6" height="14" fill="#2a2a35"/><rect x="21" y="9" width="6" height="14" fill="#2a2a35"/></svg><span class="lbl">Per cell</span></div>
+          </div>
+        </div>
+        <div>
+          <h3>4 · Look</h3>
+          <div class="row" style="gap:6px">
+            <div class="swatch on" style="background:#3a3a44" title="neutral"></div>
+            <div class="swatch" style="background:#c8a37a" title="tan"></div>
+            <div class="swatch" style="background:linear-gradient(140deg,#3a3a48,#26262f);" title="from a reference"></div>
+            <div class="swatch" style="background:repeating-linear-gradient(45deg,#2a2a35 0 4px,#22222b 4px 8px)" title="pick a colour"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>5 · Cells · the sheet you asked for has 19</h3>
+        <div class="row" style="align-items:flex-start; gap:14px">
+          <div class="glyphs">
+            <div class="glyph on"><svg><use href="#g-face"/></svg><span class="lbl">Face</span></div>
+            <div class="glyph on"><svg><use href="#g-portrait"/></svg><span class="lbl">Portrait</span></div>
+            <div class="glyph on"><svg><use href="#g-front"/></svg><span class="lbl">Front</span></div>
+            <div class="glyph on"><svg><use href="#g-side"/></svg><span class="lbl">Side</span></div>
+            <div class="glyph on"><svg><use href="#g-back"/></svg><span class="lbl">Back</span></div>
+            <div class="glyph on"><svg><use href="#g-eyes"/></svg><span class="lbl">Eyes</span></div>
+            <div class="glyph on"><svg><use href="#g-mouth"/></svg><span class="lbl">Mouth</span></div>
+            <div class="glyph on"><svg><use href="#g-hands"/></svg><span class="lbl">Hands</span></div>
+            <div class="glyph on"><svg><use href="#g-feet"/></svg><span class="lbl">Feet</span></div>
+            <div class="glyph on"><svg><use href="#g-torso"/></svg><span class="lbl">Breasts</span></div>
+            <div class="glyph on"><svg><use href="#g-lower"/></svg><span class="lbl">Groin</span></div>
+            <div class="glyph on"><svg><use href="#g-rear"/></svg><span class="lbl">Butt</span></div>
+            <div class="glyph on"><svg><use href="#g-mouth"/></svg><span class="lbl">Ahego</span></div>
+          </div>
+        </div>
+        <div class="hoverline">Every glyph is one hover away from its sentence. No hint bar, no
+          dropdown, no list of words to parse — the picture is the control.</div>
+      </div>
+
+      <div class="row">
+        <div class="glyphs" style="flex:1">
+          <div class="glyph wide" style="width:104px"><svg><use href="#g-front"/></svg><span class="lbl">3 references</span></div>
+          <div class="glyph wide" style="width:104px"><svg viewBox="0 0 32 32"><rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="#8f8fa3" stroke-width="1.4"/><circle cx="16" cy="16" r="9" fill="none" stroke="#b9b9c8" stroke-width="1.3"/><path d="M16 11v5l3.5 2" stroke="#b9b9c8" stroke-width="1.3" fill="none"/></svg><span class="lbl">~3 min</span></div>
+          <div class="glyph wide" style="width:104px"><svg viewBox="0 0 32 32"><rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="#8f8fa3" stroke-width="1.4"/><path d="M8 12h16M8 18h11" stroke="#b9b9c8" stroke-width="1.6"/><path d="M8 24h7" stroke="#b9b9c8" stroke-width="1.6"/></svg><span class="lbl">prompt</span></div>
+        </div>
+        <button class="btn primary" style="padding:12px 26px; font-size:13px">▸ Render all 4 sheets</button>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================== B-prime: references -->
+<section class="wrap" data-wrap="b2">
+  <div class="node">
+    <div class="node-head"><span class="dot"></span>
+      <span class="node-title">Character Sheet Builder</span>
+      <span class="node-sub">References · 3 pictures · 1 video · 1 audio</span></div>
+    <div class="panel">
+      <div class="row" style="align-items:stretch; gap:12px;">
+        <div class="rail">
+          <button class="btn icon is-active" style="border-color:#ffb347" title="References">◧</button>
+          <button class="btn icon" title="Cells">▦</button>
+          <button class="btn icon" title="Look">◐</button>
+          <button class="btn icon" title="Results">▤</button>
+          <button class="btn icon" title="Help">?</button>
+        </div>
+
+        <div class="grow" style="display:flex; flex-direction:column; gap:8px;">
+          <!-- the SAME pane as the render view: here it holds the selected reference and the
+               blur painter, so one layout serves both jobs -->
+          <div class="paint-stage" style="aspect-ratio:16/10;">
+            <div class="who"><svg viewBox="0 0 32 32" style="color:#8f8fa3"><use href="#g-portrait"/></svg></div>
+            <!-- hand-painted areas, exactly the strokes the pack already stores (normalized) -->
+            <svg viewBox="0 0 100 62" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">
+              <g fill="#ffb34755" stroke="#ffb347" stroke-width="0.6">
+                <ellipse cx="50" cy="24" rx="9" ry="11"/>
+                <ellipse cx="72" cy="46" rx="7" ry="5"/>
+                <ellipse cx="28" cy="49" rx="6" ry="4"/>
+              </g>
+            </svg>
+            <div class="veil"></div>
+            <div class="toolbar">
+              <span class="chip on">Paint</span>
+              <span class="chip">Pan</span>
+              <span class="tiny muted">brush</span>
+              <input type="range" min="1" max="30" value="14" style="width:110px">
+              <span class="grow"></span>
+              <span class="chip">Undo</span>
+              <span class="chip">Clear</span>
+              <span class="chip on">Done</span>
+            </div>
+          </div>
+
+          <div class="row">
+            <span class="tiny muted">Blur area</span>
+            <span class="chip on">Hair</span><span class="chip">Face only</span><span class="chip">Whole head</span>
+            <span class="grow"></span>
+            <span class="tiny dim">the patch grows around what is detected</span>
+          </div>
+
+          <div class="compare">
+            <figure>
+              <div class="art"><svg viewBox="0 0 32 32" style="color:#8f8fa3"><use href="#g-portrait"/></svg></div>
+              <figcaption>Original - as you uploaded it</figcaption>
+            </figure>
+            <figure>
+              <div class="art" style="background:#1b1b22">
+                <svg viewBox="0 0 32 32" style="color:#8f8fa3;filter:blur(4px)"><use href="#g-portrait"/></svg>
+              </div>
+              <figcaption>What the render receives - face blurred, painting kept, clothing untouched</figcaption>
+            </figure>
+          </div>
+        </div>
+
+        <div style="width:330px; display:flex; flex-direction:column; gap:9px;">
+          <div class="row">
+            <h3 style="margin:0">References</h3><span class="grow"></span>
+            <span class="tiny dim">9 pictures · 3 video · 3 audio</span>
+          </div>
+
+          <div class="tiles railcol3">
+            <div class="reftile on">
+              <div class="corner"><span class="badge id">ID</span></div>
+              <div class="corner2"><span class="badge blur">auto</span></div>
+              <div class="art"><svg viewBox="0 0 32 32" style="color:#b9b9c8"><use href="#g-face"/></svg></div>
+              <div class="cap"><b>face</b><span>identity</span></div>
+            </div>
+            <div class="reftile">
+              <div class="corner2"><span class="badge blur on">on</span><span class="badge paint">2</span></div>
+              <div class="art"><svg viewBox="0 0 32 32" style="color:#b9b9c8"><use href="#g-front"/></svg></div>
+              <div class="cap"><b>outfit</b><span>blurred</span></div>
+            </div>
+            <div class="reftile">
+              <div class="corner2"><span class="badge blur off">off</span></div>
+              <div class="art"><svg viewBox="0 0 32 32" style="color:#b9b9c8"><use href="#g-side"/></svg></div>
+              <div class="cap"><b>pose</b><span>as-is</span></div>
+            </div>
+            <div class="reftile video">
+              <div class="corner2"><span class="badge warn">no blur yet</span></div>
+              <div class="art" style="background:repeating-linear-gradient(90deg,#2c2c38 0 22%,#212129 22% 26%)"></div>
+              <div class="cap"><b>motion</b><span>124f</span></div>
+            </div>
+            <div class="reftile audio">
+              <div class="art" style="background:#1d1d25">
+                <div class="wave"><i style="height:30%"></i><i style="height:70%"></i><i style="height:45%"></i><i style="height:90%"></i><i style="height:55%"></i><i style="height:25%"></i><i style="height:65%"></i><i style="height:40%"></i><i style="height:80%"></i><i style="height:35%"></i><i style="height:60%"></i><i style="height:20%"></i></div>
+              </div>
+              <div class="cap"><b>voice</b><span>4.2s</span></div>
+            </div>
+            <div class="reftile add" style="display:grid; place-items:center; min-height:96px; border-style:dashed">
+              <div style="text-align:center">
+                <div style="font-size:20px; color:var(--muted)">+</div>
+                <div class="tiny dim">picture · video<br>audio</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="section" style="padding:9px">
+            <div class="row" style="gap:6px">
+              <span class="badge blur">auto</span><span class="tiny muted">blur unless it is the ID reference</span>
+            </div>
+            <div class="row" style="gap:6px; margin-top:5px">
+              <span class="badge paint">2</span><span class="tiny muted">painted areas on this picture</span>
+            </div>
+            <div class="row" style="gap:6px; margin-top:5px">
+              <span class="badge warn">no blur yet</span><span class="tiny muted">video references cannot be blurred (see below)</span>
+            </div>
+          </div>
+
+          <div class="hoverline">Tap a tile to load it into the big pane. Everything you need to fix a
+            reference — blur it, paint an area out, compare before/after — happens there, on the
+            picture itself, instead of in a form beside it.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="notes" style="margin-top:12px">
+    <div class="note">
+      <h4>Already in the pack (just needs this home)</h4>
+      <ul>
+        <li><b>Per-picture face blur</b>: auto (blur unless it is the ID photo) / always / never.</li>
+        <li><b>Blur area</b> grow around the detected head: hair / face only / whole head.</li>
+        <li><b>Hand-painted areas</b> - normalized strokes, saved with the workflow: this is how you
+            take out an <i>object</i>, a logo, a tattoo or a second person, not only a face.</li>
+        <li><b>Before/after compare</b> of exactly what the render wires.</li>
+        <li>Video and audio reference slots (3 each) with roles.</li>
+      </ul>
+    </div>
+    <div class="note">
+      <h4>The one real gap</h4>
+      <ul>
+        <li><b>Video references cannot be blurred today</b> - only pictures. If you take identity
+            from a picture but motion from a clip whose performer should not leak in, there is
+            currently no way to blur that clip.</li>
+        <li>Same for a <b>region of a video</b> (blur frames 20-60 only).</li>
+        <li class="dim">Audio needs no blur; what it wants is a trim/waveform view, which the plan
+            already has for the export side.</li>
+      </ul>
+    </div>
+    <div class="note">
+      <h4>What it would take</h4>
+      <ul>
+        <li>Video blur: per-frame detection is the expensive part - the honest version is
+            <i>detect on a sample of frames, propagate the box, blur every frame</i>, cached next to
+            the file like the picture blur already is.</li>
+        <li>Paint on video: paint once on a keyframe, hold it across the window (my suggestion:
+            box-based, not pixel-based, so it stays cheap and predictable).</li>
+        <li>Both are engine work (<code>face_blur.py</code>), not panel work - the mockup above is
+            what the panel would show either way.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================== comparison -->
+<div class="stage" style="margin-top:22px">
+  <div class="section">
+    <h3>How they differ</h3>
+    <table>
+      <tr><th style="width:150px">&nbsp;</th><th>A · Sheet cards</th><th>B · Preview-first</th><th>C · Tile wall</th></tr>
+      <tr><td><b>Top of the panel</b></td><td>a rail of arrangement pictures you click</td>
+          <td>nothing - the sheet render is the top</td><td>a wall of large picture tiles</td></tr>
+      <tr><td><b>The 6 tabs</b></td><td>kept, each tab's content becomes pictures + glyph toggles</td>
+          <td>replaced with a 5-icon rail (labels on hover)</td><td>replaced with numbered picture sections, one scroll</td></tr>
+      <tr><td><b>Dropdowns</b></td><td>gone (2 selects → rail)</td><td>gone</td><td>none anywhere</td></tr>
+      <tr><td><b>Text</b></td><td>one summary line under the rail</td><td>almost none</td><td>one-line tooltips on hover</td></tr>
+      <tr><td><b>Shows the render</b></td><td>small filmstrip</td><td>big - the sheet fills the panel</td><td>small strip at the bottom</td></tr>
+      <tr><td><b>Best at</b></td><td>picking a sheet + tuning cells quickly</td>
+          <td>watching a run; per-cell re-rolls</td><td>first-time use, and showing someone the pack</td></tr>
+      <tr><td><b>Risk</b></td><td>rail needs a horizontal scroll at narrow widths</td>
+          <td>less room for the cell vocabulary</td><td>tall - needs its own scroll inside the node</td></tr>
+      <tr><td><b>Effort</b></td><td><span class="tag new">phase 1</span> ~1 day: cards + glyph toggles + icons, same payload</td>
+          <td><span class="tag new">+0.5 day</span> on top of A (reuses A's tiles)</td>
+          <td><span class="tag new">+1 day</span> on top of A (section rails, scroll)</td></tr>
+    </table>
+  </div>
+
+  <div class="notes" style="margin-top:12px">
+    <div class="note">
+      <h4>What stays exactly the same</h4>
+      <ul>
+        <li>Every payload key and the node's widgets - this is presentation only.</li>
+        <li>All current controls, just drawn differently (nothing is removed).</li>
+        <li>The preset ids, the resolution chips' rules, the suite's board list.</li>
+        <li>Tests: the payload/spec suites stay green; the panel's DOM tests get updated selectors.</li>
+      </ul>
+    </div>
+    <div class="note">
+      <h4>My recommendation</h4>
+      <ul>
+        <li><b>A first</b>: it removes both dropdowns and the hint bar in one pass, and it is where
+            the glyph vocabulary pays off most.</li>
+        <li>Then take <b>B's big preview</b> as the top of the Results tab (not the whole panel).</li>
+        <li>Keep <b>C's tile wall</b> as the preset gallery behind a "Browse" button.</li>
+      </ul>
+    </div>
+    <div class="note">
+      <h4>Phase 2 (the real win)</h4>
+      <ul>
+        <li>Use your own last render of each layout as the card art - the folder already keeps
+            every sheet on disk.</li>
+        <li>Then "which sheet do I want" is answered by a picture of the sheet you got last time.</li>
+        <li>Same for references: show the actual reference face as an avatar instead of a filename.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+  const buttons = [...document.querySelectorAll(".switcher button")];
+  const wraps = [...document.querySelectorAll(".wrap")];
+  function show(key) {
+    buttons.forEach((b) => b.classList.toggle("is-active", b.dataset.show === key));
+    wraps.forEach((w) => w.classList.toggle("is-active", w.dataset.wrap === key));
+  }
+  buttons.forEach((b) => b.addEventListener("click", () => show(b.dataset.show)));
+</script>
+</body>
+</html>
