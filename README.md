@@ -262,12 +262,14 @@ never how. The suite preset only sets the mode.
 cannot drift from the layout the panel offers on its own; the run's own cell list is ignored while
 a suite is active (a fifth render nobody asked for), and an unknown or non-layout board id is
 reported in the warnings instead of rendering an empty sheet.
-* **Exporting it to RefMod.** Each board's folder *is* a sheet folder, so *H3 Sheet → RefMod* takes
-`<run>/<board>/` and exports that board as its own bundle - four bundles for a suite, each with its
-own appearance (and voice/video) members. The node's `sheet_dir` output points at the **hero board**,
-so the shipped `+ RefMod` workflow exports the hero sheet from a suite run with no change. A single
-merged bundle whose members are named per board (`hero-4_views`, `hero-4_sheet`, `expressions-6_views`,
-…) is the next step for this preset, not something this build does yet.
+* **Exporting it to RefMod: one bundle for the whole suite.** *H3 Sheet → RefMod* reads the run's
+`suite` record and puts **every board in one file**: each board contributes its picked cells
+(`<name>_<board>_views`) and its composite (`<name>_<board>_sheet`), and the motion and voice members
+are read once, because every board was rendered from the same references. Point `sheet_dir` at the run
+or at any board - the Builder's own `sheet_dir` output is the hero board, so the shipped `+ RefMod`
+workflow picks this up with nothing rewired - and the run's manifest records the bundle in its
+`suite.exported` field. A board that never rendered is named in the report and is simply not in the
+bundle; a suite with nothing on disk at all is refused with the reason.
 
 Picking a single layout after the suite returns to one sheet - the boards go with the layout they
 replaced. Switching the quality preset leaves the suite alone.
@@ -966,6 +968,17 @@ rides H3's own reference path for a fraction of the tokens a real reference cost
 | `<name>_voice_videos` | the soundtracks of those reference videos, joined (H3 pairs a reference video with its own soundtrack) | `[1,32,2,T]` |
 | `<name>_voice_cells` | every exported cell clip joined into one waveform (the fallback when the manifest has no reference audio) | `[1,32,2,T]` |
 | `<name>_voice_cellN` | the audio track of cell *N*'s exported clip, forced with `voice_cell=n` | `[1,32,2,T]` |
+
+**A suite run exports as ONE bundle.** Point `sheet_dir` at a
+[suite](#the-refmod-suite-four-sheets-one-queue) run (or at any of its boards - the Builder's own
+`sheet_dir` output is the hero board, so the shipped `+ RefMod` workflow needs nothing rewired) and
+every board goes into the one file: `<name>_hero-4_views`, `<name>_hero-4_sheet`,
+`<name>_expressions-6_views`, `<name>_expressions-6_sheet`, and so on, in the order the boards render,
+with a single `<name>_voice` / `<name>_videos` for the run, because every board was rendered from the
+same references. Each board's views are read from its own `cells/` folder in the **sheet's cell order**
+(the manifest's, not the folder listing's), and the run's manifest records which bundle carries it in
+the `suite.exported` field. A board that never rendered is named in the report and left out of the
+bundle; a suite with nothing on disk at all is refused with the reason rather than written empty.
 
 `voice_cell` is the ladder switch: `-1` (default) walks *reference audio -> reference-video
 soundtracks -> cell clips joined -> a connected `AUDIO`*, `0` keeps the sheet out of it (a

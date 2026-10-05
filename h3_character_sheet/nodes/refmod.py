@@ -63,7 +63,9 @@ class H3SheetRefMod(io.ComfyNode):
                 "the picked cell stills as a stacked appearance member, the composited "
                 "sheet as a second one, the sheet's reference videos as a motion member, "
                 "and a voice member from the sheet's own reference audio, its videos' "
-                "soundtracks, its exported clips, or a connected audio. One file, written "
+                "soundtracks, its exported clips, or a connected audio. A SUITE run (the "
+                "RefMod suite preset) exports as ONE bundle with a member pair per board, "
+                "named after it. One file, written "
                 "to models/refmods/<subfolder>/<name>.safetensors. Needs the "
                 "ComfyUI-MiniMaxH3Mod pack for the encoders."
             ),
@@ -121,7 +123,10 @@ class H3SheetRefMod(io.ComfyNode):
                             "on its left to wire it (or right-click it -> 'Convert "
                             "widget to input'), or just type the sheet's name as it "
                             "was rendered here (the Builder's output_name; a %date% "
-                            "name resolves to the newest matching run).",
+                            "name resolves to the newest matching run). Point it at a "
+                            "SUITE run (or at any of its boards) and every board goes "
+                            "into the one bundle, each with its own views and sheet "
+                            "members.",
                 ),
                 io.String.Input(
                     "name",

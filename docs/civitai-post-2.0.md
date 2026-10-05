@@ -197,7 +197,10 @@ A character sheet is a multi-view identity board, which is what a RefMod wants: 
 attends to like a real reference, at a fraction of the tokens. The `H3 Sheet -> RefMod` node (from
 [ComfyUI-MiniMaxH3Mod](https://github.com/Luisacaotica/ComfyUI-MiniMaxH3Mod)) writes one bundle with
 the picked cells stacked, the composite as a second member, and a voice member taken from the sheet's
-own reference audio, the soundtracks of your reference videos, or a cell's generated audio. Full
+own reference audio, the soundtracks of your reference videos, or a cell's generated audio. A suite
+run goes into ONE bundle: every board contributes its own views and its own composite, each named
+after the board, and the voice and motion members are read once because every board shares the
+references. Full
 Reference stores the real encode so a face survives; Compressed Reference pools it into a tiny grid
 that carries concept rather than identity. The node's report prints each member's token count, because
 the tokens are what the export costs at sampling time, not the file size.

@@ -12,6 +12,7 @@ The one thing this cannot check is the VAE math: that belongs to their pack.
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -904,6 +905,173 @@ def test_the_loaded_pack_is_reused_when_comfyui_already_has_it(monkeypatch):
                            NODE_CLASS_MAPPINGS={})
     monkeypatch.setitem(__import__("sys").modules, "ComfyUI-MiniMaxH3Mod", fake)
     assert rx.loaded_pack() is fake
+
+
+# ------------------------------------------------------------------- the suite
+# A suite renders several sheets under ONE run name, one folder per board, and the node records them
+# in the run's manifest. A RefMod is better the more views of the character it carries, so a suite is
+# exported as ONE bundle: every board's own folder supplies its picked stills and its composite, and
+# the motion/voice members are read once (every board shares the run's references). The folder the
+# user points at decides nothing: the Builder's own sheet_dir output is the HERO board, so pointing
+# at a board has to find the run one level up.
+
+SUITE_BOARDS = [
+    {"id": "hero-4", "label": "Hero + 4 panels", "folder": "hero-4", "cells": 2,
+     "layout": "hero-left"},
+    {"id": "expressions-6", "label": "Expressions 2x3", "folder": "expressions-6", "cells": 2,
+     "layout": "grid"},
+]
+
+
+def _png(path: Path, value: int = 10) -> None:
+    """A real (tiny) png, so the still reader is exercised rather than mocked."""
+    from PIL import Image
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (8, 8), (value, value, value)).save(path)
+
+
+def _board(run: Path, folder: str, cells: dict[str, int], *, sheet: bool = True,
+           audio: str | None = None, input_root: Path | None = None) -> Path:
+    """One board folder: its picked stills, its composite, and its own manifest."""
+    board = run / folder
+    for cell_id, value in cells.items():
+        _png(board / "cells" / f"{cell_id}.png", value)
+    manifest: dict[str, object] = {"cells": {cell: {"index": 0} for cell in cells}}
+    if sheet:
+        name = f"{folder}-20261005-120100.png"
+        _png(board / name, 200)
+        manifest["sheetFile"] = name
+    if audio:
+        target = (input_root if input_root is not None else board) / audio
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"RIFF")
+        manifest["spec"] = {"refs": {"audios": [
+            {"audioFile": audio, "role": "voice", "enabled": True}]}}
+    (board / f"{folder}.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return board
+
+
+@pytest.fixture()
+def suite_run(tmp_path, sheets_root, input_root):
+    """A rendered suite: one run folder, two boards, the run's own suite record."""
+    run = sheets_root / "character_sheet-20261005_120000"
+    _board(run, "hero-4", {"face-neutral": 30, "profile-neutral": 90}, audio="voice.wav",
+           input_root=input_root)
+    _board(run, "expressions-6", {"smile": 60, "anger": 120})
+    (run / f"{run.name}.json").write_text(json.dumps({
+        "spec": {"refs": {}},
+        "suite": {"name": run.name, "boards": list(SUITE_BOARDS), "exported": ""},
+    }), encoding="utf-8")
+    return run
+
+
+def test_a_suite_run_exports_every_board_into_one_bundle(tmp_path, suite_run, monkeypatch):
+    pack, calls = fake_pack(tmp_path)
+    monkeypatch.setattr(rx, "clip_audio", lambda path: VOICE)
+    result = rx.export_bundle(
+        cells=stills(5), sheet=stills(1),
+        video_vae="video-vae", audio_vae="audio-vae",
+        sheet_dir=str(suite_run), name="elf girl", subfolder="character_sheets", pack=pack,
+    )
+
+    # One member pair per board, in render order, each named after its board.
+    assert [call["name"] for call in calls["extract"]] == [
+        "elf girl_hero-4_views", "elf girl_hero-4_sheet",
+        "elf girl_expressions-6_views", "elf girl_expressions-6_sheet",
+    ]
+    # The stills came from each board's own folder, in the sheet's cell order.
+    first = calls["extract"][0]
+    assert list(first["refs_image"]) == ["ref_image_1", "ref_image_2"]
+    assert torch.allclose(first["refs_image"]["ref_image_1"], torch.full((1, 8, 8, 3), 30 / 255))
+    assert torch.allclose(first["refs_image"]["ref_image_2"], torch.full((1, 8, 8, 3), 90 / 255))
+    # The composite member is the board's own sheet png, not the wired one.
+    assert torch.allclose(calls["extract"][1]["refs_image"]["ref_image_1"],
+                          torch.full((1, 8, 8, 3), 200 / 255))
+
+    # ONE voice member for the whole bundle (the boards share the run's references), and the
+    # audio came from the first board's folder - not from the run folder, which has no spec.
+    assert [call["name"] for call in calls["audio"]] == ["elf girl_voice"]
+    assert calls["audio"][0]["audio"] is not None
+    assert "the sheet's reference audio (voice.wav)" in result.report
+
+    bundle = calls["bundle"][0]
+    assert [mod.name for mod in bundle["mods"]] == [
+        "elf girl_hero-4_views", "elf girl_hero-4_sheet",
+        "elf girl_expressions-6_views", "elf girl_expressions-6_sheet", "elf girl_voice",
+    ]
+    assert bundle["strengths"] == [1.0] * 5
+    assert result.boards == ["hero-4", "expressions-6"]
+    assert "suite: 2 board(s) of one character in ONE bundle" in result.report
+    # The wired tensors are the hero board's - said out loud, not silently dropped.
+    assert "the wired cells/sheet are the hero board's" in result.report
+    # And the run records which bundle now carries its boards.
+    record = json.loads((suite_run / f"{suite_run.name}.json").read_text(encoding="utf-8"))
+    assert record["suite"]["exported"] == result.path
+    assert "records this bundle as its export" in result.report
+    assert record["suite"]["boards"] == SUITE_BOARDS, "the rest of the record survives"
+
+
+def test_pointing_at_a_board_finds_the_run_one_level_up(tmp_path, suite_run):
+    """The Builder's own sheet_dir output is the hero board, so this is the shipped path."""
+    pack, calls = fake_pack(tmp_path)
+    result = rx.export_bundle(
+        video_vae="v", sheet_dir=str(suite_run / "hero-4"), name="elf", pack=pack,
+    )
+    assert [call["name"] for call in calls["extract"]] == [
+        "elf_hero-4_views", "elf_hero-4_sheet", "elf_expressions-6_views", "elf_expressions-6_sheet",
+    ]
+    assert result.boards == ["hero-4", "expressions-6"]
+    assert "the wired cells/sheet are the hero board's" not in result.report, (
+        "nothing was wired, so there is nothing to explain"
+    )
+
+
+def test_a_plain_sheet_run_is_not_a_suite(tmp_path, sheets_root, input_root):
+    pack, calls = fake_pack(tmp_path)
+    folder = make_sheet_folder(sheets_root, "plain", cells=["a", "b"], clips=[])
+    _png(folder / "cells" / "a.png", 10)
+    _png(folder / "cells" / "b.png", 20)
+    result = rx.export_bundle(cells=stills(2), sheet=stills(1), video_vae="v",
+                              sheet_dir=str(folder), name="plain", pack=pack)
+    assert [call["name"] for call in calls["extract"]] == ["plain_views", "plain_sheet"]
+    assert result.boards == []
+    assert "suite:" not in result.report
+
+
+def test_a_board_that_never_rendered_is_named_and_skipped(tmp_path, suite_run):
+    pack, calls = fake_pack(tmp_path)
+    # The second board rendered nothing: its cells and its composite are gone.
+    shutil.rmtree(suite_run / "expressions-6")
+    (suite_run / "expressions-6").mkdir()
+    result = rx.export_bundle(video_vae="v", sheet_dir=str(suite_run), name="elf", pack=pack)
+    assert [call["name"] for call in calls["extract"]] == ["elf_hero-4_views", "elf_hero-4_sheet"]
+    assert "Expressions 2x3 (expressions-6) has no cell stills on disk" in result.report
+    assert result.boards == ["hero-4", "expressions-6"], "the board list is the run's, not the disk's"
+
+
+def test_a_suite_with_nothing_on_disk_says_so(tmp_path, suite_run):
+    pack, _calls = fake_pack(tmp_path)
+    for board in SUITE_BOARDS:
+        shutil.rmtree(suite_run / board["folder"])
+    with pytest.raises(rx.RefModExportError, match="none of the 2 board"):
+        rx.export_bundle(video_vae="v", sheet_dir=str(suite_run), name="elf", pack=pack)
+
+
+def test_the_views_keep_the_sheet_s_order_not_the_folder_s(tmp_path, suite_run):
+    """A sheet means nothing if its views come out shuffled: the manifest's cell order wins."""
+    pack, calls = fake_pack(tmp_path)
+    board = suite_run / "hero-4"
+    # Rewrite the board manifest so "face" comes FIRST, and its file is the darker one -
+    # alphabetically the folder would answer "face" first for the wrong reason.
+    (board / "hero-4.json").write_text(json.dumps({
+        "cells": {"profile-neutral": {"index": 0}, "face-neutral": {"index": 0}},
+        "sheetFile": None,
+    }), encoding="utf-8")
+    rx.export_bundle(video_vae="v", sheet_dir=str(suite_run), name="elf", pack=pack)
+    refs = calls["extract"][0]["refs_image"]
+    assert torch.allclose(refs["ref_image_1"], torch.full((1, 8, 8, 3), 90 / 255))
+    assert torch.allclose(refs["ref_image_2"], torch.full((1, 8, 8, 3), 30 / 255))
 
 
 # ---------------------------------------------------------------------- the node

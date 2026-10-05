@@ -30,6 +30,18 @@ mean.)*
 
 ### Added
 
+* **A suite exports as ONE RefMod bundle.** The suite preset produced four sheets, and the export
+  node could only ever see one folder at a time, so the most useful thing it had - every view of one
+  character - needed four exports and four loads. Now `refmod_export.suite_boards(folder)` reads the
+  run's `suite` record, and `export_bundle` puts every board into one file: each board contributes
+  `<name>_<board>_views` (its picked cell stills, read from its own `cells/` in the SHEET's cell order)
+  and `<name>_<board>_sheet` (its composite), while the motion and voice members are read **once** from
+  the run's first board, since every board was rendered from the same references. `sheet_dir` may point
+  at the run or at any of its boards - the Builder's own output is the hero board, so the shipped
+  `+ RefMod` workflow picks it up with nothing rewired - and a save writes the file name back into the
+  run manifest's `suite.exported` field (the field the record has carried since the suite landed, with
+  nothing to fill it in). A board with nothing on disk is named in the report and left out; a suite
+  with nothing on disk at all is refused with the reason instead of writing an empty bundle.
 * **A suite's boards are visible and addressable.** The suite rendered four complete sheets under one
   run name, but nothing could see them: the routes only ever built the store for the run folder
   (`SheetStore(name, node_id=...)`, board never passed), `list_sheet_names()` lists top-level folders

@@ -369,6 +369,204 @@ def sheet_manifest(folder: Path | str) -> dict[str, Any]:
     return _json_dict(folder / f"{folder.name}.json")
 
 
+#: Manifest key a SUITE run writes to record its boards (see ``suite.py``). A literal on purpose:
+#: this module is the one part of the pack that imports nothing from ComfyUI, and the record's shape
+#: is part of the same on-disk contract as ``sheetFile`` and ``cells`` below.
+SUITE_KEY = "suite"
+#: Cell stills a sheet folder keeps, one file per cell (``sheet_store.CELLS_DIR``).
+CELLS_DIRNAME = "cells"
+#: Image suffixes a cell still may carry.
+STILL_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
+
+
+def _clean_boards(entries: Any) -> list[dict[str, Any]]:
+    """Normalise the suite record's boards (junk skipped, folder names made safe)."""
+    boards: list[dict[str, Any]] = []
+    for item in entries if isinstance(entries, list) else []:
+        if not isinstance(item, dict):
+            continue
+        name = sanitize_name(item.get("folder") or item.get("id") or "", "")
+        if not name:
+            continue
+        boards.append({
+            "id": str(item.get("id") or name),
+            "label": str(item.get("label") or item.get("id") or name),
+            "folder": name,
+            "cells": int(item.get("cells") or 0),
+            "layout": str(item.get("layout") or ""),
+        })
+    return boards
+
+
+def suite_boards(folder: Path | str | None) -> tuple[Path | None, list[dict[str, Any]]]:
+    """``(run_folder, boards)`` when a folder is, or belongs to, a SUITE run.
+
+    A suite renders several sheets under ONE run name, one folder per board, and the node records
+    them in the run's own manifest. So a folder belongs to a suite in one of two ways: it IS the
+    run (its manifest carries the record) or it is one of its boards (the record is one level up).
+    Both name the same suite, which is what lets an export merge the boards whether the user points
+    ``sheet_dir`` at the run or at a board - and the Builder's own ``sheet_dir`` output is the hero
+    board, so the shipped ``+ RefMod`` workflow picks this up with nothing rewired.
+
+    ``(None, [])`` for an ordinary single-sheet run.
+    """
+    if folder is None:
+        return None, []
+    folder = Path(folder)
+    record = sheet_manifest(folder).get(SUITE_KEY)
+    if isinstance(record, dict) and record.get("boards"):
+        boards = _clean_boards(record.get("boards"))
+        if boards:
+            return folder, boards
+    parent = folder.parent
+    record = sheet_manifest(parent).get(SUITE_KEY)
+    if isinstance(record, dict) and record.get("boards"):
+        boards = _clean_boards(record.get("boards"))
+        if any(entry["folder"] == folder.name for entry in boards):
+            return parent, boards
+    return None, []
+
+
+def board_stills(folder: Path | str | None, *, limit: int = MAX_VISUAL_REFS) -> list[Any]:
+    """A board's picked cell stills, in the sheet's own cell order.
+
+    The folder already keeps them (``cells/<id>.png``, one file per cell), which is what lets a
+    suite's boards be exported without wiring one Builder per board. The order comes from
+    :func:`cell_ids` (the manifest, then ``picks.json``) rather than from the directory listing: a
+    sheet means nothing if its views come out shuffled.
+
+    Each still keeps its own size, and the encoder resizes to ``ref_resolution`` - so a board whose
+    cells have different shapes still exports, instead of failing on a stack of mismatched images.
+    A cell with no file on disk is skipped; the caller reports how many arrived.
+    """
+    if folder is None:
+        return []
+    cells_dir = Path(folder) / CELLS_DIRNAME
+    if not cells_dir.is_dir():
+        return []
+    ordered = cell_ids(Path(folder))
+    if not ordered:
+        # A folder with no manifest (a hand-made sheet, or a run that died before it wrote one)
+        # still has its cells: fall back to the listing, sorted, so the views are at least stable.
+        ordered = sorted(
+            path.stem
+            for path in cells_dir.iterdir()
+            if path.is_file() and path.suffix.lower() in STILL_SUFFIXES
+        )
+    found: list[Path] = []
+    for cell_id in ordered:
+        files = sorted(
+            path
+            for path in cells_dir.glob(f"{cell_id}.*")
+            if path.is_file() and path.suffix.lower() in STILL_SUFFIXES
+        )
+        if files:
+            found.append(files[0])
+    if not found:
+        return []
+    stills = [still for still in (_read_still(path) for path in found) if still is not None]
+    if not stills:
+        return []
+    indexes = _sample_indexes(len(stills), int(limit))
+    if len(indexes) != len(stills):
+        log.info(
+            "RefMod export: %s cell still(s) sampled down to %s views (their autogrow limit).",
+            len(stills), len(indexes),
+        )
+    return [stills[index] for index in indexes]
+
+
+def _read_still(path: Path) -> Any | None:
+    """One image file as a ComfyUI IMAGE batch (``[1, H, W, 3]``, float 0-1).
+
+    Imported here rather than at module load: this module is deliberately importable with no
+    ComfyUI, no torch and no GPU, which is what keeps its tests honest.
+    """
+    try:  # noqa: PLC0415 - heavy, and only a folder-based export needs it
+        import numpy as np
+        import torch
+        from PIL import Image
+
+        with Image.open(path) as image:
+            array = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
+        return torch.from_numpy(array)[None, ...]
+    except Exception as exc:  # noqa: BLE001 - a broken file is one missing cell, not a failed export
+        log.warning("RefMod export: could not read the cell still %s (%s)", path, exc)
+        return None
+
+
+def board_sheet_still(folder: Path | str | None) -> list[Any]:
+    """A board's composited sheet as a single still (``[]`` when it has not written one).
+
+    The file is the one the manifest recorded (``sheetFile``); a folder without a manifest
+    falls back to the newest png at its root, which is the same rule the store uses for a
+    re-compose. A folder keeps every dated composite it ever wrote, and the newest is the sheet
+    the board last produced.
+    """
+    if folder is None:
+        return []
+    folder = Path(folder)
+    recorded = str(sheet_manifest(folder).get("sheetFile") or "")
+    path = folder / recorded if recorded else None
+    if path is not None and not path.is_file():
+        path = None
+    if path is None:
+        try:
+            files = [
+                item for item in folder.glob("*.png")
+                if item.is_file() and item.suffix.lower() in STILL_SUFFIXES
+            ]
+        except OSError:
+            files = []
+        path = max(files, key=lambda item: item.stat().st_mtime) if files else None
+    if path is None:
+        return []
+    still = _read_still(path)
+    return [still] if still is not None else []
+
+
+def mark_suite_exported(run: Path | str, exported: str) -> bool:
+    """Record in a suite run's manifest which bundle covered its boards.
+
+    The suite record has carried an ``exported`` field since the boards were first written, with
+    nothing to fill it in - the export is what knows the file name. Best effort, and written to a
+    temporary file that is moved into place, so a crash cannot leave a half-written manifest behind
+    a run whose sheets are perfectly fine. Returns whether the record was updated.
+    """
+    run = Path(run)
+    path = run / f"{run.name}.json"
+    data = _json_dict(path)
+    record = data.get(SUITE_KEY)
+    if not isinstance(record, dict):
+        return False
+    record["exported"] = str(exported)
+    try:  # noqa: PLC0415 - only a save needs it
+        import os
+
+        temp = path.with_suffix(path.suffix + ".tmp")
+        temp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+        os.replace(temp, path)
+    except OSError as exc:
+        log.warning("RefMod export: could not record the export in %s (%s)", path, exc)
+        return False
+    return True
+
+
+def _sample_indexes(count: int, limit: int) -> list[int]:
+    """Evenly spaced indexes down to ``limit``, both ends kept.
+
+    The first and the last view of a sheet are the ones a user notices missing, so the sample is
+    spread end to end. Shared by :func:`split_stills` (an IMAGE batch) and :func:`board_stills`
+    (files read one at a time), so the two cannot disagree about which views survive.
+    """
+    if limit and count > limit:
+        if limit <= 1:
+            return [0]
+        step = (count - 1) / float(limit - 1)
+        return sorted({int(round(index * step)) for index in range(limit)})
+    return list(range(count))
+
+
 def _reference_roots(folder: Path | None) -> list[Path]:
     """Where a manifest's reference file name may live, nearest first.
 
@@ -747,13 +945,7 @@ def split_stills(batch: Any, limit: int = MAX_VISUAL_REFS) -> list[Any]:
         return []
     indexes = list(range(count))
     if limit and count > limit:
-        if limit <= 1:
-            indexes = [0]
-        else:
-            # Keep both outer cells: the first and the last view of a sheet are the
-            # ones a user notices missing, so the sample is spread end to end.
-            step = (count - 1) / float(limit - 1)
-            indexes = sorted({int(round(index * step)) for index in range(limit)})
+        indexes = _sample_indexes(count, limit)
         log.info(
             "RefMod export: %s stills sampled down to %s views (their autogrow limit).",
             count, len(indexes),
@@ -922,6 +1114,9 @@ class ExportResult:
     members: list[dict[str, Any]] = field(default_factory=list)
     path: str = ""
     lines: list[str] = field(default_factory=list)
+    #: Board folders this bundle covers, empty for a single-sheet export. The panel and the report
+    #: say which sheets one file now carries.
+    boards: list[str] = field(default_factory=list)
 
     @property
     def report(self) -> str:
@@ -1275,6 +1470,12 @@ def export_bundle(
     ``n`` forces the nth cell's clip. ``video_frames`` is how many consecutive frames of
     each reference video become the motion member (``0`` turns it off; it is snapped to
     H3's causal grid) and ``video_start`` where in the clip that window begins.
+
+    A SUITE run (several sheets under one run name, one folder per board) is exported as ONE
+    bundle: ``sheet_dir`` may point at the run or at any of its boards - the Builder's own
+    ``sheet_dir`` output is the hero board - every board contributes ``<name>_<board>_views`` and
+    ``<name>_<board>_sheet`` from its own folder, and the motion and voice members are read once
+    from the run's first board, because every board was rendered from the same references.
     ``pack`` / ``api`` are injection points for tests; see :func:`voice_member`.
     """
     if pack is None and api is None:
@@ -1292,47 +1493,121 @@ def export_bundle(
     lines: list[str] = []
     members: list[Any] = []
 
-    stills = split_stills(cells)
-    if stills:
-        member = build_visual_mod(
-            api,
-            name=f"{mod_name}_views",
-            stills=stills,
-            vae=video_vae,
-            mode=mode,
-            ref_resolution=ref_resolution,
-            max_tokens=max_tokens,
-            identity=identity,
-            concept_type=concept_type,
-            description=description,
-        )
-        members.append(member)
+    # A SUITE run is several sheets under one run name, one folder per board - and a RefMod is
+    # better the more views of the character it carries, so the whole suite goes into ONE bundle.
+    # The boards come from their own folders (which is what makes this work without wiring one
+    # Builder per board): every board already keeps its picked cells and its composite on disk.
+    run, boards = suite_boards(folder)
+    shared_folder = folder
+    if boards and run is not None:
+        result.boards = [entry["folder"] for entry in boards]
         lines.append(
-            f"appearance: {len(stills)} picked cell still(s) stacked as '{mod_name}_views' "
-            f"({MODES.get(str(mode), mode)}, short edge {int(ref_resolution)}px)"
+            f"suite: {len(boards)} board(s) of one character in ONE bundle - "
+            + ", ".join(entry["label"] for entry in boards)
         )
+        for entry in boards:
+            board_dir = run / entry["folder"]
+            prefix = f"{mod_name}_{entry['folder']}"
+            board_stills_here = board_stills(board_dir)
+            if board_stills_here:
+                member = build_visual_mod(
+                    api,
+                    name=f"{prefix}_views",
+                    stills=board_stills_here,
+                    vae=video_vae,
+                    mode=mode,
+                    ref_resolution=ref_resolution,
+                    max_tokens=max_tokens,
+                    identity=identity,
+                    concept_type=concept_type,
+                    description=description,
+                )
+                members.append(member)
+                lines.append(
+                    f"appearance: {len(board_stills_here)} picked cell still(s) of "
+                    f"{entry['label']} as '{prefix}_views' "
+                    f"({MODES.get(str(mode), mode)}, short edge {int(ref_resolution)}px)"
+                )
+            else:
+                lines.append(
+                    f"suite: {entry['label']} ({entry['folder']}) has no cell stills on disk - "
+                    "that board is not in this bundle."
+                )
+            board_sheet = board_sheet_still(board_dir)
+            if board_sheet:
+                member = build_visual_mod(
+                    api,
+                    name=f"{prefix}_sheet",
+                    stills=board_sheet,
+                    vae=video_vae,
+                    mode=mode,
+                    ref_resolution=ref_resolution,
+                    max_tokens=max_tokens,
+                    identity=identity,
+                    concept_type=concept_type,
+                    description=description,
+                )
+                members.append(member)
+                lines.append(f"appearance: {entry['label']}'s composite as '{prefix}_sheet'")
+        if not members:
+            raise RefModExportError(
+                f"nothing to export: none of the {len(boards)} board(s) of {run.name!r} has "
+                "anything on disk yet (the cells and the composite of each board come from its "
+                "own folder) - render the suite, then export."
+            )
+        # The motion and voice members belong to the RUN, not to a board: every board was rendered
+        # from the same references, so reading them once (from the first board's folder, which
+        # carries the run's manifest spec) is what keeps the bundle from carrying the same
+        # soundtrack four times.
+        shared_folder = run / boards[0]["folder"]
+        if cells is not None or sheet is not None:
+            lines.append(
+                "suite: the wired cells/sheet are the hero board's, and it is in this bundle "
+                "from its own folder - not repeated. The other boards come from their folders."
+            )
 
-    sheet_still = split_stills(sheet, limit=1)
-    if sheet_still:
-        member = build_visual_mod(
-            api,
-            name=f"{mod_name}_sheet",
-            stills=sheet_still,
-            vae=video_vae,
-            mode=mode,
-            ref_resolution=ref_resolution,
-            max_tokens=max_tokens,
-            identity=identity,
-            concept_type=concept_type,
-            description=description,
-        )
-        members.append(member)
-        lines.append(f"appearance: the composited sheet as '{mod_name}_sheet'")
+    if not boards or run is None:
+        stills = split_stills(cells)
+        if stills:
+            member = build_visual_mod(
+                api,
+                name=f"{mod_name}_views",
+                stills=stills,
+                vae=video_vae,
+                mode=mode,
+                ref_resolution=ref_resolution,
+                max_tokens=max_tokens,
+                identity=identity,
+                concept_type=concept_type,
+                description=description,
+            )
+            members.append(member)
+            lines.append(
+                f"appearance: {len(stills)} picked cell still(s) stacked as '{mod_name}_views' "
+                f"({MODES.get(str(mode), mode)}, short edge {int(ref_resolution)}px)"
+            )
+
+        sheet_still = split_stills(sheet, limit=1)
+        if sheet_still:
+            member = build_visual_mod(
+                api,
+                name=f"{mod_name}_sheet",
+                stills=sheet_still,
+                vae=video_vae,
+                mode=mode,
+                ref_resolution=ref_resolution,
+                max_tokens=max_tokens,
+                identity=identity,
+                concept_type=concept_type,
+                description=description,
+            )
+            members.append(member)
+            lines.append(f"appearance: the composited sheet as '{mod_name}_sheet'")
 
     video, video_lines = video_member(
         api,
         name=mod_name,
-        folder=folder,
+        folder=shared_folder,
         frames=video_frames,
         start=video_start,
         vae=video_vae,
@@ -1350,7 +1625,7 @@ def export_bundle(
         api,
         name=mod_name,
         voice_cell=voice_cell,
-        folder=folder,
+        folder=shared_folder,
         audio=audio,
         audio_vae=audio_vae,
         max_seconds=voice_max_seconds,
@@ -1379,6 +1654,10 @@ def export_bundle(
         result.path = str(api.save_bundle(path_no_ext, mod_name,
                                           [(member, 1.0) for member in members]))
         lines.append(f"saved: {result.path}")
+        # A suite run's manifest says which bundle now carries its boards (the record's own
+        # 'exported' field). Best effort: a read-only output folder must not fail an export.
+        if run is not None and boards and mark_suite_exported(run, result.path):
+            lines.append(f"suite: {run.name!r} records this bundle as its export")
     else:
         lines.append("saved: no (save is off - the mods are on the 'mods' output)")
 
@@ -1432,6 +1711,8 @@ __all__ = [
     "build_video_mod",
     "build_visual_mod",
     "build_voice_mod",
+    "board_sheet_still",
+    "board_stills",
     "causal_frames",
     "cell_clips",
     "cell_ids",
@@ -1443,6 +1724,7 @@ __all__ = [
     "load_pack",
     "load_video_window",
     "loaded_pack",
+    "mark_suite_exported",
     "member_rows",
     "pack_dir",
     "pack_status",
@@ -1458,6 +1740,7 @@ __all__ = [
     "sheet_video_references",
     "shrink_frames",
     "split_stills",
+    "suite_boards",
     "video_frame_rate",
     "video_member",
     "video_soundtracks",
