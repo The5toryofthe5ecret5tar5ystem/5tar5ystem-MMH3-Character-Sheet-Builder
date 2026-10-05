@@ -254,6 +254,12 @@ board's result as this node's own outputs - so every node that writes into a she
 (`H3SheetOnePassSink`, `H3SheetCellSink`, `H3SheetGrid`) declares `is_output_node`, the way core's
 `SaveImage` / `SaveVideo` do. Without that a four-board suite rendered the hero sheet and reported
 success, and in per-cell mode the other boards produced cells but never composed their sheets.
+* **Nothing downstream starts until the last board is done.** ComfyUI runs a node as soon as *its own*
+inputs are ready - a graph has no notion of "after" - so wiring the RefMod export to the first
+board's result let it bundle one sheet while boards 2..4 were still rendering. The suite's outputs
+therefore come from an internal **join** node (`H3SheetJoin`) that every other board's report feeds as
+an input it never reads: reports are strings, so the wait costs nothing, and the RefMod export (or
+anything else you wire to the Builder) cannot run before every board has finished.
 * **Each board is a folder.** Everything lands under `<output>/minimax_sheets/<run name>/<board>/`
 and every board is a complete sheet folder: `frames/`, `cells/`, `picks/`, its own `report.txt`
 and manifest. The run folder keeps one record of its own - a `suite` block in its

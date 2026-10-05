@@ -44,6 +44,9 @@ ALLOWED_ONE_PASS_TYPES = {
     "SamplerCustomAdvanced",
     "VAEDecode",
     "H3SheetOnePassSink",
+    # The suite's join: the pack's own pass-through that waits for every board (see join.py). It
+    # only exists in a suite expansion, and the graph's type allow-list has to know it.
+    "H3SheetJoin",
 }
 
 _FIVE_VIEWS = ("face", "portrait", "front", "profile", "back")

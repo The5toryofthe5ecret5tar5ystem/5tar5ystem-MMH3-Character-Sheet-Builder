@@ -267,6 +267,39 @@ def test_the_boards_do_not_share_a_single_node():
     assert len(decodes) == 4, "each board decodes its own samples"
 
 
+def test_the_suite_waits_for_every_board_before_anything_downstream_runs():
+    """The RefMod export must be bundling ALL the boards, so it may not start with the first one.
+
+    ComfyUI runs a node as soon as its own inputs are ready, and a suite's boards are independent
+    renders: returning the hero board's values as this node's outputs let whatever is wired
+    downstream - the RefMod export above all - run while boards 2..4 were still rendering. The
+    bundle was written from one sheet and the others landed after it (reported from a real run).
+
+    The fix is a dependency, because a graph has no notion of "after": every other board's report
+    goes into one join node and the node's own outputs come from IT, so nothing downstream can run
+    before the last board has finished.
+    """
+    spec = _suite_spec()
+    boards, _warnings = suite_mod.suite_boards(spec)
+    expand, outputs_, _lines = _suite_graph(spec)
+    joins = {key: node for key, node in expand.items() if node["class_type"] == "H3SheetJoin"}
+    assert len(joins) == 1, f"one join for the whole suite, got {sorted(joins)}"
+    key, node = next(iter(joins.items()))
+    # The node's outputs ARE the join's outputs: that is what makes the wait real.
+    for socket, link in enumerate(outputs_):
+        assert link[0] == key and link[1] == socket, (
+            f"output {socket} must come from the join, got {link}"
+        )
+    # It carries the first board's four values through...
+    for name in ("sheet", "cells", "report", "sheet_dir"):
+        assert name in node["inputs"], f"the join hands on {name}"
+    # ...and waits on every OTHER board's report (strings: no tensors held for the whole run).
+    waited = sorted(name for name in node["inputs"] if name.startswith("boards."))
+    assert len(waited) == len(boards) - 1, f"{waited} should be one per other board"
+    reports = {expand[node["inputs"][name][0]]["class_type"] for name in waited}
+    assert reports <= {"H3SheetOnePassSink", "H3SheetGrid"}, reports
+
+
 def test_every_board_of_a_suite_actually_runs():
     """The boards are not enough: the nodes that WRITE them have to be executed.
 

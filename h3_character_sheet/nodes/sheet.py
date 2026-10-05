@@ -521,6 +521,9 @@ def build_suite_graph(
     lines: list[str] = []
     merged: dict[str, Any] = {}
     hero: tuple[Any, Any, Any, Any] | None = None
+    #: Every board but the first reports into the join node below: strings, so the dependency costs
+    #: nothing (see join.py - the executor has no notion of "after", only of dependencies).
+    later_reports: list[Any] = []
 
     # ONE preview wrapper for the whole suite: the wrapper goes on the model every board samples
     # through, so attaching it per board would stack four step clocks on one model. Built here,
@@ -609,6 +612,8 @@ def build_suite_graph(
         merged.update(sub.finalize())
         if hero is None:
             hero = outs
+        else:
+            later_reports.append(outs[2])
         lines.append(
             f"Suite board '{board.id}': {board.cells} cell(s), "
             f"{'one render' if spec.render.single_pass else 'per-cell renders'} -> "
@@ -623,7 +628,25 @@ def build_suite_graph(
 
     if hero is None:  # pragma: no cover - suite_boards() never returns an empty list
         raise ValueError("suite has no boards to render")
-    return merged, hero, lines
+
+    # ONE joiner, and it is what this node's outputs come from. ComfyUI runs a node as soon as its
+    # OWN inputs are ready, so returning the hero board's values directly let whatever is wired
+    # downstream - the RefMod export above all - run while boards 2..4 were still rendering: the
+    # bundle was written from the first sheet and the rest landed after it. The joiner takes every
+    # other board's report as an input it never reads, so it cannot run until the last board has
+    # finished, and neither can anything wired to this node.
+    join = GraphBuilder()
+    joined = join.node(
+        "H3SheetJoin",
+        id="suite_join",
+        sheet=hero[0],
+        cells=hero[1],
+        report=hero[2],
+        sheet_dir=hero[3],
+        **{f"boards.report_{index}": link for index, link in enumerate(later_reports)},
+    )
+    merged.update(join.finalize())
+    return merged, (joined.out(0), joined.out(1), joined.out(2), joined.out(3)), lines
 
 
 class MiniMaxH3CharacterSheet(io.ComfyNode):

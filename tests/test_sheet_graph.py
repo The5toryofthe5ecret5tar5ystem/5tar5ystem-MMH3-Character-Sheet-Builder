@@ -60,6 +60,7 @@ ALLOWED_NODE_TYPES = {
     "H3SheetGrid",
     "H3SheetCellSink",
     "H3SheetOrderGate",
+    "H3SheetJoin",
 }
 
 SENTINEL = {"model": "MODEL", "clip": "CLIP", "video_vae": "VVAE", "audio_vae": "AVAE"}

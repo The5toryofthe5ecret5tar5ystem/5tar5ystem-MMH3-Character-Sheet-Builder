@@ -150,6 +150,15 @@ mean.)*
   cells empty - the boards own those) instead of merging into whatever ran in that folder before,
   which left a previous single-sheet run's sheet, onePass block and cells describing a suite run that
   had not happened. `write_manifest` gained an explicit `sheet_file` argument for that.
+* **The RefMod bundle was written before the suite had finished (fixed).** ComfyUI runs a node as soon
+  as *its own* inputs are ready, and a graph has no notion of "after": the suite returned the FIRST
+  board's values as the Builder's outputs, so the export node - wired to those - ran while boards 2..4
+  were still rendering. The bundle held one sheet and the rest landed after it. Every other board's
+  report now feeds an internal **join** node (`h3_character_sheet/nodes/join.py`, `H3SheetJoin`) whose
+  inputs are ignored on purpose and whose outputs ARE the Builder's, so nothing wired downstream can
+  run before the last board has finished. Reports are strings, so the dependency holds no tensors (the
+  same trick as `ordergate.py`, for the same reason). A test pins the wiring: the Builder's outputs
+  come from the join, and the join waits on one report per other board.
 * The README's suite section now says what the code actually does: the record is a `suite` block in
   the run's own `<name>.json` manifest (there is no `suite.json` file), and the four sheets are
   reached through the panel's board row rather than by appearing as top-level folders. The Results
