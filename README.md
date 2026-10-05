@@ -405,6 +405,13 @@ The panel is laid out the way the **preview-first studio** direction was drawn (
   one column again. The paint surface measures the STAGE for its width (that column) and
   the pane for its height, and a stage is never taller than its own width, so a tall node cannot
   turn the preview into an unreadable column.
+* **A fresh node's canvas shows the pack's own sample render.** With nothing wired the stage used to
+  be a dashed rectangle holding one line of prose, which reads as a broken pane rather than as "this
+  is where a picture goes". It now shows a portrait the pack ships (`web/js/assets/sample-elf-girl.jpg`,
+  85 KB) with **No references yet** under it, sized like a reference would be. It is a placeholder in
+  the strict sense: it is never in the payload, never wired into a graph, and the first reference you
+  add - or select - takes the canvas over. A host that cannot resolve the path (a bare module, a test)
+  passes no `packAsset` hook and gets the old dashed hint instead of a broken image.
 
 Two small things that came out of looking at it on a real page: the preset hint line kept a
 row-era `flex: 1 1 240px` after the presets row became a column, which rendered as a **240px band

@@ -27,7 +27,7 @@ import {
     NODE_WIDTH,
     REF_GROUPS,
     enforceWidgetWidth,
-} from "./h3sheet_core.mjs?boot=h3sheet_v84";
+} from "./h3sheet_core.mjs?boot=h3sheet_v85";
 
 const CLASS = "MiniMaxH3CharacterSheet";
 const DOM_WIDGET = "h3_character_sheet_ui";
@@ -318,6 +318,16 @@ function mountPanel(node) {
             if (panel?.status) panel.status.textContent = String(text || "");
         },
         assetUrl: viewUrl,
+        // The pack's own files (the sample render a fresh node's canvas shows) live next to THIS
+        // module inside the extension, so the URL is resolved against it rather than guessed: the
+        // panel only ever passes a path relative to the web directory (see PLACEHOLDER_ART).
+        packAsset: (relative) => {
+            try {
+                return new URL(String(relative || ""), import.meta.url).href;
+            } catch {
+                return "";
+            }
+        },
         upload: uploadReference,
         listMedia,
         listResults: (board) => listSheet(node, board),

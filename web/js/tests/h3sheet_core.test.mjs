@@ -1103,5 +1103,58 @@ ok.push("blur area: face / face + hair / whole head, as chips under the picture,
         + "gets written back over it");
 }
 
+// --- a fresh node's references tab is not a bare box -------------------------------------------
+// The opening tab used to be a dashed rectangle on a new node, which reads as a broken pane. It now
+// carries the pack's own sample render, captioned as what it is - a PLACEHOLDER that is never wired
+// into anything.
+{
+    const empty = core.readState("");
+    const panel = core.buildSheetInterface({
+        state: empty,
+        hooks: {
+            status: () => {},
+            planCells: async () => ({ cells: [] }),
+            stateChanged: () => {},
+            packAsset: (relative) => `extension://pack/${relative}`,
+        },
+    });
+    await tick();
+    panel.showTab("references");
+    await tick();
+    const box = panel.container.querySelector('[data-action="ref-canvas-empty"]');
+    assert.ok(box, "a fresh panel draws the canvas placeholder");
+    const art = box.querySelector("img.mmx-canvas__art");
+    assert.ok(art, "it is a picture, not a dashed box");
+    assert.equal(art.src, `extension://pack/${core.PLACEHOLDER_ART}`,
+        "and the host resolved the path inside the pack");
+    assert.match(art.title, /not part of your sheet/, "the tooltip says it is not a reference");
+    assert.match(box.textContent, /No references yet/);
+    assert.match(box.textContent, /sample render/, "and the note under it says where it came from");
+    // It is decoration: nothing about the placeholder may reach the payload or a render.
+    const payload = core.toPayload(empty);
+    assert.equal(JSON.stringify(payload).includes("sample-elf-girl"), false,
+        "the placeholder never enters the payload");
+    assert.deepEqual(payload.refs.pictures, [], "and it is not a wired reference");
+    // The first reference wired replaces it (the canvas shows what the run would send).
+    empty.refs.pictures = [{ file: "face.png", role: "face and hair", enabled: true }];
+    panel.refresh();
+    await tick();
+    assert.equal(panel.container.querySelector("img.mmx-canvas__art"), null,
+        "a wired reference takes the canvas over");
+    assert.match(panel.container.querySelector('[data-action="ref-canvas"]').textContent, /face\.png/);
+    panel.dispose();
+    // No host hook (a bare module, a test): the plain hint, never a broken image.
+    const bare = core.buildSheetInterface({ state: core.readState(""), hooks: {} });
+    await tick();
+    bare.showTab("references");
+    await tick();
+    const bareBox = bare.container.querySelector('[data-action="ref-canvas-empty"]');
+    assert.equal(bareBox, null, "without a host that can resolve the path there is no image");
+    assert.match(bare.container.querySelector('[data-action="ref-canvas"]').textContent,
+        /Add a reference/, "the dashed hint is what is left");
+    bare.dispose();
+    ok.push("a fresh node's canvas shows the pack's sample render, and only until a reference is wired");
+}
+
 console.log("h3sheet_core: PASS");
 for (const line of ok) console.log(" -", line);

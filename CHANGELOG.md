@@ -92,6 +92,15 @@ mean.)*
   choice cannot be pulled away by the next board, and the switch turns it back on. The row also
   re-lights its chips and re-reads that switch the moment the selection changes - a light refresh
   keeps the thumbnails and only repaints what moved, so a board switch used to leave the old chip lit.
+* **A fresh node's canvas is not an empty box.** The References tab is the tab a new node opens on, and
+  its stage was a dashed rectangle with one line of prose - which reads as a broken pane rather than as
+  "this is where a picture goes". It now shows the pack's own sample render
+  (`web/js/assets/sample-elf-girl.jpg`, 680x1200, 85 KB) with **No references yet** under it, sized
+  like a reference would be. It is a placeholder in the strict sense: never in the payload, never in a
+  graph, and the first reference added (or selected) replaces it. The path is resolved by the HOST
+  through a new `packAsset` hook - the wiring against its own `import.meta.url`, the standalone harness
+  against the mockups folder - so a bare module (or any host that cannot resolve it) simply gets the
+  old hint instead of a broken image, and `PLACEHOLDER_ART` is exported so the path cannot drift.
 * The README's suite section now says what the code actually does: the record is a `suite` block in
   the run's own `<name>.json` manifest (there is no `suite.json` file), and the four sheets are
   reached through the panel's board row rather than by appearing as top-level folders. The Results

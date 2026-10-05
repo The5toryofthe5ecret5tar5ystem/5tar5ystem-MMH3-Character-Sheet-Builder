@@ -369,7 +369,16 @@ export const KNOB_COLUMNS = 3;
  * build makes that a glance instead of an investigation; a test keeps it in step with the
  * import, so bumping one without the other fails the suite rather than confusing a user.
  */
-export const PANEL_BUILD = "h3sheet_v84";
+export const PANEL_BUILD = "h3sheet_v85";
+
+/**
+ * The pack's own sample render, shown in a fresh node's reference canvas (see canvasCard).
+ *
+ * A path relative to the extension's web directory: the wiring resolves it with its own
+ * `import.meta.url` through the `packAsset` hook, so the panel never guesses where it is served
+ * from (and a bare module - a test - simply passes no hook and gets the plain hint instead).
+ */
+export const PLACEHOLDER_ART = "assets/sample-elf-girl.jpg";
 
 /** How long a knob hint may be before it stops being printed under its field (it stays a tooltip).
  *
@@ -1766,6 +1775,19 @@ button.mmx-badge:hover { border-color: var(--mmx-tick); }
   min-height: 92px; display: grid; place-items: center; text-align: center;
   border: 1px dashed var(--mmx-line); border-radius: 6px;
 }
+/* A fresh node's canvas: the pack's sample render instead of an empty box. The picture is sized to
+   the pane (a reference would be), and the note under it says what it is so nobody reads it as a
+   reference that is somehow already wired. */
+.mmx-canvas__empty--art {
+  display: flex; flex-direction: column; gap: 6px; min-height: 0; padding: 6px;
+}
+.mmx-canvas__art {
+  max-width: 100%; max-height: 380px; width: auto; height: auto; object-fit: contain;
+  border-radius: 6px; border: 1px solid var(--mmx-line); opacity: 0.92;
+}
+.mmx-canvas__artnote {
+  display: flex; flex-direction: column; gap: 2px; text-align: left; font-size: 10px;
+}
 /* The tile whose reference is on the canvas. */
 .mmx-sheet-ref.is-canvas .mmx-tile { border-color: var(--mmx-tick); box-shadow: 0 0 0 2px rgba(255,185,94,.22); }
 /* Filmstrip: the picked frame of every cell, in cell order, under the sheet. Clicking one jumps
@@ -2745,6 +2767,13 @@ export function buildSheetInterface({ state, hooks = {} }) {
     const notify = (text) => hooks.status?.(text);
     const persist = () => hooks.stateChanged?.(toPayload(state));
     const viewUrl = (url) => hooks.assetUrl?.(url) || url;
+    // The pack's own sample render, for a canvas with nothing in it (see PLACEHOLDER_ART). The path
+    // is relative to the extension's web directory, so the HOST resolves it - the wiring knows its
+    // own URL, the harness knows its own, and a bare module passes no hook and gets the plain hint.
+    const placeholderArt = () => {
+        const resolved = typeof hooks.packAsset === "function" ? hooks.packAsset(PLACEHOLDER_ART) : "";
+        return resolved ? String(resolved) : "";
+    };
 
     const container = element("div", { className: "mmx-sheet" });
     const styleTag = element("style", { textContent: PANEL_CSS });
@@ -5192,6 +5221,33 @@ export function buildSheetInterface({ state, hooks = {} }) {
             ? referenceParts(target.group, target.index, { inlineHeightShare: 0.78 })
             : null;
         if (!parts) {
+            // Nothing is wired yet. A fresh node used to open on a bare dashed box, which reads as a
+            // broken pane rather than as "this is where a reference goes" - so the canvas shows the
+            // pack's own sample render instead, sized like a reference and captioned as what it is.
+            // It is a PLACEHOLDER: it is never in the payload, never in a graph, and the first
+            // reference wired (or selected) replaces it.
+            const art = placeholderArt();
+            if (art) {
+                const empty = element("div", { className: "mmx-canvas__empty mmx-canvas__empty--art" });
+                empty.dataset.action = "ref-canvas-empty";
+                empty.append(element("img", {
+                    src: art,
+                    alt: "the pack's sample character render",
+                    className: "mmx-canvas__art",
+                    title: "A sample render that ships with the pack - it is not part of your sheet. "
+                        + "Add a reference and it opens here instead.",
+                }));
+                empty.append(element("div", { className: "mmx-canvas__artnote" }, {}, [
+                    element("span", { textContent: "No references yet", className: "mmx-title" }),
+                    element("span", {
+                        textContent: "the picture is the pack's sample render, waiting for yours - "
+                            + "a reference opens here to blur, paint or check against the original",
+                        className: "mmx-muted",
+                    }),
+                ]));
+                wrap.append(empty);
+                return wrap;
+            }
             wrap.append(element("div", { className: "mmx-canvas__empty" }, {}, [
                 element("span", {
                     textContent: "Add a reference - it opens here to blur, paint or check against the original",

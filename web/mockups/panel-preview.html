@@ -285,6 +285,9 @@ const panel = core.buildSheetInterface({
             if (/\.(mp4|webm|mov)/i.test(text) || /\.(wav|mp3|flac)/i.test(text)) return text;
             return SAMPLE;
         },
+        // The mockups folder sits beside web/js, so the pack's own assets resolve against it -
+        // the same relative path the wiring uses, one level up (see PLACEHOLDER_ART).
+        packAsset: (relative) => new URL(`../js/${relative}`, import.meta.url).href,
     },
 });
 
