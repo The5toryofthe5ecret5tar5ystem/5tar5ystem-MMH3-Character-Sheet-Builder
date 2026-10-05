@@ -141,6 +141,19 @@ const RESULTS = {
     sheetFile: "minimax_sheets/character_sheet-20261005_181500/hero_4.png",
     dir: "preview",
     counts: { rendered: 5, cells: 5, frames: 20 },
+    // A SUITE run: the run folder holds one folder per board, and the Results tab switches between
+    // them (see suite_boards_of). The board row also carries the switch that follows the render.
+    board: "hero-4",
+    boards: [
+        { id: "hero-4", label: "Hero + 4 panels", folder: "hero-4", cells: 5, layout: "hero-left",
+          rendered: true },
+        { id: "expressions-6", label: "Expressions 2x3", folder: "expressions-6", cells: 6,
+          layout: "grid", rendered: false },
+        { id: "details-sfw", label: "Closeups 2x2 (SFW)", folder: "details-sfw", cells: 4,
+          layout: "grid", rendered: false },
+        { id: "details-nsfw", label: "Closeups 2x2 (NSFW)", folder: "details-nsfw", cells: 4,
+          layout: "grid", rendered: false },
+    ],
     cells: [
         { id: "face-neutral-neutral", view: "face", pose: "neutral", expression: "neutral",
           frames: [{ url: frame("f0", "#26262f") }, { url: frame("f1", "#2a2a34") },
@@ -279,6 +292,55 @@ const panel = core.buildSheetInterface({
 // strip, the stage's live cell, the caption) gets looked at without waiting for a render.
 window.__mmxSheetPanel = panel;
 
+// A stand-in for a SUITE render's stream.
+//
+// The real thing comes from the node: preview_stream.py is told the boards in render order by
+// suite.board_segments, so every clip names the board it belongs to and the Results tab can follow
+// it. This sends the same payload shape, one board at a time, so the strip, the caption and the
+// board row all behave exactly as they do during a render.
+const SUITE_STREAM = [
+    { id: "hero-4", label: "Hero + 4 panels", folder: "hero-4" },
+    { id: "expressions-6", label: "Expressions 2x3", folder: "expressions-6" },
+    { id: "details-sfw", label: "Closeups 2x2 (SFW)", folder: "details-sfw" },
+    { id: "details-nsfw", label: "Closeups 2x2 (NSFW)", folder: "details-nsfw" },
+];
+let suiteTimer = null;
+function simulateSuiteRender() {
+    if (suiteTimer) {
+        clearInterval(suiteTimer);
+        suiteTimer = null;
+        panel.setRunning(false);
+        say("suite stream: stopped");
+        return;
+    }
+    panel.setRunning(true);
+    let index = 0;
+    let step = 0;
+    say("suite stream: four boards, one queue");
+    suiteTimer = setInterval(() => {
+        const board = SUITE_STREAM[index];
+        step += 1;
+        panel.setLivePreview({
+            name: "preview suite", fps: 8, steps: 8, step,
+            frames: [frame(board.id.slice(0, 3), "#2f2f3d"), frame(board.id.slice(0, 3) + "2", "#3d3d4e")],
+            board: board.id, board_label: board.label, board_folder: board.folder,
+            board_index: index + 1, boards: SUITE_STREAM.length,
+            cell: 1, cells: 1, whole_sheet: true,
+        });
+        if (step >= 3) {
+            step = 0;
+            index += 1;
+            if (index >= SUITE_STREAM.length) {
+                clearInterval(suiteTimer);
+                suiteTimer = null;
+                panel.setRunning(false);
+                say("suite stream: done");
+            }
+        }
+    }, 900);
+}
+window.__mmxSuiteStream = simulateSuiteRender;
+
 document.getElementById("stage").append(panel.container);
 document.getElementById("tabs").replaceChildren(
     ...["references", "cells", "prompts", "results", "preview", "settings", "help"].map((key, index) => {
@@ -294,6 +356,13 @@ document.getElementById("tabs").replaceChildren(
         return node;
     }),
 );
+// The one thing this page cannot do is render: this plays a suite's stream instead, so the board
+// row's "following the render" switch has something real to follow.
+const suiteButton = document.createElement("button");
+suiteButton.textContent = "suite render";
+suiteButton.title = "Play a stand-in suite stream: four boards, one after another";
+suiteButton.addEventListener("click", () => simulateSuiteRender());
+document.getElementById("tabs").append(suiteButton);
 panel.showTab("cells");
 say("mounted: the real panel module, no ComfyUI. Console shows every wiring call.");
 </script>

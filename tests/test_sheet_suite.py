@@ -280,6 +280,34 @@ def test_the_suite_wraps_the_preview_once_for_all_boards():
     assert len({json.dumps(model) for model in models}) == 1, models
 
 
+def test_the_suite_tells_the_preview_which_board_is_rendering():
+    """One wrapper for four boards, so it can only name them if it is handed the map.
+
+    The preview wrapper goes on the model every board samples through: the stream is ONE run of
+    sampler calls across all of them, and the panel follows the board it is told about (see
+    suite.board_segments and preview_stream._SheetPreviewWrapper.board_of).
+    """
+    spec = _suite_spec()
+    boards, _warnings = suite_mod.suite_boards(spec)
+    segments = suite_mod.board_segments(boards)
+    assert [entry["id"] for entry in segments] == [board.id for board in boards]
+    assert [entry["folder"] for entry in segments] == [board.folder for board in boards]
+    assert all(entry["label"] for entry in segments)
+    # One-pass is the suite's own mode: every board is ONE sampler call, and that call IS the
+    # sheet, so each clip is labelled as the board rather than as "cell 1 of 19".
+    assert [entry["calls"] for entry in segments] == [1, 1, 1, 1]
+    assert all(entry["whole_sheet"] is True for entry in segments)
+
+    spec.render.single_pass = False
+    per_cell, _warnings = suite_mod.suite_boards(spec)
+    segments = suite_mod.board_segments(per_cell)
+    assert [entry["calls"] for entry in segments] == [
+        len(board.spec.enabled_cells) for board in per_cell
+    ]
+    assert sum(entry["calls"] for entry in segments) == 19, "the suite's cells, board by board"
+    assert all(entry["whole_sheet"] is False for entry in segments)
+
+
 def test_a_suite_in_per_cell_mode_renders_every_board_s_cells():
     spec = _suite_spec()
     spec.render.single_pass = False

@@ -272,6 +272,17 @@ under the rails reads `Custom suite · 6 sheet(s)` instead - and ticking that ca
 lights the card again. The row hides itself when no suite is active, and a plain single-sheet run
 never grows one. The list rides the payload like the rest of the panel state, so a saved workflow
 reopens with its ticks.
+* **The Results tab follows the render, board by board.** A suite draws its sheets one after
+the other, and only the board in hand has cells landing on disk - so a tab left on the board you
+picked earlier shows an empty folder for the whole run. The live stream therefore names its board
+(the node hands the preview wrapper the boards in render order, `suite.board_segments`), and the
+row switches to whichever board is being drawn, with the strip saying `Expressions 2x3 · whole
+sheet · step 7/8`. A click on a chip is a decision, not a hint: it turns the following off so the
+next board cannot pull the tab away, and the switch at the end of the row (`following the render`
+/ `follow off`) is how it comes back. The preference is in the payload, so a reopened workflow
+remembers your answer, and a plain single-sheet render never sends a board at all. The standalone
+harness (`web/mockups/panel-preview.html`) has a **suite render** button that plays a stand-in stream
+of four boards, one after another, so this can be watched without queueing anything.
 * **Exporting it to RefMod: one bundle for the whole suite.** *H3 Sheet → RefMod* reads the run's
 `suite` record and puts **every board in one file**: each board contributes its picked cells
 (`<name>_<board>_views`) and its composite (`<name>_<board>_sheet`), and the motion and voice members
@@ -586,6 +597,15 @@ its cells, its layout and whether it has rendered yet). Switching a chip re-asks
 board, and Re-compose, the frame picker, Clear sheet and the new-seed re-roll all follow it, because
 they name the same board. The choice rides the payload's `ui` block, so a reopened workflow comes
 back to the sheet you were reading instead of the run folder.
+
+The row also carries the **following the render** switch. A suite draws its sheets one board at a
+time, and only the board in hand has cells landing on disk, so a tab left on the board you picked
+earlier shows an empty folder for the whole run. With the switch on (the default) the row moves to
+the board the render is on - the node's live stream names it, the same way the sheet's live preview
+does - and the strip prints that board's name first (`Expressions 2x3 · whole sheet · step 7/8`). A
+click on a chip is a decision rather than a hint: it turns the following off, so the next board
+cannot pull the tab away, and the switch is how it comes back. The answer is recorded in the payload
+like the other view preferences, and a plain single-sheet render never sends a board at all.
 
 ### Node previews (the same Settings tab)
 

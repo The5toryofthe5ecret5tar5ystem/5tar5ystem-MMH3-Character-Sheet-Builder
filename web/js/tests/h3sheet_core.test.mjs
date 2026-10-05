@@ -827,7 +827,9 @@ ok.push("blur area: face / face + hair / whole head, as chips under the picture,
     await tick();
     const row = suitePanel.results.querySelector('[data-action="suite-boards"]');
     assert.ok(row, "a suite run's Results tab offers its boards");
-    const chips = [...row.querySelectorAll(".mmx-chip")];
+    // The boards are the chips with a choice; the row also carries the follow switch (below), which
+    // is not a sheet and must not be read as one.
+    const chips = [...row.querySelectorAll(".mmx-chip[data-choice]")];
     assert.deepEqual(chips.map((chip) => chip.textContent), ["Hero + 4 panels", "Expressions 2x3"]);
     assert.equal(chips[0].classList.contains("is-on"), true, "the board the listing is about is lit");
     assert.equal(chips[1].classList.contains("is-on"), false);
@@ -854,6 +856,101 @@ ok.push("blur area: face / face + hair / whole head, as chips under the picture,
         "the board row leads the tab, above the sheet");
     suitePanel.dispose();
     ok.push("a suite run's boards are a row in Results: labelled, lit and switchable");
+}
+
+// --- the board row follows the render, and a click is what stops it ----------------------------
+// A suite draws its sheets one board at a time, and only the board in hand has cells landing on
+// disk - so the tab that stays on the board you picked an hour ago shows an empty folder for the
+// whole run. The stream names the board it is on (suite.board_segments -> the preview wrapper), the
+// row switches to it, and a deliberate click opts out.
+{
+    const seen = [];
+    const followState = core.readState("");
+    followState.suite = ["hero-4", "expressions-6"];
+    const boards = [
+        { id: "hero-4", label: "Hero + 4 panels", folder: "hero-4", cells: 5, rendered: true },
+        { id: "expressions-6", label: "Expressions 2x3", folder: "expressions-6", cells: 6,
+          rendered: false },
+    ];
+    const listing = (board, rendered) => ({
+        name: "run", dir: "/out/run", board, boards,
+        cells: [], counts: { cells: 0, rendered, frames: 0 },
+        sheetUrl: "", sheetFile: "", onePass: { active: false, frames: [], prompt: "", panels: [], size: [0, 0] },
+        manifest: {}, spec: {}, report: "",
+    });
+    const panel = core.buildSheetInterface({
+        state: followState,
+        hooks: {
+            status: (text) => seen.push(["status", text]),
+            planCells: async () => ({ cells: [] }),
+            stateChanged: (payload) => seen.push(["state", payload]),
+            listResults: async (board) => { seen.push(["list", board]); return listing(board, 0); },
+        },
+    });
+    await tick();
+    panel.showTab("results");
+    panel.renderResults(listing("hero-4", 1));
+    await tick();
+    assert.equal(core.followBoard(followState), true, "following is on to begin with");
+    const follow = panel.results.querySelector('[data-action="suite-follow"]');
+    assert.ok(follow && follow.classList.contains("is-on"), "the row says it is following the render");
+    // The stream reports the expression board: the tab switches to it by itself.
+    panel.setRunning(true);
+    panel.setLivePreview({
+        frames: ["data:image/jpeg;base64,AAAA"], fps: 12, board: "expressions-6",
+        board_label: "Expressions 2x3", board_folder: "expressions-6", board_index: 2,
+        boards: 2, cell: 3, cells: 6, step: 4, steps: 8,
+    });
+    await tick();
+    assert.equal(seen.filter(([kind]) => kind === "list").pop()[1], "expressions-6",
+        "the board the render moved on to is the one the tab asks for");
+    assert.equal(seen.filter(([kind]) => kind === "state").pop()[1].ui.suiteBoard, "expressions-6",
+        "and the switch is recorded, so a reopened workflow is on that board too");
+    assert.match(panel.liveMeta.textContent, /^Expressions 2x3 · cell 3\/6/,
+        "the strip names the board, and the cell is the cell OF that board");
+    assert.match(seen.filter(([kind]) => kind === "status").pop()[1], /following the render/);
+    // The row re-lights on the spot: the fetch is a round trip and the tab should already say which
+    // sheet it is about to draw.
+    assert.equal(panel.results.querySelector('.mmx-chip[data-choice="expressions-6"]')
+        .classList.contains("is-on"), true, "the chip that is rendering is lit");
+    assert.equal(panel.results.querySelector('.mmx-chip[data-choice="hero-4"]')
+        .classList.contains("is-on"), false, "and the one it moved off is not");
+    // A click on a chip is a decision: it stops the tab from being pulled around, and says so.
+    click(panel.results.querySelector('.mmx-chip[data-choice="hero-4"]'));
+    await tick();
+    assert.equal(core.followBoard(followState), false, "picking a board by hand turns following off");
+    assert.equal(seen.filter(([kind]) => kind === "state").pop()[1].ui.followBoard, false,
+        "...and the workflow records that");
+    const offSwitch = panel.results.querySelector('[data-action="suite-follow"]');
+    assert.equal(offSwitch.textContent, "follow off", "the switch says what it is doing now");
+    assert.equal(offSwitch.classList.contains("is-on"), false);
+    panel.setLivePreview({
+        frames: ["data:image/jpeg;base64,AAAA"], fps: 12, board: "expressions-6",
+        board_label: "Expressions 2x3", board_folder: "expressions-6", cell: 1, cells: 6,
+    });
+    await tick();
+    assert.equal(seen.filter(([kind]) => kind === "list").pop()[1], "hero-4",
+        "a later board does not move the tab once following is off");
+    // The switch is how it comes back, and it re-reads the row from the listing.
+    click(panel.results.querySelector('[data-action="suite-follow"]'));
+    await tick();
+    assert.equal(core.followBoard(followState), true, "the switch turns following back on");
+    assert.equal(panel.results.querySelector('[data-action="suite-follow"]').classList
+        .contains("is-on"), true, "and it lights up");
+    // A plain sheet run never sends a board, so nothing here can move the tab on its own.
+    followState.followBoard = true;
+    panel.renderResults({ ...listing("", 1), boards: [] });
+    await tick();
+    const pinned = String(followState.suiteBoard);
+    panel.setLivePreview({
+        frames: ["data:image/jpeg;base64,AAAA"], fps: 12, cell: 1, cells: 1, whole_sheet: true,
+    });
+    await tick();
+    assert.equal(String(followState.suiteBoard), pinned,
+        "a single-sheet stream leaves the board where it was");
+    panel.setRunning(false);
+    panel.dispose();
+    ok.push("the board row follows the board the render is on, and a click stops it");
 }
 
 // --- a suite's boards are ticks: which sheets one queue renders --------------------------------

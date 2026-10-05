@@ -455,6 +455,95 @@ def test_the_sheet_graph_attaches_the_preview_before_every_cell():
         "execute must pass the payload switch through"
     )
 
+# --------------------------------------------------------------------------- #
+# a suite's stream belongs to one board at a time
+# --------------------------------------------------------------------------- #
+def _suite_segments(calls: list[int], *, whole: bool) -> list[dict]:
+    return [
+        {"id": f"board-{index + 1}", "label": f"Board {index + 1}", "folder": f"board-{index + 1}",
+         "calls": count, "whole_sheet": whole}
+        for index, count in enumerate(calls)
+    ]
+
+
+def _streamed(segments: list[dict] | None, calls: int = 1, cells_total: int | None = None,
+              **kwargs):
+    """Run ``calls`` sampler calls through a wrapper and return what the panel was sent."""
+    sender = _Sender()
+    total = (cells_total if cells_total is not None
+             else sum(int(entry.get("calls") or 1) for entry in (segments or [])))
+    wrapper = ps._SheetPreviewWrapper(
+        sender=sender, source=_StubSource(), interval=0.0, cells_total=total,
+        segments=segments, **kwargs,
+    )
+
+    def run(noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar, seed,
+            latent_shapes=None):
+        for step in range(calls):
+            callback(0, _nested_latent(), None, 1)
+        return "sampled"
+
+    wrapper(run, None, None, None, None, None, None, False, 1)
+    assert len(sender.payloads) == calls, "each sampler call streams one clip"
+    return sender.payloads
+
+
+def test_a_suite_stream_names_the_board_that_is_rendering():
+    """One queue, four boards, ONE wrapper: without the map the panel only sees "cell 3/19"."""
+    payloads = _streamed(_suite_segments([1, 1, 1, 1], whole=True), calls=4)
+    assert [item["board"] for item in payloads] == ["board-1", "board-2", "board-3", "board-4"]
+    assert [item["board_index"] for item in payloads] == [1, 2, 3, 4]
+    assert {item["boards"] for item in payloads} == {4}
+    first = payloads[0]
+    assert first["board_label"] == "Board 1" and first["board_folder"] == "board-1"
+    # In one-pass mode each board IS one sampler call: the clip is the whole sheet, and the
+    # panel is told so per board rather than for the run as a whole.
+    assert all(item["whole_sheet"] is True for item in payloads)
+    assert [(item["cell"], item["cells"]) for item in payloads] == [(1, 1)] * 4
+
+
+def test_a_per_cell_suite_counts_cells_inside_the_board():
+    payloads = _streamed(_suite_segments([5, 6], whole=False), calls=11)
+    assert [(item["board"], item["cell"], item["cells"]) for item in payloads] == (
+        [("board-1", cell, 5) for cell in range(1, 6)]
+        + [("board-2", cell, 6) for cell in range(1, 7)]
+    )
+    assert [item["cell_overall"] for item in payloads] == list(range(1, 12))
+    assert all(item["whole_sheet"] is False for item in payloads), (
+        "per-cell boards are cells, not sheets"
+    )
+
+
+def test_a_counter_past_the_map_stays_on_the_last_board():
+    """A board that makes more calls than its cells promised must not fall out of the suite."""
+    payloads = _streamed(_suite_segments([2, 2], whole=False), calls=6)
+    assert [item["board"] for item in payloads] == ["board-1", "board-1", "board-2",
+                                                   "board-2", "board-2", "board-2"]
+
+
+def test_a_plain_sheet_stream_never_grows_a_board():
+    """A single sheet passes no map: its payload is exactly what it always was."""
+    payloads = _streamed(None, calls=2, cells_total=2, name="sheet")
+    assert all("board" not in item for item in payloads)
+    assert [(item["cell"], item["cells"]) for item in payloads] == [(1, 2), (2, 2)]
+    assert all(item["name"] == "sheet" for item in payloads)
+    assert all(item["whole_sheet"] is False for item in payloads)
+
+
+def test_the_suite_graph_hands_the_wrapper_its_board_map():
+    """The wiring, read off the source: one wrapper, given the boards in render order."""
+    import pathlib
+    import re
+
+    source = (pathlib.Path(__file__).resolve().parents[1] / "h3_character_sheet" / "nodes"
+              / "sheet.py").read_text()
+    assert re.search(r"segments = board_segments\(boards\)", source)
+    assert re.search(r"segments=segments,", source), "and the wrapper is given them"
+    assert re.search(r'cells_total=sum\(int\(entry\.get\("calls"\)', source), (
+        "the total counts sampler calls, not cells"
+    )
+
+
 def test_strided_keeps_both_ends_of_a_clip():
     frames = list(range(10))
     assert ps.strided(frames, 20) == frames, "a short clip is left alone"

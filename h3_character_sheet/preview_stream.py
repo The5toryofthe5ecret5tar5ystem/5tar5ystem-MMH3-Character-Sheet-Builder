@@ -461,11 +461,17 @@ class _SheetPreviewWrapper:
         budget: float = FRAME_BUDGET_SECONDS,
         cell_ids: list[str] | None = None,
         whole_sheet: bool = False,
+        segments: list[dict[str, Any]] | None = None,
     ) -> None:
         self.name = name
         self.node_id = node_id
         self.cells_total = int(cells_total or 0)
         self.whole_sheet = bool(whole_sheet)
+        #: One entry per SUITE BOARD, in render order: ``{id, label, folder, calls, whole_sheet}``
+        #: (see ``suite.board_segments``). A suite's wrapper sits on the model every board samples
+        #: through, so the stream is one run of sampler calls across all of them - without this
+        #: map the panel can only say "cell 3/19" and cannot name the board it is looking at.
+        self.segments = [dict(entry) for entry in (segments or []) if isinstance(entry, dict)]
         self.mute = bool(mute)
         self.stream = bool(stream)
         self.interval = float(interval)
@@ -593,18 +599,35 @@ class _SheetPreviewWrapper:
         # The whole latent prefix goes to the worker (a few hundred KB): how much of it becomes
         # frames is decided there, from the budget and the rate this box measured.
         clip = latent.detach().to("cpu", copy=True)
+        cell = self._cell
+        segment, board_position, board_calls = self.board_of(cell)
+        if segment is not None:
+            # A suite re-reads the run's own numbers per board: the call counter belongs to the
+            # board it is in, so the panel can say "cell 3/6 of the expression board" instead of
+            # "cell 12/19" - and it can follow the board that is rendering.
+            cell = self.cell_in_board(cell, board_position)
         info = {
             "node_id": self.node_id,
             "name": self.name,
-            "cell": self._cell,
-            "cells": self.cells_total,
+            "cell": cell,
+            "cells": board_calls if segment is not None else self.cells_total,
             # True when this one clip is the whole sheet (the draft pass): the panel says so
             # instead of "cell 1", and there is no per-cell re-roll to offer.
-            "whole_sheet": self.whole_sheet,
+            "whole_sheet": bool(segment.get("whole_sheet")) if segment is not None
+            else self.whole_sheet,
             "cell_id": self.cell_id_of(self._cell),
             "step": step_index + 1,
             "steps": total,
         }
+        if segment is not None:
+            info.update({
+                "board": str(segment.get("id") or ""),
+                "board_label": str(segment.get("label") or segment.get("id") or ""),
+                "board_folder": str(segment.get("folder") or ""),
+                "board_index": board_position + 1,
+                "boards": len(self.segments),
+                "cell_overall": self._cell,
+            })
         source = self._source
         if source is None:
             self._source = source = build_frame_source(self.latent_format)
@@ -635,6 +658,37 @@ class _SheetPreviewWrapper:
         if 0 <= index < len(self.cell_ids):
             return self.cell_ids[index]
         return ""
+
+    def board_of(self, cell: int) -> tuple[dict[str, Any] | None, int, int]:
+        """``(segment, position, calls)`` for the board the ``cell``-th sampler call is in.
+
+        ``(None, 0, cells_total)`` when no map was given, which is what a single-sheet render
+        passes - so a plain sheet never grows a board in its payload. A counter that runs past
+        the map (a board that made more calls than its cells said) stays on the LAST board
+        rather than falling out of the suite.
+        """
+        if not self.segments:
+            return None, 0, self.cells_total
+        offset = 0
+        last = len(self.segments) - 1
+        for position, segment in enumerate(self.segments):
+            calls = max(1, int(segment.get("calls") or 1))
+            if int(cell) <= offset + calls or position == last:
+                return segment, position, calls
+            offset += calls
+        return self.segments[-1], last, max(1, int(self.segments[-1].get("calls") or 1))
+
+    def cell_in_board(self, cell: int, position: int) -> int:
+        """The 1-based call index inside board ``position`` (what the panel prints as a cell)."""
+        if not self.segments:
+            return max(1, int(cell))
+        offset = 0
+        for index, segment in enumerate(self.segments):
+            calls = max(1, int(segment.get("calls") or 1))
+            if index >= position:
+                break
+            offset += calls
+        return max(1, int(cell) - offset)
 
     def _send(self, payload: dict[str, Any]) -> None:
         self._sent += 1
@@ -669,6 +723,7 @@ def attach_sheet_preview(
     budget: float = FRAME_BUDGET_SECONDS,
     cell_ids: list[str] | None = None,
     whole_sheet: bool = False,
+    segments: list[dict[str, Any]] | None = None,
 ) -> Any:
     """Return the model with the sheet-preview wrapper attached (or the model unchanged).
 
@@ -677,7 +732,8 @@ def attach_sheet_preview(
 
     ``whole_sheet`` marks a render whose single clip IS the sheet (the one-pass sheet, see
     ``one_pass``): one sampler call, nothing to re-roll per cell, so the panel labels the stream
-    as the sheet rather than as "cell 1".
+    as the sheet rather than as "cell 1". ``segments`` is the same idea for a SUITE - the boards
+    in render order, so every clip can name the board it belongs to.
     """
     if comfy is None or model is None or not (mute or stream):
         return model
@@ -688,6 +744,7 @@ def attach_sheet_preview(
         name=name, node_id=node_id, cells_total=cells_total, mute=mute, stream=stream,
         sender=sender, latent_format=latent_format, source=source, max_frames=max_frames,
         fps=fps, budget=budget, cell_ids=cell_ids, whole_sheet=whole_sheet,
+        segments=segments,
     )
     try:
         wrapped = model.clone()

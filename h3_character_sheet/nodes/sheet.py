@@ -70,7 +70,7 @@ from ..sheet_spec import (
     parse_sheet_spec,
 )
 from ..sheet_store import SheetStore
-from ..suite import suite_boards, suite_lines, suite_manifest
+from ..suite import board_segments, suite_boards, suite_lines, suite_manifest
 from ..verbosity import apply_verbose
 
 log = logging.getLogger("H3-Character-Sheet.sheet")
@@ -524,15 +524,19 @@ def build_suite_graph(
     # kept rather than muted a second time).
     preview_on = bool(boards and boards[0].spec.render.live_preview)
     comfy_preview = bool(boards and boards[0].spec.render.comfy_preview)
+    # The boards in render order, with how many sampler calls each makes: the wrapper is what
+    # turns that into "board 3 of 4, cell 2/6" on the wire, and the panel follows it.
+    segments = board_segments(boards)
     if preview_on or not comfy_preview:
         model = attach_sheet_preview(
             model,
             mute=not comfy_preview,
             stream=preview_on,
             name=str(name or ""),
-            cells_total=sum(int(board.cells) for board in boards),
+            cells_total=sum(int(entry.get("calls") or 0) for entry in segments),
+            segments=segments,
             node_id=node_id,
-            whole_sheet=True,
+            whole_sheet=bool(segments[0]["whole_sheet"]) if segments else True,
         )
 
     for board in boards:

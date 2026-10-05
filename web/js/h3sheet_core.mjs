@@ -369,7 +369,7 @@ export const KNOB_COLUMNS = 3;
  * build makes that a glance instead of an investigation; a test keeps it in step with the
  * import, so bumping one without the other fails the suite rather than confusing a user.
  */
-export const PANEL_BUILD = "h3sheet_v83";
+export const PANEL_BUILD = "h3sheet_v84";
 
 /** How long a knob hint may be before it stops being printed under its field (it stays a tooltip).
  *
@@ -922,6 +922,18 @@ export function compactKnobs(state) {
 /** Auto-refresh (the background poll of the sheet folder) - off unless a workflow says so. */
 export function autoRefresh(state) {
     return state?.autoRefresh === true;
+}
+
+/**
+ * Should the Results tab follow the board a suite render is currently drawing?
+ *
+ * A suite is one queue and several sheets, and the sheets render one after another: the board
+ * being drawn is the only one with anything to watch, so the panel switches to it (see
+ * setLivePreview) unless the user pinned a board instead. On by default - a chip click is what
+ * turns it off, and the switch beside the row turns it back on.
+ */
+export function followBoard(state) {
+    return state?.followBoard !== false;
 }
 
 /** The value the node's widget should get from a panel control. */
@@ -1518,6 +1530,10 @@ export const PANEL_CSS = `
 .mmx-chip.is-on {
   background: var(--mmx-accent); border-color: var(--mmx-accent); color: #17171c;
 }
+/* The Board row's own switch: whether that row follows the render (see followSwitch). It sits at the
+   far end of the row so it cannot be mistaken for a board, and stays quiet when it is off. */
+.mmx-chip--follow { margin-left: auto; font-size: 10px; opacity: 0.8; }
+.mmx-chip--follow.is-on { opacity: 1; }
 .mmx-chiprow__hint { font-size: 10px; }
 .mmx-col__foot {
   margin-top: 4px; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding-top: 2px;
@@ -2294,6 +2310,11 @@ export function readState(payload) {
         // rather than a render setting, like the preview sizes - but it has to round-trip, or a
         // reopened workflow would silently go back to the run folder and show nothing.
         suiteBoard: String(data?.ui?.suiteBoard || ""),
+        // Whether the Results tab follows the board the render is ON while a suite draws it (see
+        // followBoard). On unless the user said otherwise: the board that is rendering is the one
+        // with something to watch, and a chip click turns it off for good (a preference, not an
+        // armed-for-one-run flag - the switch that turns it back on is in the row).
+        followBoard: data?.ui?.followBoard !== false,
         build: {
             views: Array.isArray(data.build?.views) ? data.build.views.map(String) : ["face", "front"],
             poses: Array.isArray(data.build?.poses) ? data.build.poses.map(String) : ["neutral"],
@@ -2354,6 +2375,7 @@ export function toPayload(state) {
         panelPreview: panelPreview(state),
         autoRefresh: autoRefresh(state),
         suiteBoard: String(state.suiteBoard || ""),
+        followBoard: followBoard(state),
     };
     for (const group of REF_GROUPS) {
         payload.refs[group.key] = (state.refs?.[group.key] || [])
@@ -6385,9 +6407,18 @@ export function buildSheetInterface({ state, hooks = {} }) {
         return String(state.suiteBoard || "").trim();
     }
 
+    // The board row's own handles, so its chips and its follow switch can be re-read without
+    // rebuilding the Results pane (see syncBoardRow).
+    let boardRowNode = null;
+    let boardRowChoices = [];
+    let followNode = null;
+
     /** The board row: which sheet of a run the Results tab is showing (null for a plain sheet). */
     function boardRow(shown) {
         const boards = Array.isArray(shown?.boards) ? shown.boards : [];
+        boardRowNode = null;
+        boardRowChoices = [];
+        followNode = null;
         if (!boards.length) return null;
         const current = String(shown?.board || boardName() || boards[0].folder || "");
         const row = chipChoice(
@@ -6399,7 +6430,7 @@ export function buildSheetInterface({ state, hooks = {} }) {
             boards.length === 1 ? "one sheet in this run" : `${boards.length} sheets from one queue`,
         );
         row.dataset.action = "suite-boards";
-        for (const chip of row.querySelectorAll(".mmx-chip")) {
+        for (const chip of row.querySelectorAll(".mmx-chip[data-choice]")) {
             const entry = boards.find((item) => String(item.folder || item.id) === chip.dataset.choice) || {};
             const bits = [];
             if (entry.cells) bits.push(`${entry.cells} cell(s)`);
@@ -6407,7 +6438,71 @@ export function buildSheetInterface({ state, hooks = {} }) {
             bits.push(entry.rendered ? "rendered" : "not rendered yet");
             chip.title = `${entry.label || entry.id}: ${bits.join(" · ")}`;
         }
+        if (boards.length > 1) {
+            followNode = followSwitch();
+            row.append(followNode);
+        }
+        boardRowNode = row;
+        boardRowChoices = boards;
+        syncBoardRow();
         return row;
+    }
+
+    /**
+     * Re-light the board row's chips and re-read the follow switch.
+     *
+     * The row is otherwise only rebuilt when the LISTING changes (a light refresh keeps the
+     * thumbnails and just repaints what moved), so a board switch - by a click or by the render
+     * moving on - would leave the old chip lit and the switch saying the opposite of what it does.
+     */
+    function syncBoardRow() {
+        if (!boardRowNode) return;
+        const current = String(boardName() || lastSheet?.board
+            || boardRowChoices[0]?.folder || boardRowChoices[0]?.id || "");
+        for (const chip of boardRowNode.querySelectorAll(".mmx-chip[data-choice]")) {
+            const on = String(chip.dataset.choice) === current;
+            chip.classList.toggle("is-on", on);
+            chip.setAttribute("aria-pressed", on ? "true" : "false");
+        }
+        if (followNode) {
+            const on = followBoard(state);
+            followNode.textContent = on ? "following the render" : "follow off";
+            followNode.classList.toggle("is-on", on);
+            followNode.setAttribute("aria-pressed", on ? "true" : "false");
+            followNode.title = followTitle(on);
+        }
+    }
+
+    function followTitle(on) {
+        return on
+            ? "The board row follows whichever board this suite is drawing. Click to stop following."
+            : "The board row stays on the sheet you picked. Click to follow the render again.";
+    }
+
+    /**
+     * The little switch that says whether the Results tab follows the render.
+     *
+     * It is on the row rather than buried in Settings because it is only ever a question while a
+     * suite is drawing - and because a chip click turns it off, the user needs to see that it did.
+     */
+    function followSwitch() {
+        const on = followBoard(state);
+        const chip = button(on ? "following the render" : "follow off", () => {
+            state.followBoard = !followBoard(state);
+            persist();
+            notify(followBoard(state)
+                ? "following the render again - the board row will switch by itself"
+                : "not following the render - the board row stays where you put it");
+            syncBoardRow();
+            refreshResults();
+        });
+        chip.classList.add("mmx-chip");
+        chip.classList.add("mmx-chip--follow");
+        chip.classList.toggle("is-on", on);
+        chip.dataset.action = "suite-follow";
+        chip.setAttribute("aria-pressed", on ? "true" : "false");
+        chip.title = followTitle(on);
+        return chip;
     }
 
     /**
@@ -6416,13 +6511,22 @@ export function buildSheetInterface({ state, hooks = {} }) {
      * The choice is a view preference (it rides the payload's `ui` block, like the preview sizes),
      * and the listing is re-fetched because the board decides which folder answers. Re-compose,
      * picks and Clear follow it for free: they read the same state.
+     *
+     * `auto` marks the switch the live stream asked for (see setLivePreview) - a deliberate click
+     * is a decision, so it turns following off rather than being immediately overruled by the
+     * next board the render moves on to.
      */
-    function selectBoard(folder) {
+    function selectBoard(folder, { auto = false } = {}) {
         const next = String(folder || "");
         if (boardName() === next) return;
         state.suiteBoard = next;
+        if (!auto && followBoard(state)) state.followBoard = false;
         persist();
-        notify(`results: ${next || "the sheet"}`);
+        // The row re-lights HERE rather than when the listing comes back: the fetch is a round trip,
+        // and the tab should show which sheet it is about to draw immediately.
+        syncBoardRow();
+        notify(auto ? `results: following the render - ${next || "the sheet"}`
+            : `results: ${next || "the sheet"}`);
         refreshResults();
     }
 
@@ -6908,9 +7012,13 @@ export function buildSheetInterface({ state, hooks = {} }) {
         parts.push(frames.length === 1 ? "1 frame" : `${frames.length}-frame loop`);
         parts.push(`${liveCount} clip${liveCount === 1 ? "" : "s"}`);
         // One string, two places: the filmstrip prints it, and the stage's caption repeats it.
+        // A suite's board goes FIRST, because it is the thing the cell number is relative to.
+        const boardLabel = String(data.board_label || data.board || "");
+        if (boardLabel) parts.unshift(boardLabel);
         const meta = parts.join(" · ");
         liveMeta.textContent = meta;
         liveMetaText = meta;
+        followLiveBoard(data);
         syncStageCaption();
         if (liveStrip.style.display === "none") {
             liveStrip.style.display = "flex";
@@ -6918,6 +7026,27 @@ export function buildSheetInterface({ state, hooks = {} }) {
             // switch or a new result does.
             hooks.layoutChanged?.();
         }
+    }
+
+    /**
+     * Follow the board a suite render is drawing.
+     *
+     * The stream names it (``preview_stream`` is told the boards in render order by
+     * ``suite.board_segments``), so the panel can show the sheet that is being worked on instead of
+     * an empty folder for the whole run - the run renders one board at a time, and only the board
+     * in hand has cells landing on disk. A plain single-sheet run never sends a board, so nothing
+     * here can move the tab on its own, and switching is a preference the user can turn off (a
+     * click on a chip, or the switch on the row).
+     */
+    function followLiveBoard(data) {
+        const folder = String(data?.board_folder || data?.board || "");
+        if (!folder || !followBoard(state) || folder === boardName()) return;
+        // Only ever to a board this run actually has: a stale stream, or a run whose boards the
+        // listing has not described yet, must not point the Results tab at a folder that is not
+        // there.
+        const boards = Array.isArray(lastSheet?.boards) ? lastSheet.boards : [];
+        if (!boards.some((entry) => String(entry.folder || entry.id || "") === folder)) return;
+        selectBoard(folder, { auto: true });
     }
 
     function dispose() {
@@ -6961,6 +7090,8 @@ export function buildSheetInterface({ state, hooks = {} }) {
         state.layoutPreset = String(fresh.layoutPreset || "");
         state.suite = Array.isArray(fresh.suite) ? fresh.suite.map(String) : [];
         state.suiteBoard = String(fresh.suiteBoard || "");
+        // ...and whether the Results tab follows the render (its own switch shows this).
+        state.followBoard = followBoard(fresh);
         // A loaded workflow can carry a different compact preference and different knob
         // values, and the fields here must show what will actually render.
         state.compactKnobs = compactKnobs(fresh);

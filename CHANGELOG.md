@@ -76,6 +76,22 @@ mean.)*
   the hint - `applyQualityCard` called `showHint()` and `applyLayoutCard` did not - so applying a
   layout (or the suite) left the line reading "pick a sheet on the left rail"; both rails refresh it
   now, as does `refresh()`, so a reopened workflow's line describes what it actually loaded.
+* **A suite's live stream names its board, and the Results tab follows it.** The suite rendered four
+  sheets through ONE preview wrapper (it goes on the model every board samples through, because four
+  wrappers would stack four step clocks), so the stream was one run of sampler calls that could only
+  say "cell 3/19" - and it said `whole_sheet` for the whole run, which was wrong in per-cell mode.
+  Now `suite.board_segments(boards)` maps the boards in render order (one sampler call each in
+  one-pass, one per cell otherwise, with the honest `whole_sheet` per board) and
+  `preview_stream._SheetPreviewWrapper` resolves every clip against it: the payload carries `board`,
+  `board_label`, `board_folder`, `board_index`, `boards`, `cell_overall`, and `cell`/`cells`/
+  `whole_sheet` are read from the board the call belongs to rather than from the run. A plain sheet
+  passes no map and its payload is byte-for-byte what it was. On the panel side the stream moves the
+  Results tab to the board it is drawing whenever the run is following it, the strip prints the board
+  name first, and the row's own switch (`following the render` / `follow off`, recorded as
+  `ui.followBoard`) is the preference: a click on a chip turns the following off so a deliberate
+  choice cannot be pulled away by the next board, and the switch turns it back on. The row also
+  re-lights its chips and re-reads that switch the moment the selection changes - a light refresh
+  keeps the thumbnails and only repaints what moved, so a board switch used to leave the old chip lit.
 * The README's suite section now says what the code actually does: the record is a `suite` block in
   the run's own `<name>.json` manifest (there is no `suite.json` file), and the four sheets are
   reached through the panel's board row rather than by appearing as top-level folders. The Results

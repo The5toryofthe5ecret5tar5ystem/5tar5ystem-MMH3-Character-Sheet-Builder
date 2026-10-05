@@ -165,6 +165,35 @@ def _board_spec(spec: SheetSpec, preset: Any, *, frames: int | None) -> SheetSpe
     return replace(spec, cells=cells, layout=layout, render=render, warnings=[], notes=[])
 
 
+def board_segments(boards: list[SuiteBoard]) -> list[dict[str, Any]]:
+    """The live stream's map of a suite: which board each sampler call belongs to.
+
+    The preview wrapper is attached to the model every board samples through, so it sees ONE
+    stream of sampler calls for the whole suite and cannot know where one board ends and the next
+    begins. This is that missing piece - one entry per board, in render order:
+
+    * ``id`` / ``label`` / ``folder``: what the panel (and the routes) name the board by.
+    * ``calls``: how many sampler calls the board makes - one in one-pass mode (the whole sheet is
+      a single render), one per cell otherwise.
+    * ``whole_sheet``: whether each of those calls IS the board (one-pass) rather than one cell of
+      it, so the panel can label what it is showing honestly.
+
+    Without it a suite stream reads as "cell 3/19" of a run whose boards the panel cannot tell
+    apart, and it cannot follow the board that is actually rendering.
+    """
+    out: list[dict[str, Any]] = []
+    for board in boards:
+        single = bool(board.spec.render.single_pass)
+        out.append({
+            "id": str(board.id),
+            "label": str(board.label),
+            "folder": str(board.folder),
+            "calls": 1 if single else max(1, len(board.spec.enabled_cells)),
+            "whole_sheet": single,
+        })
+    return out
+
+
 def suite_lines(boards: list[SuiteBoard], *, name: str = "") -> list[str]:
     """The suite's report block: what will render, in order, and where each board lands."""
     if not boards:
@@ -195,6 +224,7 @@ def suite_manifest(boards: list[SuiteBoard], *, name: str = "", exported: str = 
 __all__ = [
     "SuiteBoard",
     "board_folder",
+    "board_segments",
     "suite_boards",
     "suite_lines",
     "suite_manifest",
