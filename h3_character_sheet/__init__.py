@@ -34,6 +34,7 @@ if not __package__:
 else:
     from .nodes.cellsink import H3SheetCellSink
     from .nodes.grid import H3SheetGrid
+    from .nodes.join import H3SheetJoin
     from .nodes.onepass import H3SheetOnePassSink
     from .nodes.ordergate import H3SheetOrderGate
     from .nodes.refmod import H3SheetRefMod
@@ -53,6 +54,13 @@ else:
         "H3SheetDraftSink": H3SheetOnePassSink,
         # Internal: sequences the cells so they render in list order.
         "H3SheetOrderGate": H3SheetOrderGate,
+        # Internal: a SUITE's exit point. Every board's sheet/report/cells feed it, so nothing
+        # downstream (the RefMod export) can run before the last board has finished - graphs have
+        # no ordering of their own. NOTE: this list is what ComfyUI executes from, and it is a
+        # SECOND list next to ``nodes/__init__.__all__`` - forgetting an entry here means the
+        # executor dies with KeyError after the expansion has already run (that happened to
+        # H3SheetJoin). ``tests/test_node_registry.py`` now keeps the two lists in step.
+        "H3SheetJoin": H3SheetJoin,
         # Optional: needs ComfyUI-MiniMaxH3Mod installed to actually run.
         "H3SheetRefMod": H3SheetRefMod,
     }
@@ -63,6 +71,7 @@ else:
         "H3SheetCellSink": "H3 Sheet Cell Saver (internal)",
         "H3SheetOnePassSink": "H3 Sheet One-Pass Sink (internal)",
         "H3SheetOrderGate": "H3 Sheet Order Gate (internal)",
+        "H3SheetJoin": "H3 Sheet Join (internal)",
         "H3SheetRefMod": "H3 Sheet → RefMod",
     }
 

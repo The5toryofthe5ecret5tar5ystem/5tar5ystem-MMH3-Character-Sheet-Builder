@@ -535,13 +535,28 @@ _V3_MODULES = (
 
 
 def _installed_node_classes() -> dict:
-    """Node type -> class, from ComfyUI's own registry (base nodes) plus the V3 extras."""
+    """Node type -> class, from ComfyUI's own registry (base nodes) plus the V3 extras.
+
+    This pack's own nodes come from ``h3_character_sheet.NODE_CLASS_MAPPINGS`` - the list ComfyUI
+    reads - rather than from ``h3cs.nodes``: the two are separate lists, and reading the one the
+    server does not use is how ``H3SheetJoin`` went unregistered while every input check passed
+    (see ``tests/test_node_registry.py``).
+    """
     import importlib
     import inspect
+    import sys
+    from pathlib import Path
 
     import nodes as core_nodes
 
     mapping = dict(core_nodes.NODE_CLASS_MAPPINGS)
+    root = str(Path(__file__).resolve().parent.parent)
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    try:
+        mapping.update(dict(importlib.import_module("h3_character_sheet").NODE_CLASS_MAPPINGS))
+    except Exception:  # noqa: BLE001 - a lean environment still resolves the core types
+        pass
     for module_name in _V3_MODULES:
         try:
             module = importlib.import_module(module_name)
