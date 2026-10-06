@@ -4,6 +4,27 @@ All notable changes to **5tar5ystem MMH3 Character Sheet Builder** are recorded 
 follows [semantic versioning](https://semver.org/): the node type (`MiniMaxH3CharacterSheet`) and
 the payload contract are what "breaking" refers to, not the panel's layout.
 
+## [2.1.1] - 2026-10-06
+
+**Suites render again.** A one-line registration bug, and the test gap that let it through.
+
+### Fixed
+
+* **`H3SheetJoin` was never registered, so every SUITE render died the moment it started.** The
+  pack hands ComfyUI its nodes from a hand-written `NODE_CLASS_MAPPINGS` in
+  `h3_character_sheet/__init__.py`, and that list is a *second* list next to `nodes/__init__.__all__`
+  - which is what the graph tests import. The join node (the pass-through that makes a suite's
+  RefMod export wait for the last board) was in the nodes package and missing from the registry, so
+  a suite expanded its four boards, printed them, and then failed with `KeyError: 'H3SheetJoin'`
+  before a single step was sampled. A per-cell sheet was unaffected: the join only exists in a
+  suite's graph, which is why 2.1.0 looked healthy in single-sheet runs.
+* **The guard that would have caught it.** `tests/test_node_registry.py` now checks the registry the
+  executor actually reads: every class the `nodes` package exports is registered, every pack-owned
+  node type the three expansions can produce is registered (asked of the graphs themselves, not of a
+  list), every registered class builds its schema and answers to the key it is filed under, and
+  every registered node has a display name. The input-validation helper in `test_sheet_one_pass.py`
+  reads that same registry instead of the package the server never uses.
+
 ## [2.1.0] - 2026-10-05
 
 **LoRAs, as a thing the sheet owns.** 2.0 made the sheet one render; this one makes the model that
