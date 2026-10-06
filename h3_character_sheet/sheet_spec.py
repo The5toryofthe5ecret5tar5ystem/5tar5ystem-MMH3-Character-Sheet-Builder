@@ -732,6 +732,15 @@ ONE_PASS_SHEET_FRAME = 0
 #: needs before its views start crowding the reference tokens.
 MAX_SUITE_BOARDS = 8
 
+#: How many LoRAs one sheet may stack (the panel's LoRAs tab). Every entry is a weight load on the
+#: model every cell samples through, and the whole point of a sheet is one consistent look: a stack
+#: past this is a mistake rather than a style, so it is refused rather than rendered.
+MAX_LORAS = 16
+#: The strength window a payload may ask for. Past this a LoRA stops shaping the sheet and starts
+#: wrecking it, and a render is an expensive place to find that out.
+LORA_STRENGTH_RANGE = (-4.0, 4.0)
+DEFAULT_LORA_STRENGTH = 1.0
+
 #: The resolution control: ``(key, label, sheet short edge, cell short edge)``.
 #:
 #: One choice, two paired sizes. The sheet short edge is the canvas a one-pass render draws and
@@ -808,6 +817,31 @@ class SheetRef:
         """Official H3 prompt tag for this reference (``<Picture 1>``, ...)."""
         label = {"picture": "Picture", "video": "Video", "audio": "Audio"}[self.kind]
         return f"<{label} {self.index + 1}>"
+
+
+@dataclass
+class SheetLora:
+    """One LoRA in the sheet's stack: which file, how hard, and whether it is switched on.
+
+    The stack lives on the SHEET rather than in the graph (see ``lora_library.py``): the panel's
+    LoRAs tab authors it, the node applies it to the model every cell samples through, and one
+    list therefore covers every cell - and every board of a suite.
+    """
+
+    file: str
+    strength: float = DEFAULT_LORA_STRENGTH
+    on: bool = True
+
+    def label(self) -> str:
+        """The file's own name without its extension (the panel prefers a stored name)."""
+        stem = self.file.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        for suffix in (".safetensors", ".ckpt", ".pt", ".sft"):
+            if stem.lower().endswith(suffix):
+                return stem[: -len(suffix)]
+        return stem
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"file": self.file, "strength": round(float(self.strength), 3), "on": bool(self.on)}
 
 
 @dataclass
@@ -963,6 +997,9 @@ class SheetSpec:
     negative_prompt: str = ""
     task_type: str = ""
     refs: list[SheetRef] = field(default_factory=list)
+    #: The sheet's LoRA stack (the panel's LoRAs tab), applied to the model every cell samples
+    #: through - so one list covers every cell and every board of a suite.
+    loras: list[SheetLora] = field(default_factory=list)
     cells: list[SheetCell] = field(default_factory=list)
     #: The panel's view/pose/expression ticks. Kept even when the cell list is
     #: edited by hand, so an empty cell list is not a lost intention: the ticks
@@ -1012,6 +1049,7 @@ class SheetSpec:
             },
             "warnings": list(self.warnings),
             "notes": [str(note) for note in self.notes],
+            "loras": [entry.to_dict() for entry in self.loras],
             "refs": {
                 "pictures": [
                     {
@@ -1289,6 +1327,73 @@ def _parse_refs(raw: Any, warnings: list[str]) -> list[SheetRef]:
             ref.index = counters.get(ref.kind, 0)
             counters[ref.kind] = ref.index + 1
     return refs
+
+
+def _parse_loras(raw: Any, warnings: list[str]) -> list[SheetLora]:
+    """The sheet's LoRA stack: which files, how hard, switched on or not.
+
+    Accepts what the panel writes (``[{"file": ..., "strength": ..., "on": true}]``) and the
+    shorthand a hand-written payload may use (``"Minimax/x.safetensors@0.8"``, or a bare file name
+    at full strength). A repeated file is one entry - the last mention wins, because a stack with
+    the same LoRA twice is a strength typo, not an intention.
+    """
+    if raw is None or raw == "":
+        return []
+    if isinstance(raw, str):
+        raw = [part for part in re.split(r"[,\n;]+", raw) if part.strip()]
+    if isinstance(raw, dict):
+        raw = [raw]
+    if not isinstance(raw, list):
+        warnings.append("loras: expected a list of LoRA entries; ignoring it.")
+        return []
+
+    stack: list[SheetLora] = []
+    seen: dict[str, int] = {}
+    for item in raw:
+        name = ""
+        strength = DEFAULT_LORA_STRENGTH
+        on = True
+        if isinstance(item, str):
+            text = item.strip()
+            if "@" in text:
+                text, _, raw_strength = text.rpartition("@")
+                strength = _as_float(raw_strength, DEFAULT_LORA_STRENGTH)
+            name = text.strip()
+        elif isinstance(item, dict):
+            name = str(
+                item.get("file")
+                or item.get("lora")
+                or item.get("name")
+                or item.get("lora_name")
+                or ""
+            ).strip()
+            strength = _as_float(
+                item.get("strength", item.get("strengthModel", item.get("strength_model"))),
+                DEFAULT_LORA_STRENGTH,
+            )
+            on = _as_bool(item.get("on", item.get("enabled")), True)
+        if not name:
+            continue
+        # A loader widget writes the file name as-is; a hand-typed one may carry the folder
+        # separator the other way round, and a leading "./" is never part of the name.
+        name = name.replace("\\", "/").lstrip("./").strip()
+        if not name:
+            continue
+        low, high = LORA_STRENGTH_RANGE
+        clamped = round(min(high, max(low, strength)), 3)
+        entry = SheetLora(file=name, strength=clamped, on=on)
+        if name in seen:
+            stack[seen[name]] = entry
+            continue
+        if len(stack) >= MAX_LORAS:
+            warnings.append(
+                f"loras: more than {MAX_LORAS} entries; the rest are ignored (one sheet is one "
+                "look - a stack this long is a mistake, not a style)."
+            )
+            break
+        seen[name] = len(stack)
+        stack.append(entry)
+    return stack
 
 
 def _parse_cell_aspect(render_raw: dict[str, Any], warnings: list[str]) -> str:
@@ -1719,6 +1824,7 @@ def parse_sheet_spec(raw: Any) -> SheetSpec:
         negative_prompt=str(data.get("negativePrompt") or data.get("negative_prompt") or "").strip(),
         task_type=str(data.get("taskType") or data.get("task_type") or "").strip(),
         refs=refs,
+        loras=_parse_loras(data.get("loras"), warnings),
         cells=cells,
         build=_parse_build(data.get("build"), warnings),
         layout=layout,

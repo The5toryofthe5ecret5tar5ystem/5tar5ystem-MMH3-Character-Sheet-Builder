@@ -290,6 +290,29 @@ assert.ok(/payload\.cells = current\.cells/.test(wiring),
 assert.ok(media.includes("def list_media") && media.includes("resolve_subfolder"),
     "the backend must list media and refuse traversal");
 assert.ok(routes.includes('BASE + "/media"'), "the media route must be registered");
+// The LoRAs tab's own two endpoints, and the wiring that reaches them: a tab whose route exists on
+// one side only draws an empty list and a "reload ComfyUI" hint nobody can act on.
+assert.ok(routes.includes('BASE + "/loras"'), "the LoRA library route must be registered");
+assert.ok(routes.includes('"lora-info"') && routes.includes('"lora-save"'),
+    "the two LoRA actions must be in the action list, or the dispatcher 400s them");
+assert.ok(wiring.includes("async function listLoras(") && wiring.includes("apiUrl(`/loras${query}`)"),
+    "the wiring must call the pack's /loras route");
+assert.ok(/loraInfo: \(body\) => loraAction\(node, "lora-info"/.test(wiring),
+    "the info hook must post the action the backend serves");
+assert.ok(/saveLoraInfo: \(body\) => loraAction\(node, "lora-save"/.test(wiring),
+    "and so must the metadata hook");
+// The panel's own limits are the node's: a stack the panel allows must be a stack the spec takes.
+{
+    const spec = read("h3_character_sheet/sheet_spec.py");
+    const jsBlock = core.slice(core.indexOf("export const MAX_LORAS"), core.indexOf("export function loraStack"));
+    const jsMax = Number(/MAX_LORAS = (\d+)/.exec(jsBlock)[1]);
+    const pyMax = Number(/MAX_LORAS = (\d+)/.exec(spec)[1]);
+    assert.equal(jsMax, pyMax, "the panel's cap on a stack must be the node's cap");
+    const jsRange = JSON.parse(/LORA_STRENGTH_RANGE = (\[[^\]]+\])/.exec(jsBlock)[1]);
+    const pyRange = (/LORA_STRENGTH_RANGE = \(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\)/.exec(spec) || [])
+        .slice(1).map(Number);
+    assert.deepEqual(jsRange, pyRange, "and the strength window must be the same window");
+}
 ok.push("reference grid: drops upload, Browse reads /media, routes registered");
 
 console.log("h3sheet_ui wiring: PASS");

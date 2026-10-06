@@ -131,19 +131,45 @@ looping, nothing to install, and the render is unaffected either way.
 
 ### LoRAs
 
-Wire a LoRA loader **between the checkpoint and the node's `model` input** - core's
-`LoraLoaderModelOnly`, rgthree's **Power Lora Loader**, or a chain of them at different
-strengths. There is nothing to switch on and no special socket to find:
+There are two ways to render a sheet through a LoRA, and they compose:
 
-```
-UNETLoader ─► LoraLoaderModelOnly (0.6) ─► Power Lora Loader ─► [ model ] MiniMax H3 Character Sheet Builder
-```
+| | Where the stack lives | Use it for |
+|---|---|---|
+| **The LoRAs tab** (this pack's own) | on the **sheet** - one list in the payload | the everyday case: a stack that covers every cell, and every board of a suite, with the file's own facts one click away |
+| **A loader node** (core's `LoraLoaderModelOnly`, rgthree's **Power Lora Loader**) | in the **graph**, wired into the node's `model` input | stacking with other node-based tooling, or a mod you already keep wired that way |
 
-The node loads no model of its own. It copies the patcher it is handed **once** (that copy is
-where the live preview hangs itself) and passes that same copy to H3's own nodes for every cell
-it builds - so the LoRA, the whole stack, and anything else already patched onto the MODEL
-(block swap, an attention backend, a patcher you built yourself) reach the sampler, in a per-cell
-sheet and in a **suite board exactly alike**: one loader covers all four boards.
+#### The LoRAs tab
+
+**LoRAs** in the rail. *+ Add LoRA* lists everything in `models/loras` (a search box filters it), and
+each row is the three things a Power Lora Loader gives you:
+
+* **a switch** - one click takes a LoRA out of the render without losing the row (its strength, its
+  notes and its hash stay);
+* **a strength** - a number box (`-4` to `4`) plus a slider. The slider's window is the file's own
+  **Strength Min / Strength Max** if you set them in the card, and `-1` to `2` otherwise;
+* **the file** - the name you gave it, or the file's stem, with the full path under it.
+
+*info* opens the card behind the row:
+
+* **the sha256** of the file (read when the card opens - it is what Civitai is looked up by);
+* **View on Civitai** / *look up by hash* - one click asks Civitai's public API for the model version
+  with that hash and shows what a browser tab would have shown you: the model and version name, the
+  type, the **base model**, the creator, the **trigger words** (click one to copy it into the
+  prompt), the tags, the description and a sample image, plus the link to the page itself;
+* **Name / Strength Min / Strength Max / Additional Notes** - your own fields, saved to
+  `user/default/h3_character_sheet/loras.json` (the LoRA file itself is never touched).
+
+**Nothing is fetched until you ask.** Opening the tab reads a folder listing and that JSON; the
+hash is read when a card is opened; Civitai is only contacted by a row's button or by *Fetch Civitai
+info*, which walks the rows that have no answer yet, one at a time, saying where it is. A machine
+with no internet renders exactly the same sheet - the card just says what could not be reached, and
+a file Civitai does not know is remembered as such instead of being asked again.
+
+**What the render does with it.** The node applies the stack itself, once, before it builds anything
+- so every cell of a per-cell sheet and every board of a suite samples through the same patched
+model (the report names what was applied: `LoRA stack: Minimax/x.safetensors@0.8`). A file that is
+not in `models/loras` is a **warning in the report and in the panel** (`not installed` on the row),
+never a failed render, and the rest of the stack still applies.
 
 Two caveats, both about the LoRA rather than the wiring:
 
@@ -156,6 +182,21 @@ Two caveats, both about the LoRA rather than the wiring:
 
 If the LoRA's own page names a checkpoint (a `fl2va` trainer, a specific hybrid), prefer that
 checkpoint: this pack renders the model you give it, whatever family it came from.
+
+#### A loader node in the graph
+
+Wire it **between the checkpoint and the node's `model` input** - core's `LoraLoaderModelOnly`,
+rgthree's **Power Lora Loader**, or a chain of them at different strengths:
+
+```
+UNETLoader ─► LoraLoaderModelOnly (0.6) ─► Power Lora Loader ─► [ model ] MiniMax H3 Character Sheet Builder
+```
+
+The node loads no model of its own. It copies the patcher it is handed **once** (that copy is
+where the live preview hangs itself) and passes that same copy to H3's own nodes, so a loader's
+patches reach the sampler in a per-cell sheet and in a **suite board exactly alike** - one loader
+covers all four boards. Both routes are the same call (`comfy.sd.load_lora_for_models`, which
+clones), so a stack in the tab plus one in the graph is simply both.
 
 ## How long it takes
 
@@ -341,8 +382,8 @@ suite alone.
 The panel is laid out the way the **preview-first studio** direction was drawn (proposal B in
 `web/mockups/panel-redesign-proposals.html`):
 
-* **A narrow icon rail down the left** holds the seven tabs - References, Cells, Prompt, Results,
-  **Preview**, Settings, Help - as 17px line icons instead of a strip of words: no numeral badges
+* **A narrow icon rail down the left** holds the eight tabs - References, Cells, Prompt, Results,
+  **Preview**, **LoRAs**, Settings, Help - as 17px line icons instead of a strip of words: no numeral badges
   (they read as unread-message counters), just the icon and a tooltip naming the tab and its count,
   so the rail costs 32px of width and the panel reads as a studio rather than a form.
 * **The live stream has its own tab.** While a render works, its frames are on **Preview** at the
@@ -1362,9 +1403,19 @@ close-up, and a reference whose whole role is the eyes is not claimed for a mout
   refreshed, so re-opening the picker, changing kind or typing in the search box costs nothing:
   measured on this box, a folder view is **15ms (input) / 48ms (output)** and a cached repeat is
   **0.0ms**.
+* `GET /h3-character-sheet/loras?fresh=0|1` - the LoRAs tab's library: `{ok, items:[{file, folder,
+  label, name, strengthMin, strengthMax, notes, sha256, civitai, civitaiError, missing}], count,
+  missing, store}`. A folder listing (`models/loras`) plus the stored metadata - **no hashing and no
+  network**, which is why the tab can ask for it every time it opens. `fresh=1` skips the 15s
+  listing cache after a file was added by hand.
+* `POST /h3-character-sheet/action` with `lora-info` (`{file, fetch?, force?}`) - the sha256 of one
+  LoRA, and with `fetch=1` Civitai's answer for it (hash lookup, no key, 20s timeout, run in a
+  worker thread so a slow network cannot stall a render; a 404 or an offline box is an answer, not
+  a 500). With `lora-save` (`{file, name?, strengthMin?, strengthMax?, notes?}`) it stores the
+  card's own fields in `user/default/h3_character_sheet/loras.json`.
 * `POST /h3-character-sheet/action` - `list` | `plan` | `compose` | `pick` |
   `delete` | `clear` | `names` | `blur` | `presets` | `save-preset` | `delete-preset` |
-  `knobs` (`blur` = face blur one reference and answer with the copy's URL, `presets` = the
+  `knobs` | `lora-info` | `lora-save` (`blur` = face blur one reference and answer with the copy's URL, `presets` = the
   recommended whole-node settings **plus the user's saved ones** (each entry carries
   `custom`), `save-preset` = store the settings the panel sent as one of those (answering
   with the whole list), `delete-preset` = remove one by id (a built-in is refused with a

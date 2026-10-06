@@ -1272,5 +1272,189 @@ ok.push("blur area: face / face + hair / whole head, as chips under the picture,
     ok.push("the media picker opens on one folder, and only walks the tree when asked");
 }
 
+// --- LoRAs: a stack on the sheet, with the facts a user needs about each file ------------------
+// The tab is the pack's own answer to "use a Power Lora Loader": same three things per row
+// (on/off, a strength, the file), except the stack lives on the SHEET - so it covers every cell
+// and every board - and each row can say what Civitai knows about the file behind it. What is
+// pinned here is the payload contract (one list, normalized) and the three interactions that make
+// it usable: toggle, strength, and the info card.
+{
+    assert.ok(core.TAB_ORDER.includes("loras"), "the rail has a LoRAs tab");
+    assert.ok(core.RAIL_ICONS.loras, "with an icon of its own");
+    assert.ok(core.PANEL_CSS.includes(".mmx-lora__card"), "and styles for its card");
+
+    // Normalizing: no file, a repeat, a strength that is not a number, a value past the window.
+    const stack = core.loraStack({
+        loras: [
+            { file: "Minimax/alpha.safetensors", strength: 0.8 },
+            { file: "Minimax/alpha.safetensors", strength: 2 },      // the same file twice
+            { file: "", strength: 1 },                                // nothing to load
+            { file: "beta.safetensors", strength: "hot" },            // not a number
+            { file: "gamma.safetensors", strength: 99, on: false },   // clamped, switched off
+        ],
+    });
+    assert.deepEqual(stack, [
+        { file: "Minimax/alpha.safetensors", strength: 0.8, on: true },
+        { file: "beta.safetensors", strength: core.DEFAULT_LORA_STRENGTH, on: true },
+        { file: "gamma.safetensors", strength: core.LORA_STRENGTH_RANGE[1], on: false },
+    ], "the payload carries one entry per file, clamped and deduped");
+    assert.deepEqual(core.loraStack({}), [], "no stack is an empty stack");
+    assert.equal(core.loraStack({ loras: [{ file: ".\\Minimax\\alpha.safetensors" }] })[0].file,
+        "Minimax/alpha.safetensors", "a hand-typed path is the name folder_paths would look up");
+    // The payload writes it only when there is one: a sheet with no LoRAs says nothing.
+    assert.equal("loras" in core.toPayload({ ...state, loras: [] }), false);
+    assert.deepEqual(core.toPayload({ ...state, loras: stack }).loras, stack,
+        "and the stack travels as the tab shows it");
+}
+
+{
+    const seen = [];
+    const infos = [];
+    const saves = [];
+    const library = {
+        ok: true,
+        items: [
+            { file: "Minimax/alpha.safetensors", folder: "Minimax", label: "alpha", name: "Alpha v2",
+              strengthMin: 0.2, strengthMax: 1.4, notes: "8 steps", sha256: "", civitai: null,
+              civitaiError: "" },
+            { file: "MM-H3 - Fingering v4.safetensors", folder: "", label: "MM-H3 - Fingering v4",
+              name: "", strengthMin: null, strengthMax: null, notes: "", sha256: "", civitai: null,
+              civitaiError: "" },
+        ],
+        count: 2,
+        store: "/user/default/h3_character_sheet/loras.json",
+    };
+    const loraState = core.readState("");
+    loraState.loras = [
+        { file: "Minimax/alpha.safetensors", strength: 0.8, on: true },
+        { file: "Minimax/alpha.safetensors", strength: 1.5, on: true },   // the repeat is dropped
+        { file: "gone.safetensors", strength: 1, on: true },              // not in the library
+    ];
+    const loraPanel = core.buildSheetInterface({
+        state: loraState,
+        hooks: {
+            stateChanged: (payload) => seen.push(payload),
+            status: () => {},
+            listLoras: async (request) => { seen.push({ list: request }); return library; },
+            loraInfo: async (request) => {
+                infos.push(request);
+                return {
+                    ok: true, file: request.file, sha256: "a".repeat(64), fetched: Boolean(request.fetch),
+                    civitai: request.fetch
+                        ? { found: true, modelName: "Fingering - Minimax H3", versionName: "v4",
+                            type: "LORA", baseModel: "MiniMax H3", creator: "someone",
+                            url: "https://civitai.com/models/7654321?modelVersionId=1234567",
+                            trainedWords: ["fingering"], tags: ["lora"], description: "close-ups",
+                            images: [] }
+                        : null,
+                };
+            },
+            saveLoraInfo: async (request) => {
+                saves.push(request);
+                return { ok: true, file: request.file, record: { name: "Alpha v2", strengthMin: 0.2,
+                    strengthMax: 1.4, notes: "8 steps", sha256: "", civitai: null, civitaiError: "" } };
+            },
+        },
+    });
+    await tick();
+    loraPanel.showTab("loras");
+    await tick();
+    assert.equal(seen.find((entry) => entry.list)?.list?.fresh, false,
+        "opening the tab reads models/loras (not a fresh walk: the folder listing is cached)");
+    const rows = () => [...loraPanel.container.querySelectorAll(".mmx-lora")];
+    assert.equal(rows().length, 2, "one row per LoRA on the sheet, the repeat collapsed");
+    assert.equal(rows()[0].dataset.file, "Minimax/alpha.safetensors");
+    assert.match(rows()[0].textContent, /Alpha v2/, "the stored name is the row's title");
+    assert.match(rows()[1].textContent, /not installed/, "a file the library does not have says so");
+    // The strip of the flow: the row is a switch, a strength and the file.
+    const box = rows()[0].querySelector('[data-action="lora-toggle"]');
+    const number = rows()[0].querySelector('[data-action="lora-strength"]');
+    const slider = rows()[0].querySelector('[data-action="lora-slider"]');
+    assert.ok(box && number && slider, "each row carries on/off and a strength");
+    assert.equal(box.checked, true);
+    assert.equal(number.value, "0.8", "the row shows the strength the sheet will render with");
+    assert.equal(slider.value, "0.8");
+    assert.equal(slider.min, "0.2", "the slider's window is the file's own saved range");
+    assert.equal(slider.max, "1.4");
+    box.checked = false;
+    box.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    assert.equal(seen.filter((entry) => entry.loras).at(-1).loras[0].on, false,
+        "turning a row off is written to the payload (the file stays, the render skips it)");
+    // Strength: the slider writes the box, and the payload follows (debounced, so a drag is one edit).
+    slider.value = "1.2";
+    slider.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    assert.equal(number.value, "1.2", "the two controls are one value");
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    assert.equal(seen.filter((entry) => entry.loras).at(-1).loras[0].strength, 1.2);
+    number.value = "9";
+    number.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    assert.equal(number.value, String(core.LORA_STRENGTH_RANGE[1]),
+        "the box takes the payload's own window and clamps what it is handed");
+
+    // The card: its hash is read on open, Civitai only when asked, and the fields save.
+    click(rows()[0].querySelector('[data-action="lora-info"]'));
+    await tick();
+    assert.equal(infos.at(-1).file, "Minimax/alpha.safetensors");
+    assert.equal(infos.at(-1).fetch, false, "opening the card hashes the file, it does not call Civitai");
+    let card = loraPanel.container.querySelector(".mmx-lora__card");
+    assert.ok(card, "the card opens under its own row");
+    assert.match(card.textContent, new RegExp("a".repeat(64)), "and shows the digest");
+    assert.match(card.textContent, /look up by hash/, "Civitai is a button, never automatic");
+    click(card.querySelector('[data-action="lora-civitai"]'));
+    await tick();
+    assert.equal(infos.at(-1).fetch, true, "asking is what fetches");
+    card = loraPanel.container.querySelector(".mmx-lora__card");
+    assert.match(card.textContent, /Fingering - Minimax H3/);
+    assert.match(card.textContent, /base MiniMax H3 · by someone/);
+    const link = card.querySelector('[data-action="lora-civitai-link"]');
+    assert.equal(link.getAttribute("href"),
+        "https://civitai.com/models/7654321?modelVersionId=1234567",
+        "the card links to the version the hash names");
+    assert.equal(link.getAttribute("target"), "_blank", "in a new tab: the canvas is unsaved work");
+    assert.ok(card.querySelectorAll('[data-action="lora-word"]').length >= 1,
+        "the trigger words are there to copy into the prompt");
+    card.querySelector('[data-field="notes"]').value = "8 steps, 0.8";
+    click(card.querySelector('[data-action="lora-save"]'));
+    await tick();
+    assert.deepEqual(saves.at(-1), {
+        file: "Minimax/alpha.safetensors", name: "Alpha v2", strengthMin: "0.2",
+        strengthMax: "1.4", notes: "8 steps, 0.8",
+    }, "Save posts exactly the four fields the user owns");
+
+    // Add: the picker lists what is not on the sheet yet, and a click puts it on.
+    click(loraPanel.container.querySelector('[data-action="lora-add"]'));
+    await tick();
+    const picks = [...loraPanel.container.querySelectorAll(".mmx-loras__pick")];
+    assert.deepEqual(picks.map((pick) => pick.dataset.file), ["MM-H3 - Fingering v4.safetensors"],
+        "the picker offers what the sheet does not already have");
+    click(picks[0]);
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    const added = seen.filter((entry) => entry.loras).at(-1).loras;
+    assert.deepEqual(added.map((entry) => entry.file),
+        ["Minimax/alpha.safetensors", "gone.safetensors", "MM-H3 - Fingering v4.safetensors"],
+        "the new LoRA joins the stack at full strength");
+    assert.equal(added.at(-1).strength, core.DEFAULT_LORA_STRENGTH);
+    // Remove: the only way a row leaves the sheet.
+    const before = rows().length;
+    click(rows()[0].querySelector('[data-action="lora-remove"]'));
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    assert.equal(rows().length, before - 1, "the row is gone");
+    assert.equal(seen.filter((entry) => entry.loras).at(-1).loras
+        .some((entry) => entry.file === "Minimax/alpha.safetensors"), false);
+
+    // A workflow load brings its own stack across (and the rows follow it).
+    loraPanel.setState(core.readState(JSON.stringify({
+        version: 1, loras: [{ file: "Minimax/alpha.safetensors", strength: 0.5, on: true }],
+    })));
+    loraPanel.showTab("loras");
+    await tick();
+    assert.deepEqual(loraPanel.loras, [{ file: "Minimax/alpha.safetensors", strength: 0.5, on: true }],
+        "a loaded workflow's LoRAs are the panel's LoRAs");
+    assert.equal(rows().length, 1);
+    loraPanel.dispose();
+    ok.push("LoRAs: a stack on the sheet - toggle, strength, Civitai card and the payload contract");
+}
+
 console.log("h3sheet_core: PASS");
 for (const line of ok) console.log(" -", line);

@@ -38,12 +38,13 @@ error, because the panel polls this while a render is still starting.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
 from aiohttp import web
 
-from . import face_blur, sheet_media, sheet_spec, sheet_store, user_presets
+from . import face_blur, lora_library, sheet_media, sheet_spec, sheet_store, user_presets
 from . import planner as sheet_planner
 from .help import help_payload
 from .knobs import KNOB_COLUMNS, KNOB_GROUPS, knob_groups, knob_list
@@ -56,7 +57,7 @@ log = logging.getLogger("ComfyUI-MiniMax-H3-Motion-Director.sheet.routes")
 BASE = "/h3-character-sheet"
 _ACTIONS = (
     "list", "plan", "presets", "save-preset", "delete-preset", "knobs", "help", "blur", "gallery",
-    "compose", "pick", "delete", "clear", "names",
+    "compose", "pick", "delete", "clear", "names", "lora-info", "lora-save",
 )
 
 
@@ -172,6 +173,47 @@ async def sheet_media_list(request):
     return web.json_response(payload, status=200 if payload.get("ok") else 404)
 
 
+async def sheet_lora_list(request):
+    """The LoRAs this install has, plus whatever metadata is already stored for them.
+
+    A folder listing and a JSON read: no hashing, no network, nothing that can be slow. The panel
+    asks for it when the LoRAs tab opens and when the user refreshes, and the per-file work (the
+    sha256, the Civitai lookup) happens only when a row asks for it - see the ``lora-info`` action.
+    """
+    payload = lora_library.listing(fresh=_flag(request.rel_url.query.get("fresh"), False))
+    return web.json_response(payload, status=200 if payload.get("ok") else 404)
+
+
+async def _lora_info(body: dict[str, Any]) -> web.Response:
+    """Hash one LoRA - and, when asked, ask Civitai about it.
+
+    Both halves read the file or the network, so they run in a worker thread: a 300MB LoRA hash (or
+    a 20s Civitai timeout) must not block the event loop the render is streaming through.
+    """
+    file = str(body.get("file") or "").strip()
+    if not file:
+        return _json_error("lora-info needs a 'file'.")
+    fetch = _flag(body.get("fetch"), False)
+    force = _flag(body.get("force"), False)
+    loop = asyncio.get_running_loop()
+    try:
+        answer = await loop.run_in_executor(
+            None,
+            (lambda: lora_library.fetch_info(file, force=force)) if fetch
+            else (lambda: lora_library.file_hash(file, force=force)),
+        )
+    except Exception as exc:  # noqa: BLE001 - a bad file is an answer, not a 500
+        return web.json_response(
+            {"ok": False, "action": "lora-info", "file": file, "error": str(exc)}, status=400
+        )
+    if not fetch:
+        # One shape for the panel's row either way: hashing alone is "no Civitai answer yet",
+        # which is a state the card draws, not a missing key it has to guess about.
+        answer.setdefault("civitai", None)
+    status = 200 if answer.get("ok") else 400
+    return web.json_response({**answer, "action": "lora-info", "fetched": fetch}, status=status)
+
+
 async def sheet_action(request):
     try:
         body = await request.json()
@@ -255,6 +297,23 @@ async def sheet_action(request):
         # does the same work itself (see face_blur.blur_reference_plan); this exists so
         # the panel can show the result before any GPU time is spent on it.
         return _blur_response(body)
+    if action == "lora-info":
+        return await _lora_info(body)
+    if action == "lora-save":
+        # The fields the panel owns for one LoRA: the name it shows, the strength range its
+        # slider offers, and the user's own notes. Stored in the user directory (see
+        # lora_library.store_path) - the file itself is never touched.
+        result = lora_library.save_metadata(
+            body.get("file"),
+            {
+                key: body[key]
+                for key in ("name", "strengthMin", "strengthMax", "notes")
+                if key in body
+            },
+        )
+        return web.json_response(
+            {**result, "action": "lora-save"}, status=200 if result.get("ok") else 400
+        )
 
     try:
         store = _store(body)
@@ -486,6 +545,7 @@ def register_sheet_routes(routes) -> None:
     """Register the character-sheet endpoints (idempotent per process)."""
     _route(routes, "GET", BASE, sheet_list)
     _route(routes, "GET", BASE + "/media", sheet_media_list)
+    _route(routes, "GET", BASE + "/loras", sheet_lora_list)
     _route(routes, "POST", BASE + "/action", sheet_action)
 
 

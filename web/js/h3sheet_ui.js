@@ -27,7 +27,7 @@ import {
     NODE_WIDTH,
     REF_GROUPS,
     enforceWidgetWidth,
-} from "./h3sheet_core.mjs?boot=h3sheet_v86";
+} from "./h3sheet_core.mjs?boot=h3sheet_v87";
 
 const CLASS = "MiniMaxH3CharacterSheet";
 const DOM_WIDGET = "h3_character_sheet_ui";
@@ -69,6 +69,30 @@ async function sheetAction(node, body) {
         throw new Error(data?.error || `HTTP ${response.status}`);
     }
     return data;
+}
+
+/**
+ * The LoRAs tab's own two calls: the library, and the per-file info.
+ *
+ * Both are posted/read directly rather than through ``sheetAction``, for the same reason the
+ * preset store is: a LoRA that is not installed, or a hash Civitai does not know, is an ANSWER
+ * that has to reach the card as a sentence - ``sheetAction`` would turn it into "HTTP 400".
+ */
+async function listLoras(node, fresh = false) {
+    const query = `?fresh=${fresh ? "1" : "0"}&node_id=${encodeURIComponent(node.id ?? "")}`;
+    const response = await api.fetchApi(apiUrl(`/loras${query}`), { cache: "no-store" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok && data?.ok !== false) throw new Error(data?.error || `HTTP ${response.status}`);
+    return data;
+}
+
+async function loraAction(node, action, body = {}) {
+    const response = await api.fetchApi(apiUrl("/action"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, action, node_id: node.id }),
+    });
+    return response.json().catch(() => ({ ok: false, error: `HTTP ${response.status}` }));
 }
 
 async function listSheet(node, board = "") {
@@ -382,6 +406,15 @@ function mountPanel(node) {
         // The guide + which model files this install actually has (help.py). One request,
         // no GPU: the check is a folder listing.
         listHelp: () => sheetAction(node, { action: "help" }),
+        // The LoRAs tab's library: models/loras plus whatever metadata is stored for each file
+        // (lora_library.listing). A folder listing and a JSON read - no hashing, no network.
+        listLoras: ({ fresh = false } = {}) => listLoras(node, fresh),
+        // Hash one LoRA - and, when the row asks for it, ask Civitai about it. Posted directly
+        // like the preset store: "not in models/loras" and "Civitai has no model version with
+        // this hash" are ANSWERS the card shows, not HTTP errors.
+        loraInfo: (body) => loraAction(node, "lora-info", body),
+        /** The fields the card owns: name, the range its slider offers, and notes. */
+        saveLoraInfo: (body) => loraAction(node, "lora-save", body),
         /** The values on the node right now, so the settings fields never guess. */
         readWidgets: (names) => readWidgets(node, names),
         /** Take the node's own knob rows away (or give them back), leaving the values. */

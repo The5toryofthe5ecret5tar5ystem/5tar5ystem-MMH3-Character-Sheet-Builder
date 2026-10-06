@@ -137,10 +137,10 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         ),
         note=(
             "Any H3 ref2va checkpoint renders. The presets' 8 steps are for a TURBO build - "
-            "with a plain checkpoint raise the step count to 20-30. LoRAs belong here too: "
-            "wire a Lora Loader between this checkpoint and the node's model input and every "
-            "cell of every board renders through it (see the LoRA bullet in *Getting a good "
-            "sheet*)."
+            "with a plain checkpoint raise the step count to 20-30. LoRAs belong here too: put "
+            "them in the **LoRAs** tab (one stack for the whole sheet), or wire a Lora Loader "
+            "between this checkpoint and the node's model input - see *LoRAs (the tab, and the "
+            "loader)*."
         ),
     ),
     Requirement(
@@ -454,6 +454,39 @@ SECTIONS: tuple[HelpSection, ...] = (
         ),
     ),
     HelpSection(
+        id="loras",
+        title="LoRAs (the tab, and the loader)",
+        intro=(
+            "A sheet renders through the LoRAs you give it, and there are two ways to give it "
+            "some. They compose - a stack in the tab plus a loader wired into the graph is just "
+            "both - and neither one needs the other."
+        ),
+        bullets=(
+            "**The LoRAs tab** is the pack's own stack. *+ Add LoRA* lists `models/loras`; each row "
+            "is a switch (off keeps the row, the render skips it), a strength (number box plus a "
+            "slider) and the file. The stack lives on the SHEET, so one list covers every cell - "
+            "and every board of a suite.",
+            "**What is behind a file**: *info* opens the card and reads its sha256, then *look up "
+            "by hash* asks Civitai's public API for the model version with that hash: the name, the "
+            "base model, the creator, the trigger words (click to copy), the tags, the description "
+            "and the link to the page. Nothing is fetched until you ask - *Fetch Civitai info* "
+            "walks the rows that have no answer yet, one at a time.",
+            "**Your own fields**: Name, Strength Min/Max and Additional Notes are kept in "
+            "`user/default/h3_character_sheet/loras.json` (never in the LoRA file). The strengths "
+            "are what the row's slider offers, so a LoRA that wants 0.4-0.9 gets a slider that "
+            "says so.",
+            "**A loader node also works**: core's *LoraLoaderModelOnly* or rgthree's *Power Lora "
+            "Loader* wired between the checkpoint and this node's `model` input. The node loads no "
+            "model of its own - it copies the patcher it is handed once (the live preview hangs "
+            "itself there) - so the patches reach every cell, and every board.",
+            "**A missing file is a warning, not a failure**: the row says *not installed* and the "
+            "report names it; the rest of the stack still applies.",
+            "**An identity LoRA fights an identity reference** - the sheet already conditions on "
+            "your pictures. Keep it at 0.4-0.6 and check the first cell rather than removing it. "
+            "On a TURBO checkpoint do not add a turbo LoRA on top (see *Getting a good sheet*).",
+        ),
+    ),
+    HelpSection(
         id="tips",
         title="Getting a good sheet",
         bullets=(
@@ -480,13 +513,13 @@ SECTIONS: tuple[HelpSection, ...] = (
             "the render wires, so an unchecked tile takes no number.",
             "**10Eros' own advice**: with a TURBO file, do not also load a turbo LoRA, and "
             "skip cache/Spectrum nodes on reference (ref2va) runs - they cost accuracy.",
-            "**LoRAs**: wire any LoRA loader - core's *LoraLoaderModelOnly*, rgthree's "
-            "*Power Lora Loader*, or a chain of them at different strengths - between the "
-            "checkpoint and the node's **model** input. Nothing to switch on: this pack "
-            "never loads a model of its own, so the patches on the MODEL you hand it reach "
-            "H3's sampler as-is and apply to every cell, and to every board of a suite. "
-            "Keep an identity LoRA's strength low (0.4-0.6) when the sheet is also fed an "
-            "identity reference - the two otherwise argue about the face.",
+            "**LoRAs**: the **LoRAs** tab holds a stack of its own - one list that covers every "
+            "cell, and every board of a suite, with a switch, a strength, and the file's Civitai "
+            "info one click away. See *LoRAs (the tab, and the loader)*. A loader node wired into "
+            "the **model** input (core's *LoraLoaderModelOnly*, rgthree's *Power Lora Loader*, or "
+            "a chain of them) still works and composes with it. Keep an identity LoRA at 0.4-0.6 "
+            "when the sheet is also fed an identity reference - the two otherwise argue about the "
+            "face.",
             "**Checkpoints**: a model page often carries several numbered builds of the "
             "same hybrid, and each one is a full checkpoint. Take the build the page itself "
             "points at - a saved workflow keeps loading whatever file it was saved with, "

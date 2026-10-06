@@ -54,6 +54,7 @@ from ..planner import (
     work_summary,
 )
 from ..name_tokens import expand_tokens, has_tokens
+from ..lora_library import apply_stack as apply_lora_stack
 from ..preview_stream import EVENT as PREVIEW_EVENT
 from ..preview_stream import attach_sheet_preview
 from ..sheet_plan import drop_empty_payload_warning, plan_payload
@@ -684,8 +685,10 @@ class MiniMaxH3CharacterSheet(io.ComfyNode):
                     multiline=True,
                     tooltip=(
                         "Sheet payload authored by the in-node panel: references with "
-                        "their roles and the cell list. The panel is the authoring "
-                        "surface; leave it empty for a headless run."
+                        "their roles, the cell list, and the LoRA stack the LoRAs tab "
+                        "edits (the node applies that stack to the model before it builds "
+                        "anything, so every cell and every board renders through it). The "
+                        "panel is the authoring surface; leave it empty for a headless run."
                     ),
                 ),
                 io.String.Input("output_name", default="character_sheet", tooltip=(
@@ -959,6 +962,20 @@ class MiniMaxH3CharacterSheet(io.ComfyNode):
                     "one-pass sheet writes no clips - each cell's clip comes from the per-cell "
                     "pass (export clips)."
                 )
+
+        # The LoRAs tab's stack, applied HERE - once, before either expansion builds - so every
+        # cell of a sheet and every board of a suite samples through the same patched model. It is
+        # the same call core's own LoRA loaders make (the patcher is cloned, never mutated), so a
+        # loader wired into `model` composes with it instead of fighting it; and a file this
+        # install does not have is a warning to the panel rather than a failed render.
+        if spec.loras:
+            model, lora_lines, lora_warnings = apply_lora_stack(model, spec.loras)
+            spec.notes.extend(lora_lines)
+            spec.warnings.extend(lora_warnings)
+            for line in lora_lines:
+                log.info("Character sheet: %s", line)
+            for line in lora_warnings:
+                log.warning("Character sheet: %s", line)
 
         if spec.render.suite:
             # A SUITE (see suite.py): several sheets for one character - a hero sheet, an

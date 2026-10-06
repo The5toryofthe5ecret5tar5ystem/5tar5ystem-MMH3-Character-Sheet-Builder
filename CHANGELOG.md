@@ -409,6 +409,24 @@ mean.)*
   `model` tooltip, the node description, the Help tab (the checkpoint requirement plus a *Getting a
   good sheet* bullet) and a new **LoRAs** section in the README all spell out the wiring and the
   one caveat that matters: an identity LoRA fights an identity reference, so keep it at 0.4-0.6.
+* **A LoRAs tab, with the stack on the SHEET.** The loader route above puts the stack in the graph,
+  where the panel cannot see it and a suite needs it wired on every board. Now the stack is data -
+  `payload.loras`, authored by a tab of its own - and the node applies it once, before either
+  expansion builds, so every cell and every board of a suite samples through the same patched model.
+  Each row is the three things a Power Lora Loader gives you, plus the reading a browser tab would
+  have cost: a **switch** (off keeps the row, the render skips it), a **strength** (number box
+  `-4`..`4` and a slider whose window is the file's own saved range), the **file**, and an info card
+  with the file's **sha256**, its **Civitai** model version looked up by hash (name, base model,
+  creator, trigger words - click to copy, tags, description, sample image, page link) and the user's
+  own **Name / Strength Min / Strength Max / Additional Notes**, stored in
+  `user/default/h3_character_sheet/loras.json`. Nothing is fetched until asked: opening the card
+  reads the hash, *Fetch Civitai info* walks the rows that have no answer yet one at a time, a file
+  Civitai does not know is remembered as such, an offline box renders exactly the same sheet, and a
+  file that is not in `models/loras` is a warning on the row and in the report rather than a lost
+  render. New: `lora_library.py` (listing, cached hashing, Civitai lookup, the metadata store,
+  `apply_stack`), `GET /h3-character-sheet/loras`, the `lora-info` / `lora-save` actions,
+  `MAX_LORAS` + `SheetLora` in `sheet_spec.py`, `tests/test_sheet_loras.py` (25 tests, no network)
+  and a LoRAs block in the panel's jsdom suite.
 
 ### Fixed
 

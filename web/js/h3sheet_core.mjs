@@ -232,6 +232,10 @@ export const RAIL_ICONS = {
     // Two sliders.
     settings: '<path d="M4 8.5h16M4 15.5h16"/><circle cx="9.4" cy="8.5" r="2"/>'
         + '<circle cx="14.6" cy="15.5" r="2"/>',
+    // Three stacked plates: a stack of something applied to everything below it.
+    loras: '<path d="M12 4.2l7.4 3.6-7.4 3.6-7.4-3.6z"/>'
+        + '<path d="M4.6 12.2l7.4 3.6 7.4-3.6"/>'
+        + '<path d="M4.6 16.2l7.4 3.6 7.4-3.6"/>',
     // A question, in a circle.
     help: '<circle cx="12" cy="12" r="8.4"/>'
         + '<path d="M9.9 9.8a2.3 2.3 0 1 1 3 2.2c-.8.3-1.1.8-1.1 1.6"/>'
@@ -250,6 +254,7 @@ const TAB_TITLES = {
     references: "References",
     cells: "Cells",
     prompts: "Prompt",
+    loras: "LoRAs",
     results: "Results",
     preview: "Preview",
     settings: "Settings",
@@ -257,8 +262,10 @@ const TAB_TITLES = {
 };
 
 //: The rail's order. Preview sits after Results: it is what you watch while a run works, and it
-//: comes after the thing that run is producing.
-export const TAB_ORDER = ["references", "cells", "prompts", "results", "preview", "settings", "help"];
+//: comes after the thing that run is producing. LoRAs sits with the settings: it is a decision
+//: about how the sheet renders, not a step in building it - but a whole tab of its own, because a
+//: stack is a list of rows and a stack of rows is not a knob.
+export const TAB_ORDER = ["references", "cells", "prompts", "results", "preview", "loras", "settings", "help"];
 
 //: How much of the head a blur covers. Mirrors BLUR_SCOPES in sheet_spec.py: the
 //: detector reports the face box, so hair and headwear are covered by growing the patch
@@ -274,6 +281,44 @@ export const DEFAULT_BLUR_SCOPE = "hair";
 export function blurScope(state) {
     const value = String(state?.blurScope ?? state?.blur_scope ?? "").trim().toLowerCase();
     return BLUR_SCOPES.some(([key]) => key === value) ? value : DEFAULT_BLUR_SCOPE;
+}
+
+//: The sheet's own LoRA stack (the LoRAs tab). One list on the SHEET rather than a loader node in
+//: the graph: the node applies it to the model every cell samples through, so one list covers
+//: every cell and every board of a suite. Mirrors MAX_LORAS / LORA_STRENGTH_RANGE in sheet_spec.py.
+export const MAX_LORAS = 16;
+export const DEFAULT_LORA_STRENGTH = 1;
+export const LORA_STRENGTH_RANGE = [-4, 4];
+export const LORA_STRENGTH_STEP = 0.05;
+//: The slider's window when a file has no range saved for it. A LoRA's useful band is usually
+//: 0..1.5 and occasionally negative (pushing one the other way is a real technique), so the
+//: slider offers -1..2 while the number box takes the payload's own ±4.
+export const DEFAULT_LORA_SLIDER_RANGE = [-1, 2];
+
+/**
+ * The sheet's LoRA stack: the payload's list, normalized into what the node will apply.
+ *
+ * The panel is the authoring surface, so this is where a bad row is dropped rather than sent:
+ * no file, a repeat of a file already in the stack, a strength that is not a number, an entry
+ * past the cap. Whatever survives is exactly what ``payload.loras`` carries and what the tab
+ * draws - one list, one place it is decided.
+ */
+export function loraStack(state) {
+    const raw = Array.isArray(state?.loras) ? state.loras : [];
+    const out = [];
+    const seen = new Set();
+    for (const item of raw) {
+        const file = String(item?.file || "").trim().replace(/\\/g, "/").replace(/^\.\//, "");
+        if (!file || seen.has(file)) continue;
+        const value = Number(item?.strength);
+        const strength = Number.isFinite(value)
+            ? Math.min(LORA_STRENGTH_RANGE[1], Math.max(LORA_STRENGTH_RANGE[0], value))
+            : DEFAULT_LORA_STRENGTH;
+        seen.add(file);
+        out.push({ file, strength, on: item?.on !== false });
+        if (out.length >= MAX_LORAS) break;
+    }
+    return out;
 }
 
 //: Latent continuation between cells. Mirrors CONTINUITY_* in sheet_spec.py: each cell is
@@ -369,7 +414,7 @@ export const KNOB_COLUMNS = 3;
  * build makes that a glance instead of an investigation; a test keeps it in step with the
  * import, so bumping one without the other fails the suite rather than confusing a user.
  */
-export const PANEL_BUILD = "h3sheet_v86";
+export const PANEL_BUILD = "h3sheet_v87";
 
 /**
  * The pack's own sample render, shown in a fresh node's reference canvas (see canvasCard).
@@ -2105,6 +2150,82 @@ button.mmx-badge:hover { border-color: var(--mmx-tick); }
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px;
   background: rgba(255, 255, 255, 0.07); border-radius: 3px; padding: 0 3px;
 }
+/* LoRAs tab: a stack of rows on the LEFT of nothing - a list, a picker, and one card that opens
+   where its row is. The row is the control (switch, strength, remove); the card is the reading
+   (hash, Civitai, the fields the user owns), which is why it opens in place instead of in a
+   side panel that would fight the node's width. */
+.mmx-loras { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; }
+.mmx-loras__head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mmx-loras__note { font-size: 10px; }
+.mmx-loras__search { width: 170px; }
+.mmx-loras__rows { display: flex; flex-direction: column; gap: 4px; }
+.mmx-loras__empty {
+  display: flex; flex-direction: column; gap: 3px; padding: 10px;
+  border: 1px dashed var(--mmx-line); border-radius: 8px;
+}
+.mmx-lora { border: 1px solid var(--mmx-line); border-radius: 6px; padding: 5px 6px; background: var(--mmx-card-2); }
+.mmx-lora.is-off { opacity: .55; }
+.mmx-lora__head { display: flex; align-items: center; gap: 6px; }
+.mmx-lora__title {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0;
+  flex: 1 1 auto; background: none; border: 0; padding: 0; color: var(--mmx-fg); cursor: pointer;
+  text-align: left;
+}
+.mmx-lora__name { font-size: 11px; font-weight: 620; }
+.mmx-lora__file {
+  font-size: 9px; color: var(--mmx-muted); max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mmx-lora__strength { display: flex; align-items: center; gap: 4px; flex: 0 0 190px; }
+.mmx-lora__number { width: 58px; }
+.mmx-lora__slider { flex: 1 1 auto; min-width: 60px; }
+.mmx-lora__actions { display: flex; align-items: center; gap: 2px; }
+.mmx-lora__remove { color: var(--mmx-danger); }
+.mmx-lora__card {
+  display: flex; flex-direction: column; gap: 4px; margin-top: 5px; padding-top: 5px;
+  border-top: 1px dashed var(--mmx-line);
+}
+.mmx-lora__facts { display: flex; flex-direction: column; gap: 2px; }
+.mmx-lora__fact { display: grid; grid-template-columns: 96px 1fr auto; align-items: center; gap: 4px; }
+.mmx-lora__factlabel { font-size: 9px; color: var(--mmx-muted); text-transform: uppercase; letter-spacing: .03em; }
+.mmx-lora__factvalue, .mmx-lora__hash {
+  font-size: 9px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all; color: var(--mmx-fg);
+}
+.mmx-lora__link { font-size: 10px; color: var(--mmx-accent); text-decoration: none; }
+.mmx-lora__link:hover { text-decoration: underline; }
+.mmx-lora__error { font-size: 9px; color: var(--mmx-danger); }
+.mmx-lora__civitai {
+  display: flex; flex-direction: column; gap: 3px; padding: 5px 6px; border-radius: 6px;
+  border: 1px solid var(--mmx-line); background: rgba(255, 255, 255, 0.03);
+}
+.mmx-lora__civitaititle { font-size: 11px; font-weight: 620; }
+.mmx-lora__words { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
+.mmx-lora__tags { font-size: 9px; }
+.mmx-lora__desc { font-size: 10px; color: var(--mmx-muted); max-height: 84px; overflow: auto; }
+.mmx-lora__shot { max-width: 180px; max-height: 180px; border-radius: 5px; align-self: flex-start; }
+.mmx-lora__fields { display: flex; flex-direction: column; gap: 3px; }
+.mmx-lora__field { display: grid; grid-template-columns: 96px 1fr; align-items: center; gap: 4px; }
+.mmx-lora__field .mmx-input { width: 100%; box-sizing: border-box; }
+.mmx-lora__notes { font-size: 10px; font-family: inherit; resize: vertical; }
+.mmx-lora__saverow { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+.mmx-chip--tiny { font-size: 9px; padding: 0 4px; }
+.mmx-badge--warn { color: var(--mmx-danger); border-color: rgba(214, 92, 92, .55); }
+.mmx-loras__browser {
+  display: flex; flex-direction: column; gap: 4px; padding: 5px;
+  border: 1px solid var(--mmx-line); border-radius: 6px; background: rgba(255, 255, 255, 0.02);
+}
+.mmx-loras__picklist { display: flex; flex-direction: column; gap: 2px; max-height: 200px; overflow: auto; }
+.mmx-loras__pick {
+  display: grid; grid-template-columns: 1fr auto; gap: 1px 6px; text-align: left;
+  background: none; border: 0; border-radius: 4px; padding: 3px 4px; color: var(--mmx-fg); cursor: pointer;
+}
+.mmx-loras__pick:hover { background: rgba(255, 255, 255, 0.06); }
+.mmx-loras__pickname { font-size: 10px; font-weight: 600; }
+.mmx-loras__pickfile {
+  grid-column: 1; font-size: 9px; color: var(--mmx-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 `;
 
 // --------------------------------------------------------------------------- //
@@ -2304,6 +2425,9 @@ export function readState(payload) {
     }
     return {
         refs,
+        // The sheet's own LoRA stack (the LoRAs tab): a workflow that renders through a stack has
+        // to bring it back, or the next queue would render a different model than the one saved.
+        loras: loraStack({ loras: data.loras }),
         prompt: String(data.globalPrompt || data.global_prompt || ""),
         negative: String(data.negativePrompt || data.negative_prompt || ""),
         background: String(data.render?.background || "neutral"),
@@ -2406,6 +2530,11 @@ export function toPayload(state) {
         suiteBoard: String(state.suiteBoard || ""),
         followBoard: followBoard(state),
     };
+    // The sheet's own LoRA stack (the LoRAs tab). Written only when there is one: a payload that
+    // says "loras: []" and one that says nothing mean the same thing, and the shorter one is
+    // honest about a sheet that uses no LoRAs.
+    const loras = loraStack(state);
+    if (loras.length) payload.loras = loras;
     for (const group of REF_GROUPS) {
         payload.refs[group.key] = (state.refs?.[group.key] || [])
             .filter((item) => item && item.file)
@@ -3501,9 +3630,13 @@ export function buildSheetInterface({ state, hooks = {} }) {
         }
         if (!parts.length) parts.push("Custom suite");
         const cells = state.cells?.length || presetCellCount(layout || entry || {});
+        // A LoRA stack changes what renders as much as the layout does, and it has no card on the
+        // rail: the one line the panel has for "this is what will render" says it.
+        const stack = loraStack(state).filter((row) => row.on);
         presetHint.textContent = `${parts.join(" · ")} — ${sheets
             ? `${sheets} sheet${sheets === 1 ? "" : "s"}`
-            : `${cells} cell(s)`}`;
+            : `${cells} cell(s)`}${stack.length
+            ? ` + ${stack.length} LoRA${stack.length === 1 ? "" : "s"}` : ""}`;
     }
 
     /** Widget name -> what a person calls it, for the "changes:" line. */
@@ -4373,6 +4506,576 @@ export function buildSheetInterface({ state, hooks = {} }) {
         }
     }
 
+    // ----------------------------------------------------------------- LoRAs
+    // The sheet's own LoRA stack: one list on the SHEET instead of a loader node in the graph, so
+    // every cell - and every board of a suite - samples through the same patches (the node applies
+    // it; see lora_library.apply_stack). A loader wired into the model input still works and the
+    // two compose, which is exactly why this tab exists: the stack belongs to the sheet, and the
+    // two things a user needs about a file - how hard it should be pushed, and what it even is -
+    // should not need a second program.
+    const lorasPane = element("div", { className: "mmx-pane mmx-pane--loras mmx-loras" });
+    const lorasHead = element("div", { className: "mmx-loras__head" });
+    const lorasNote = element("div", { className: "mmx-muted mmx-loras__note" });
+    const lorasHost = element("div", { className: "mmx-loras__rows" });
+    const loraPickBox = element("div", { className: "mmx-loras__browser" }, { display: "none" });
+    const loraPickList = element("div", { className: "mmx-loras__picklist" });
+    loraPickBox.append(loraPickList);
+    lorasPane.append(lorasHead, lorasNote, lorasHost, loraPickBox);
+
+    //: The served library (file -> record): what models/loras holds, plus whatever metadata is
+    //: already stored for each file. Fetched once when the tab opens, and on demand after that.
+    let loraLibrary = new Map();
+    let loraLibraryNote = "reading models/loras...";
+    //: Which row is talking to the backend right now ("" = idle), so the tab can say so.
+    let loraBusy = "";
+    //: The card that is expanded, as a file name: it survives a re-render, because refreshing the
+    //: library or toggling a row must not close what the user is reading.
+    let openLoraCard = "";
+    let loraPickQuery = "";
+    let loraPickOpen = false;
+    let loraSaveTimer = null;
+
+    /** The library's record for one file, or null when this install does not have it. */
+    function loraRecord(file) {
+        return loraLibrary.get(String(file || "")) || null;
+    }
+
+    /** A file's name without its folder or extension - the fallback label. */
+    function loraStem(file) {
+        const base = String(file || "").split("/").pop() || "";
+        return base.replace(/\.(safetensors|ckpt|pt|sft)$/i, "");
+    }
+
+    function loraTitle(entry) {
+        const record = loraRecord(entry.file);
+        return String(record?.name || record?.label || loraStem(entry.file) || entry.file);
+    }
+
+    function clampLoraStrength(value) {
+        const number = Number(value);
+        if (!Number.isFinite(number)) return DEFAULT_LORA_STRENGTH;
+        const clamped = Math.min(LORA_STRENGTH_RANGE[1], Math.max(LORA_STRENGTH_RANGE[0], number));
+        return Math.round(clamped * 1000) / 1000;
+    }
+
+    /** The slider's window for one file: its saved range, else the tab's default. */
+    function loraSliderRange(file) {
+        const record = loraRecord(file);
+        const low = Number(record?.strengthMin);
+        const high = Number(record?.strengthMax);
+        if (Number.isFinite(low) && Number.isFinite(high) && high > low) return [low, high];
+        return DEFAULT_LORA_SLIDER_RANGE;
+    }
+
+    /** Persist on a short delay: dragging a strength slider is one edit, not thirty. */
+    function scheduleLoraSave() {
+        clearTimeout(loraSaveTimer);
+        loraSaveTimer = setTimeout(() => {
+            loraSaveTimer = null;
+            persist();
+        }, 250);
+    }
+
+    function addLora(file) {
+        const name = String(file || "").trim();
+        if (!name) return;
+        const stack = loraStack(state);
+        if (stack.some((entry) => entry.file === name)) {
+            notify(`${loraStem(name)} is already on the sheet`);
+            return;
+        }
+        if (stack.length >= MAX_LORAS) {
+            notify(`a sheet takes ${MAX_LORAS} LoRAs - that is the cap`);
+            return;
+        }
+        stack.push({ file: name, strength: DEFAULT_LORA_STRENGTH, on: true });
+        state.loras = stack;
+        openLoraCard = name;
+        persist();
+        renderLoras();
+        notify(`LoRA added: ${loraStem(name)} (applies to every cell)`);
+    }
+
+    function removeLora(file) {
+        state.loras = loraStack(state).filter((entry) => entry.file !== file);
+        if (openLoraCard === file) openLoraCard = "";
+        persist();
+        renderLoras();
+        notify(`LoRA removed: ${loraStem(file)}`);
+    }
+
+    function toggleLoraCard(file) {
+        openLoraCard = openLoraCard === file ? "" : String(file);
+        renderLoras();
+        // Opening the card is the moment to learn the file's digest: it is what Civitai is asked
+        // about, and the row shows it. Cheap on a LoRA (tens of MB), and only on demand.
+        if (openLoraCard && !String(loraRecord(file)?.sha256 || "")) loraInfoFor(file, { fetch: false });
+    }
+
+    function renderLoraPicker(open = undefined) {
+        if (open !== undefined) loraPickOpen = Boolean(open);
+        loraPickBox.style.display = loraPickOpen ? "" : "none";
+        if (loraPickOpen) renderLoraPickerList();
+    }
+
+    function renderLoraPickerList() {
+        if (!loraPickOpen) return;
+        loraPickList.replaceChildren();
+        const chosen = new Set(loraStack(state).map((entry) => entry.file));
+        const query = loraPickQuery.trim().toLowerCase();
+        const items = [...loraLibrary.values()]
+            .filter((item) => !chosen.has(String(item.file || "")))
+            .filter((item) => {
+                if (!query) return true;
+                return String(item.file || "").toLowerCase().includes(query)
+                    || String(item.name || item.label || "").toLowerCase().includes(query);
+            })
+            .slice(0, 80);
+        if (!items.length) {
+            loraPickList.append(element("div", {
+                className: "mmx-muted",
+                textContent: chosen.size && !query
+                    ? "every LoRA in models/loras is already on the sheet."
+                    : "nothing matches that search.",
+            }));
+            return;
+        }
+        for (const item of items) {
+            const row = button("", () => addLora(item.file));
+            row.classList.add("mmx-loras__pick");
+            row.dataset.file = String(item.file || "");
+            row.append(
+                element("span", { className: "mmx-loras__pickname", textContent: String(item.name || item.label || loraStem(item.file)) }),
+                element("span", { className: "mmx-loras__pickfile", textContent: String(item.file || "") }),
+            );
+            if (item.civitai?.found) {
+                row.append(element("span", { className: "mmx-badge", textContent: "civitai" }));
+            }
+            loraPickList.append(row);
+        }
+    }
+
+    function renderLoras() {
+        lorasNote.textContent = loraBusy ? `working... ${loraBusy}` : loraLibraryNote;
+        lorasHost.replaceChildren();
+        const stack = loraStack(state);
+        // Adopt the normalized list as the state's own. The rows below hand the SAME objects to
+        // their switch and their slider, and `toPayload` reads the state back - so a commit is the
+        // list changing, not a copy of it. (Without this, a toggle moved an object nobody kept.)
+        state.loras = stack;
+        if (!stack.length) {
+            lorasHost.append(element("div", { className: "mmx-loras__empty" }, {}, [
+                element("span", { className: "mmx-title", textContent: "No LoRAs on this sheet." }),
+                element("span", {
+                    className: "mmx-muted",
+                    textContent: "One list here covers every cell - and every board of a suite. A "
+                        + "LoRA loader wired into the node's model input still works; the two "
+                        + "compose, so a stack here plus one in the graph is the same model.",
+                }),
+            ]));
+        }
+        for (const entry of stack) lorasHost.append(loraRow(entry));
+        renderLoraPickerList();
+    }
+
+    /** One row: on/off, its own strength, and the facts about the file behind it. */
+    function loraRow(entry) {
+        const record = loraRecord(entry.file);
+        const missing = !record || record.missing === true;
+        const row = element("div", { className: "mmx-lora" });
+        row.dataset.file = entry.file;
+        row.classList.toggle("is-off", !entry.on);
+
+        const head = element("div", { className: "mmx-lora__head" });
+        const box = switchBox(`mmx-lora-on-${loraStem(entry.file).replace(/[^a-z0-9]+/gi, "-")}`, entry.on);
+        box.classList.add("mmx-switch-box");
+        box.dataset.action = "lora-toggle";
+        box.title = entry.on ? "on - one click takes it out of the render" : "off - the row stays, the render skips it";
+        box.addEventListener("change", () => {
+            entry.on = box.checked;
+            row.classList.toggle("is-off", !entry.on);
+            box.title = entry.on ? "on - one click takes it out of the render" : "off - the row stays, the render skips it";
+            persist();
+            notify(`${loraTitle(entry)}: ${entry.on ? "on" : "off"}`);
+        });
+        head.append(box, switchTrack());
+
+        const title = button("", () => toggleLoraCard(entry.file));
+        title.classList.add("mmx-lora__title");
+        title.dataset.action = "lora-card";
+        title.title = "Show what this file is: its hash, and what Civitai has to say about it";
+        title.append(
+            element("span", { className: "mmx-lora__name", textContent: loraTitle(entry) }),
+            element("span", { className: "mmx-lora__file", textContent: entry.file }),
+        );
+        if (missing) {
+            title.append(element("span", {
+                className: "mmx-badge mmx-badge--warn",
+                textContent: "not installed",
+                title: `models/loras has no ${entry.file} - the render will skip it and say so`,
+            }));
+        }
+        head.append(title);
+
+        const strength = element("div", { className: "mmx-lora__strength" });
+        const [low, high] = loraSliderRange(entry.file);
+        const number = element("input", {
+            className: "mmx-input mmx-lora__number",
+            type: "number",
+            value: String(entry.strength),
+            step: String(LORA_STRENGTH_STEP),
+        });
+        number.min = String(LORA_STRENGTH_RANGE[0]);
+        number.max = String(LORA_STRENGTH_RANGE[1]);
+        number.dataset.action = "lora-strength";
+        number.title = `Strength - the box takes ${LORA_STRENGTH_RANGE[0]} to ${LORA_STRENGTH_RANGE[1]}`;
+        const slider = element("input", { className: "mmx-knob__slider mmx-lora__slider", type: "range" });
+        slider.min = String(low);
+        slider.max = String(high);
+        slider.step = String(LORA_STRENGTH_STEP);
+        slider.value = String(Math.min(high, Math.max(low, entry.strength)));
+        slider.dataset.action = "lora-slider";
+        slider.title = `${low} to ${high}`
+            + (record?.strengthMin != null && record?.strengthMax != null
+                ? " (this LoRA's saved range)" : " (set a range in the card to change this)");
+        const write = (raw, from) => {
+            const value = clampLoraStrength(raw);
+            entry.strength = value;
+            // Both controls end on the ACCEPTED value: a box still reading "9" while the sheet
+            // renders 4 is exactly the lie the pair is supposed to prevent. The slider is skipped
+            // only when the change came from it - writing it back mid-drag fights the pointer.
+            number.value = String(value);
+            if (from !== "slider") slider.value = String(Math.min(high, Math.max(low, value)));
+            scheduleLoraSave();
+        };
+        number.addEventListener("change", () => write(number.value, "number"));
+        slider.addEventListener("input", () => write(slider.value, "slider"));
+        strength.append(number, slider);
+        head.append(strength);
+
+        const actions = element("div", { className: "mmx-lora__actions" });
+        const info = button(openLoraCard === entry.file ? "hide" : "info", () => toggleLoraCard(entry.file));
+        info.classList.add("mmx-btn--quiet");
+        info.dataset.action = "lora-info";
+        info.title = "File, hash, Civitai, notes";
+        const remove = button("\u2715", () => removeLora(entry.file));
+        remove.classList.add("mmx-btn--quiet", "mmx-lora__remove");
+        remove.dataset.action = "lora-remove";
+        remove.title = "Take this LoRA off the sheet";
+        actions.append(info, remove);
+        head.append(actions);
+
+        row.append(head);
+        if (openLoraCard === entry.file) row.append(loraCard(entry));
+        return row;
+    }
+
+    /** The card behind a row: the file's own facts, and the fields the user owns. */
+    function loraCard(entry) {
+        const record = loraRecord(entry.file) || {};
+        const civitai = record.civitai && typeof record.civitai === "object" ? record.civitai : null;
+        const card = element("div", { className: "mmx-lora__card" });
+        card.dataset.file = entry.file;
+
+        const facts = element("div", { className: "mmx-lora__facts" });
+        const line = (label, value, extra = null) => {
+            const row = element("div", { className: "mmx-lora__fact" });
+            row.append(element("span", { className: "mmx-lora__factlabel", textContent: label }));
+            row.append(extra || element("span", { className: "mmx-lora__factvalue", textContent: value }));
+            facts.append(row);
+            return row;
+        };
+        line("File", entry.file);
+        const hash = String(record.sha256 || "");
+        if (hash) {
+            const copy = button("copy", () => {
+                const clipboard = globalThis.navigator?.clipboard;
+                if (clipboard?.writeText) {
+                    clipboard.writeText(hash).then(
+                        () => notify("sha256 copied"),
+                        () => notify("could not copy - select the hash instead"),
+                    );
+                } else {
+                    notify("this browser will not copy for the panel");
+                }
+            });
+            copy.classList.add("mmx-btn--quiet");
+            copy.dataset.action = "lora-copy-hash";
+            const value = element("span", { className: "mmx-lora__hash", textContent: hash });
+            value.title = hash;
+            line("Hash (sha256)", hash, value);
+            facts.lastChild.append(copy);
+        } else {
+            line("Hash (sha256)", loraBusy === entry.file ? "reading the file..." : "not read yet");
+        }
+        if (civitai?.found) {
+            const link = element("a", {
+                href: String(civitai.url || ""),
+                target: "_blank",
+                rel: "noreferrer noopener",
+                textContent: "View on Civitai",
+            });
+            link.classList.add("mmx-lora__link");
+            link.dataset.action = "lora-civitai-link";
+            line("Civitai", "", link);
+        } else {
+            const ask = button(civitai ? "ask again" : "look up by hash", () => loraInfoFor(entry.file, { fetch: true, force: Boolean(civitai) }));
+            ask.classList.add("mmx-btn--quiet");
+            ask.dataset.action = "lora-civitai";
+            line("Civitai", "", ask);
+        }
+        if (record.civitaiError && !civitai) {
+            facts.append(element("div", { className: "mmx-muted mmx-lora__error", textContent: String(record.civitaiError) }));
+        }
+        card.append(facts);
+
+        // The fetched answer, as a card rather than a JSON blob: the fields a user actually reads
+        // off Civitai's page before deciding how hard to push a LoRA.
+        if (civitai?.found) {
+            const summary = element("div", { className: "mmx-lora__civitai" });
+            const title = [civitai.modelName, civitai.versionName].filter(Boolean).join(" - ");
+            if (title) summary.append(element("span", { className: "mmx-lora__civitaititle", textContent: title }));
+            const meta = [
+                civitai.type ? String(civitai.type) : "",
+                civitai.baseModel ? `base ${civitai.baseModel}` : "",
+                civitai.creator ? `by ${civitai.creator}` : "",
+                civitai.nsfw ? "NSFW" : "",
+            ].filter(Boolean);
+            if (meta.length) {
+                summary.append(element("span", { className: "mmx-muted", textContent: meta.join(" \u00b7 ") }));
+            }
+            if (Array.isArray(civitai.trainedWords) && civitai.trainedWords.length) {
+                const row = element("div", { className: "mmx-lora__words" });
+                row.append(element("span", { className: "mmx-lora__factlabel", textContent: "Trigger words" }));
+                for (const word of civitai.trainedWords.slice(0, 12)) {
+                    const chip = button(String(word), () => {
+                        // The suite of words a LoRA was trained on is prompt material, and the
+                        // prompt is one tab away: copy it rather than write it somewhere clever.
+                        const clipboard = globalThis.navigator?.clipboard;
+                        if (clipboard?.writeText) {
+                            clipboard.writeText(String(word)).then(
+                                () => notify(`"${word}" copied - paste it into the prompt`),
+                                () => notify(`trigger word: ${word}`),
+                            );
+                        } else {
+                            notify(`trigger word: ${word}`);
+                        }
+                    });
+                    chip.classList.add("mmx-chip", "mmx-chip--tiny");
+                    chip.dataset.action = "lora-word";
+                    chip.title = "Copy this trigger word (it belongs in the prompt)";
+                    row.append(chip);
+                }
+                summary.append(row);
+            }
+            if (Array.isArray(civitai.tags) && civitai.tags.length) {
+                summary.append(element("span", {
+                    className: "mmx-muted mmx-lora__tags",
+                    textContent: civitai.tags.join(", "),
+                }));
+            }
+            if (civitai.description) {
+                summary.append(element("div", { className: "mmx-lora__desc", textContent: String(civitai.description) }));
+            }
+            const shot = Array.isArray(civitai.images) ? civitai.images[0] : "";
+            if (shot) {
+                const img = element("img", { className: "mmx-lora__shot", alt: "", src: viewUrl(String(shot)), loading: "lazy" });
+                img.title = "Civitai's own sample for this version";
+                summary.append(img);
+            }
+            card.append(summary);
+        }
+
+        // The fields the user owns. They live in the user directory (lora_library.store_path),
+        // never in the LoRA file, and they are what the row shows next time.
+        const fields = element("div", { className: "mmx-lora__fields" });
+        const field = (label, value, kind, key) => {
+            const wrap = element("label", { className: "mmx-lora__field" });
+            wrap.append(element("span", { className: "mmx-lora__factlabel", textContent: label }));
+            const input = kind === "notes"
+                ? element("textarea", { className: "mmx-input mmx-lora__notes", value: String(value || "") })
+                : textInput(String(value ?? ""), "", () => {}, "mmx-input mmx-lora__input");
+            input.dataset.field = key;
+            wrap.append(input);
+            fields.append(wrap);
+            return input;
+        };
+        const nameField = field("Name", record.name, "text", "name");
+        const minField = field("Strength Min", record.strengthMin ?? "", "text", "strengthMin");
+        const maxField = field("Strength Max", record.strengthMax ?? "", "text", "strengthMax");
+        const notesField = field("Additional Notes", record.notes, "notes", "notes");
+        for (const input of [minField, maxField]) {
+            input.type = "number";
+            input.step = String(LORA_STRENGTH_STEP);
+            input.placeholder = "slider range";
+        }
+        notesField.rows = 3;
+        const saveRow = element("div", { className: "mmx-lora__saverow" });
+        const save = button("Save", () => {
+            const fieldsOut = {
+                file: entry.file,
+                name: nameField.value,
+                strengthMin: minField.value,
+                strengthMax: maxField.value,
+                notes: notesField.value,
+            };
+            if (typeof hooks.saveLoraInfo !== "function") {
+                notify("saving LoRA info needs the ComfyUI routes (reload ComfyUI)");
+                return;
+            }
+            save.disabled = true;
+            Promise.resolve(hooks.saveLoraInfo(fieldsOut))
+                .then((answer) => {
+                    save.disabled = false;
+                    if (!answer || answer.ok === false) {
+                        notify(String(answer?.error || "could not save"));
+                        return;
+                    }
+                    const item = loraLibrary.get(entry.file);
+                    if (item) loraLibrary.set(entry.file, { ...item, ...(answer.record || {}) });
+                    renderLoras();
+                    notify(`saved: ${entry.file}`);
+                })
+                .catch(() => {
+                    save.disabled = false;
+                    notify("could not save the LoRA info");
+                });
+        });
+        save.classList.add("mmx-btn--primary");
+        save.dataset.action = "lora-save";
+        saveRow.append(save);
+        saveRow.append(element("span", {
+            className: "mmx-muted",
+            textContent: "name, strength range and notes live in ComfyUI's user folder - the LoRA file is never touched.",
+        }));
+        fields.append(saveRow);
+        card.append(fields);
+        return card;
+    }
+
+    /** Hash one LoRA - and, when asked, ask Civitai about it. Never blocks the tab. */
+    function loraInfoFor(file, { fetch = false, force = false } = {}) {
+        if (typeof hooks.loraInfo !== "function") {
+            notify("LoRA info needs the ComfyUI routes (reload ComfyUI)");
+            return Promise.resolve(null);
+        }
+        loraBusy = file;
+        renderLoras();
+        return Promise.resolve(hooks.loraInfo({ file, fetch, force }))
+            .then((answer) => {
+                loraBusy = "";
+                if (!answer || answer.ok === false) {
+                    notify(String(answer?.error || "could not read that LoRA"));
+                    renderLoras();
+                    return null;
+                }
+                const item = loraLibrary.get(file) || { file, folder: "", label: loraStem(file) };
+                loraLibrary.set(file, {
+                    ...item,
+                    sha256: String(answer.sha256 || item.sha256 || ""),
+                    ...(answer.civitai !== undefined ? { civitai: answer.civitai } : {}),
+                    ...(answer.civitai && answer.civitai.found
+                        ? { civitaiError: "" }
+                        : {}),
+                    ...(answer.civitai && !answer.civitai.found && answer.civitai.error
+                        ? { civitaiError: String(answer.civitai.error) }
+                        : {}),
+                });
+                renderLoras();
+                if (fetch) {
+                    const found = answer.civitai?.found;
+                    notify(found
+                        ? `Civitai: ${answer.civitai.modelName || loraStem(file)}`
+                        : `Civitai: ${answer.civitai?.error || "nothing found"}`);
+                }
+                return answer;
+            })
+            .catch(() => {
+                loraBusy = "";
+                renderLoras();
+                notify("could not read that LoRA");
+                return null;
+            });
+    }
+
+    /** Walk the rows that have no Civitai answer yet, one at a time, saying where it is. */
+    async function fetchAllLoraInfo() {
+        const pending = loraStack(state).filter((entry) => {
+            const record = loraRecord(entry.file);
+            return record && !record.civitai?.found;
+        });
+        if (!pending.length) {
+            notify("every LoRA on the sheet already has its Civitai info");
+            return;
+        }
+        notify(`asking Civitai about ${pending.length} LoRA(s)...`);
+        let done = 0;
+        for (const entry of pending) {
+            done += 1;
+            lorasNote.textContent = `Civitai ${done}/${pending.length}: ${loraStem(entry.file)}`;
+            await loraInfoFor(entry.file, { fetch: true });
+        }
+        notify(`Civitai info fetched for ${pending.length} LoRA(s)`);
+    }
+
+    const loraAddButton = button("+ Add LoRA", () => {
+        renderLoraPicker(!loraPickOpen);
+        if (loraPickOpen && !loraLibrary.size) refreshLoras();
+    });
+    loraAddButton.classList.add("mmx-btn--primary");
+    loraAddButton.dataset.action = "lora-add";
+    loraAddButton.title = "Pick from models/loras - the stack applies to every cell";
+    const loraFetchButton = button("Fetch Civitai info", () => fetchAllLoraInfo());
+    loraFetchButton.classList.add("mmx-btn--quiet");
+    loraFetchButton.dataset.action = "lora-fetch-all";
+    loraFetchButton.title = "Hash each LoRA on the sheet and ask Civitai about it, one at a time";
+    const loraRefreshButton = button("Refresh library", () => refreshLoras({ fresh: true }));
+    loraRefreshButton.classList.add("mmx-btn--quiet");
+    loraRefreshButton.dataset.action = "lora-refresh";
+    const lorasSearch = textInput("", "filter models/loras", (value) => {
+        loraPickQuery = value;
+        renderLoraPickerList();
+    }, "mmx-input mmx-loras__search");
+    lorasSearch.dataset.action = "lora-search";
+    lorasHead.append(
+        loraAddButton, loraFetchButton, loraRefreshButton,
+        element("span", {}, { flex: "1 1 auto" }),
+        lorasSearch,
+    );
+
+    /** Load the library once (and again when asked): the tab is usable the moment it opens. */
+    function refreshLoras({ fresh = false } = {}) {
+        if (typeof hooks.listLoras !== "function") {
+            loraLibraryNote = "the LoRA list needs the ComfyUI routes (reload ComfyUI).";
+            renderLoras();
+            return Promise.resolve(null);
+        }
+        loraLibraryNote = loraLibrary.size ? loraLibraryNote : "reading models/loras...";
+        return Promise.resolve(hooks.listLoras({ fresh }))
+            .then((data) => {
+                const items = Array.isArray(data?.items) ? data.items : [];
+                loraLibrary = new Map(items.map((item) => [String(item.file || ""), item]));
+                const missing = items.filter((item) => item.missing).length;
+                loraLibraryNote = items.length
+                    ? `${items.length} LoRA(s) in models/loras${missing ? ` \u00b7 ${missing} with no file on disk` : ""}`
+                    : "no LoRAs in models/loras.";
+                renderLoras();
+                return data;
+            })
+            .catch(() => {
+                loraLibraryNote = "could not read models/loras.";
+                renderLoras();
+                return null;
+            });
+    }
+
+    let lorasLoaded = false;
+    function ensureLoras() {
+        if (lorasLoaded) return;
+        lorasLoaded = true;
+        refreshLoras();
+    }
+
     // --------------------------------------------------------------- tabs
     const tabBar = element("div", { className: "mmx-tabs" });
     // The live stream is its own tab now (see `previewPane`): a render that is working has
@@ -4385,6 +5088,7 @@ export function buildSheetInterface({ state, hooks = {} }) {
         preview: previewPane,
         prompts: element("div", { className: "mmx-pane mmx-pane--prompts" }),
         results: element("div", { className: "mmx-pane mmx-pane--results mmx-results" }),
+        loras: lorasPane,
         settings: settingsPane,
         help: helpPane,
     };
@@ -4396,6 +5100,10 @@ export function buildSheetInterface({ state, hooks = {} }) {
         for (const [name, tab] of Object.entries(tabButtons)) tab.classList.toggle("is-active", name === key);
         syncColumn();
         if (key === "results") refreshResults();
+        // The LoRA tab opens on a list, and a list has to come from the install: fetch it the
+        // first time the tab is shown rather than on every panel mount (mounts are frequent, and
+        // most of them are not about LoRAs).
+        if (key === "loras") ensureLoras();
         // The prompt preview comes from the render's own planner, so it is fetched
         // rather than guessed - and it changes whenever the references or cells do.
         if (key === "cells" || key === "prompts") refreshPlan();
@@ -4488,7 +5196,7 @@ export function buildSheetInterface({ state, hooks = {} }) {
     // preview: the active pane grows to fill the stage, so the strip is the last thing in it.
     stage.append(
         panes.references, panes.cells, panes.prompts, panes.results, panes.preview,
-        panes.settings, panes.help,
+        panes.loras, panes.settings, panes.help,
     );
     const column = element("div", { className: "mmx-col" });
     // B's control column is **tab-scoped**, and that is the whole point of it: the sheet decisions
@@ -6949,6 +7657,10 @@ export function buildSheetInterface({ state, hooks = {} }) {
         syncHeaderStatus();
         const rendered = lastSheet?.counts?.rendered;
         setTabCount("results", rendered === undefined ? "" : String(rendered));
+        // The stack's size rides the LoRAs tab's tooltip, the way the reference count rides its
+        // own: a stack left on a workflow is a thing a user should be able to see from the rail.
+        const stack = loraStack(state);
+        setTabCount("loras", stack.length ? String(stack.length) : "");
         // Anything that changes what the panel shows can change how tall it is.
         hooks.layoutChanged?.();
     }
@@ -7229,6 +7941,8 @@ export function buildSheetInterface({ state, hooks = {} }) {
         state.layoutPreset = String(fresh.layoutPreset || "");
         state.suite = Array.isArray(fresh.suite) ? fresh.suite.map(String) : [];
         state.suiteBoard = String(fresh.suiteBoard || "");
+        // The sheet's LoRA stack comes with the workflow like everything else it decides.
+        state.loras = loraStack(fresh);
         // ...and whether the Results tab follows the render (its own switch shows this).
         state.followBoard = followBoard(fresh);
         // A loaded workflow can carry a different compact preference and different knob
@@ -7252,6 +7966,7 @@ export function buildSheetInterface({ state, hooks = {} }) {
         renderReferences();
         renderCells();
         renderBoards();
+        renderLoras();
         // The line under the rails is a fact about what is set now, so it belongs on this path too:
         // a loaded workflow used to keep whatever the previous one had said there.
         showHint();
@@ -7318,9 +8033,12 @@ export function buildSheetInterface({ state, hooks = {} }) {
     return {
         container, status, results, refresh, renderResults, refreshResults, refreshTabs,
         refreshPlan, refreshSettings, syncSettings, renderHelp, noteResize,
+        refreshLoras, renderLoras,
         autoRefresh: auto, openBrowse, openPreview, closeOverlay, showTab, setState, dispose,
         setRunning, setLivePreview,
         get activeTab() { return activeTab; },
+        get loraLibrary() { return loraLibrary; },
+        get loras() { return loraStack(state); },
         get overlay() { return overlay; },
         get live() { return Boolean(liveTimer); },
         get liveStrip() { return liveStrip; },
@@ -7346,4 +8064,5 @@ export function buildSheetInterface({ state, hooks = {} }) {
 export const __internals = {
     optionRow, readChecks, selectBox, textInput, kindOfTicks, draggableOnto,
     dragCell: () => dragCell,
+    loraStack,
 };
