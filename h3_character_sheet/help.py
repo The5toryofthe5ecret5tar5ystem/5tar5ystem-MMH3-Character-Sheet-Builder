@@ -462,10 +462,12 @@ SECTIONS: tuple[HelpSection, ...] = (
             "both - and neither one needs the other."
         ),
         bullets=(
-            "**The LoRAs tab** is the pack's own stack. *+ Add LoRA* lists `models/loras`; each row "
-            "is a switch (off keeps the row, the render skips it), a strength (number box plus a "
-            "slider) and the file. The stack lives on the SHEET, so one list covers every cell - "
-            "and every board of a suite.",
+            "**The LoRAs tab** is the pack's own stack. **Type in the search box** and the list under "
+            "the stack shows what matches in `models/loras` that is not on the sheet yet - click a "
+            "result and it is on the sheet, at full strength. Each row is a switch (off keeps the "
+            "row, the render skips it), a strength (number box plus a slider) and the file, and rows "
+            "start collapsed: *info* opens the card when you want to read it. The stack lives on the "
+            "SHEET, so one list covers every cell - and every board of a suite.",
             "**What is behind a file**: *info* opens the card and reads its sha256, then *look up "
             "by hash* asks Civitai's public API for the model version with that hash: the name, the "
             "base model, the creator, the trigger words (click to copy), the tags, the description "

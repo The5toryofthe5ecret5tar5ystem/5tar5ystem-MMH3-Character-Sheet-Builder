@@ -1366,12 +1366,17 @@ ok.push("blur area: face / face + hair / whole head, as chips under the picture,
     assert.equal(rows()[0].dataset.file, "Minimax/alpha.safetensors");
     assert.match(rows()[0].textContent, /Alpha v2/, "the stored name is the row's title");
     assert.match(rows()[1].textContent, /not installed/, "a file the library does not have says so");
-    // The strip of the flow: the row is a switch, a strength and the file.
+    // The switch is a LABEL around the invisible box, so the track the user sees is the control.
     const box = rows()[0].querySelector('[data-action="lora-toggle"]');
     const number = rows()[0].querySelector('[data-action="lora-strength"]');
     const slider = rows()[0].querySelector('[data-action="lora-slider"]');
     assert.ok(box && number && slider, "each row carries on/off and a strength");
     assert.equal(box.checked, true);
+    assert.equal(box.closest("label")?.className, "mmx-lora__switch",
+        "the track is inside a label, or clicking the switch does nothing (the box is 0x0)");
+    assert.equal(box.closest("label").getAttribute("for"), box.id, "and the label points at the box");
+    assert.equal(rows()[0].querySelector(".mmx-lora__card"), null,
+        "rows start COLLAPSED: adding a LoRA is not a request to read its metadata");
     assert.equal(number.value, "0.8", "the row shows the strength the sheet will render with");
     assert.equal(slider.value, "0.8");
     assert.equal(slider.min, "0.2", "the slider's window is the file's own saved range");
@@ -1422,19 +1427,34 @@ ok.push("blur area: face / face + hair / whole head, as chips under the picture,
         strengthMax: "1.4", notes: "8 steps, 0.8",
     }, "Save posts exactly the four fields the user owns");
 
-    // Add: the picker lists what is not on the sheet yet, and a click puts it on.
-    click(loraPanel.container.querySelector('[data-action="lora-add"]'));
+    // Add: the search box is the way in (no Add button, and no click needed to reveal a list).
+    const search = loraPanel.container.querySelector('[data-action="lora-search"]');
+    assert.ok(search, "the tab has a search box of its own");
+    assert.equal(loraPanel.container.querySelector('[data-action="lora-add"]'), null,
+        "there is no Add LoRA button: searching IS the add flow");
+    const browser = () => loraPanel.container.querySelector(".mmx-loras__browser");
+    assert.match(browser().textContent, /type to search/,
+        "with nothing typed the browser says what to do, and no 167-file wall");
+    search.value = "fingering";
+    search.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
     await tick();
-    const picks = [...loraPanel.container.querySelectorAll(".mmx-loras__pick")];
+    const picks = [...browser().querySelectorAll(".mmx-loras__pick")];
     assert.deepEqual(picks.map((pick) => pick.dataset.file), ["MM-H3 - Fingering v4.safetensors"],
-        "the picker offers what the sheet does not already have");
+        "typing filters the library to what is not already on the sheet");
     click(picks[0]);
     await new Promise((resolve) => setTimeout(resolve, 320));
     const added = seen.filter((entry) => entry.loras).at(-1).loras;
     assert.deepEqual(added.map((entry) => entry.file),
         ["Minimax/alpha.safetensors", "gone.safetensors", "MM-H3 - Fingering v4.safetensors"],
-        "the new LoRA joins the stack at full strength");
+        "the clicked LoRA joins the stack at full strength");
     assert.equal(added.at(-1).strength, core.DEFAULT_LORA_STRENGTH);
+    assert.equal(search.value, "", "and the search clears itself: adding one is the end of that search");
+    assert.match(browser().textContent, /type to search/, "which puts the browser list away again");
+    assert.deepEqual(
+        [...loraPanel.container.querySelectorAll(".mmx-lora__card")].map((card) => card.dataset.file),
+        ["Minimax/alpha.safetensors"],
+        "the added row arrives collapsed - only the card the user opened by hand is still open",
+    );
     // Remove: the only way a row leaves the sheet.
     const before = rows().length;
     click(rows()[0].querySelector('[data-action="lora-remove"]'));
@@ -1454,6 +1474,41 @@ ok.push("blur area: face / face + hair / whole head, as chips under the picture,
     assert.equal(rows().length, 1);
     loraPanel.dispose();
     ok.push("LoRAs: a stack on the sheet - toggle, strength, Civitai card and the payload contract");
+}
+
+// --- a pane's own CSS must never un-hide the pane ---------------------------------------------
+// The bug this pins: the LoRAs tab's container rule set `display: flex` unscoped, which ties with
+// the generic `.mmx-pane { display: none }` and - being later in the sheet - wins. The result was
+// the LoRA stack drawn on EVERY tab, the reference page included. A pane lays itself out on its
+// `is-active` rule, and that is the only place a `display` may live.
+{
+    const panes = /\n\.mmx-pane \{[^}]*\}/.exec(core.PANEL_CSS);
+    assert.ok(panes && /display:\s*none/.test(panes[0]), "an inactive pane is hidden by one rule");
+    // Every rule that targets the PANE ELEMENT and shows it must be scoped to .is-active. (A rule
+    // that only sets display: none is the hide rule itself, and .mmx-pane__scroll is a child
+    // wrapper - neither is a pane.) jsdom's getComputedStyle cannot resolve this cascade, so the
+    // sheet is read here instead: the browser is the only other thing that can, and it does not run
+    // in this suite.
+    const leaks = [];
+    for (const [, selector, body] of core.PANEL_CSS.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+        if (!/display\s*:/.test(body)) continue;
+        if (/display\s*:\s*none/.test(body) && !/display\s*:\s*(?!none)/.test(body)) continue;
+        if (/\.is-active/.test(selector) || /:not\(/.test(selector)) continue;
+        for (const part of selector.split(",").map((text) => text.trim()).filter(Boolean)) {
+            const tail = part.split(/\s+|>/).pop();
+            if (/^\.mmx-pane(--[\w-]+)?$/.test(tail)) leaks.push(part);
+        }
+    }
+    assert.deepEqual(leaks, [],
+        `a pane rule that shows the pane without .is-active un-hides it on every tab: ${leaks}`);
+    assert.ok(/\.mmx-pane--loras\.is-active \{[^}]*display:\s*flex/.test(core.PANEL_CSS),
+        "the LoRAs tab gets its column layout from its is-active rule");
+    const loraRule = /\n\.mmx-loras \{([^}]*)\}/.exec(core.PANEL_CSS);
+    assert.ok(loraRule && !/display/.test(loraRule[1]),
+        "and its own container rule stays out of the display business - that is the bug this pins");
+    assert.ok(core.PANEL_CSS.includes(".mmx-lora__switch"),
+        "the row's switch needs its label styling, or the track is not clickable");
+    ok.push("a pane's layout lives on its is-active rule (the LoRA stack cannot leak to other tabs)");
 }
 
 console.log("h3sheet_core: PASS");

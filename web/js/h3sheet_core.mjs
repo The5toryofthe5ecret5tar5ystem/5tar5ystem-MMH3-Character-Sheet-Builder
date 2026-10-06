@@ -414,7 +414,7 @@ export const KNOB_COLUMNS = 3;
  * build makes that a glance instead of an investigation; a test keeps it in step with the
  * import, so bumping one without the other fails the suite rather than confusing a user.
  */
-export const PANEL_BUILD = "h3sheet_v87";
+export const PANEL_BUILD = "h3sheet_v88";
 
 /**
  * The pack's own sample render, shown in a fresh node's reference canvas (see canvasCard).
@@ -2150,14 +2150,16 @@ button.mmx-badge:hover { border-color: var(--mmx-tick); }
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px;
   background: rgba(255, 255, 255, 0.07); border-radius: 3px; padding: 0 3px;
 }
-/* LoRAs tab: a stack of rows on the LEFT of nothing - a list, a picker, and one card that opens
-   where its row is. The row is the control (switch, strength, remove); the card is the reading
-   (hash, Civitai, the fields the user owns), which is why it opens in place instead of in a
-   side panel that would fight the node's width. */
-.mmx-loras { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; }
+/* LoRAs tab: a stack of rows plus the library you add from, in one scrolling column. NOTE the
+   display is on .mmx-pane--loras.is-active and NOT on .mmx-loras: the generic .mmx-pane rule hides
+   an inactive pane, and an unscoped "display: flex" here ties with it and - being later in this
+   sheet - WINS, which put this tab's rows on every other tab, the reference page included. Every
+   pane's own layout belongs on its is-active rule; this one is not the exception. */
+.mmx-pane--loras.is-active { display: flex; flex-direction: column; }
+.mmx-loras { gap: 6px; padding: 6px 8px; }
 .mmx-loras__head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .mmx-loras__note { font-size: 10px; }
-.mmx-loras__search { width: 170px; }
+.mmx-loras__search { flex: 1 1 170px; min-width: 120px; }
 .mmx-loras__rows { display: flex; flex-direction: column; gap: 4px; }
 .mmx-loras__empty {
   display: flex; flex-direction: column; gap: 3px; padding: 10px;
@@ -2166,6 +2168,9 @@ button.mmx-badge:hover { border-color: var(--mmx-tick); }
 .mmx-lora { border: 1px solid var(--mmx-line); border-radius: 6px; padding: 5px 6px; background: var(--mmx-card-2); }
 .mmx-lora.is-off { opacity: .55; }
 .mmx-lora__head { display: flex; align-items: center; gap: 6px; }
+/* The switch is a LABEL around the (invisible) box and its track: the track is what a user sees and
+   clicks, so without this the only clickable part of the control was a 0x0 transparent input. */
+.mmx-lora__switch { display: flex; align-items: center; flex: 0 0 auto; cursor: pointer; }
 .mmx-lora__title {
   display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0;
   flex: 1 1 auto; background: none; border: 0; padding: 0; color: var(--mmx-fg); cursor: pointer;
@@ -2214,6 +2219,9 @@ button.mmx-badge:hover { border-color: var(--mmx-tick); }
 .mmx-loras__browser {
   display: flex; flex-direction: column; gap: 4px; padding: 5px;
   border: 1px solid var(--mmx-line); border-radius: 6px; background: rgba(255, 255, 255, 0.02);
+}
+.mmx-loras__browserlabel {
+  font-size: 9px; color: var(--mmx-muted); text-transform: uppercase; letter-spacing: .03em;
 }
 .mmx-loras__picklist { display: flex; flex-direction: column; gap: 2px; max-height: 200px; overflow: auto; }
 .mmx-loras__pick {
@@ -4517,10 +4525,13 @@ export function buildSheetInterface({ state, hooks = {} }) {
     const lorasHead = element("div", { className: "mmx-loras__head" });
     const lorasNote = element("div", { className: "mmx-muted mmx-loras__note" });
     const lorasHost = element("div", { className: "mmx-loras__rows" });
-    const loraPickBox = element("div", { className: "mmx-loras__browser" }, { display: "none" });
+    // The library browser is ALWAYS in the flow, under the stack: the tab is "search a LoRA and click
+    // it", and a list that only appears after clicking *Add* made the search box look broken.
+    const loraBrowse = element("div", { className: "mmx-loras__browser" });
+    const loraBrowseLabel = element("div", { className: "mmx-loras__browserlabel" });
     const loraPickList = element("div", { className: "mmx-loras__picklist" });
-    loraPickBox.append(loraPickList);
-    lorasPane.append(lorasHead, lorasNote, lorasHost, loraPickBox);
+    loraBrowse.append(loraBrowseLabel, loraPickList);
+    lorasPane.append(lorasHead, lorasNote, lorasHost, loraBrowse);
 
     //: The served library (file -> record): what models/loras holds, plus whatever metadata is
     //: already stored for each file. Fetched once when the tab opens, and on demand after that.
@@ -4529,11 +4540,16 @@ export function buildSheetInterface({ state, hooks = {} }) {
     //: Which row is talking to the backend right now ("" = idle), so the tab can say so.
     let loraBusy = "";
     //: The card that is expanded, as a file name: it survives a re-render, because refreshing the
-    //: library or toggling a row must not close what the user is reading.
+    //: library or toggling a row must not close what the user is reading. Rows start COLLAPSED -
+    //: adding a LoRA is not a request to read its metadata.
     let openLoraCard = "";
     let loraPickQuery = "";
-    let loraPickOpen = false;
     let loraSaveTimer = null;
+    const loraSearchBox = textInput("", "search models/loras to add", (value) => {
+        loraPickQuery = value;
+        renderLoraBrowser();
+    }, "mmx-input mmx-loras__search");
+    loraSearchBox.dataset.action = "lora-search";
 
     /** The library's record for one file, or null when this install does not have it. */
     function loraRecord(file) {
@@ -4590,8 +4606,11 @@ export function buildSheetInterface({ state, hooks = {} }) {
         }
         stack.push({ file: name, strength: DEFAULT_LORA_STRENGTH, on: true });
         state.loras = stack;
-        openLoraCard = name;
         persist();
+        // Adding one is done: the search clears, which collapses the browser list (and leaves the new
+        // row collapsed too - its card is there when the user wants to read it).
+        loraPickQuery = "";
+        loraSearchBox.value = "";
         renderLoras();
         notify(`LoRA added: ${loraStem(name)} (applies to every cell)`);
     }
@@ -4612,31 +4631,37 @@ export function buildSheetInterface({ state, hooks = {} }) {
         if (openLoraCard && !String(loraRecord(file)?.sha256 || "")) loraInfoFor(file, { fetch: false });
     }
 
-    function renderLoraPicker(open = undefined) {
-        if (open !== undefined) loraPickOpen = Boolean(open);
-        loraPickBox.style.display = loraPickOpen ? "" : "none";
-        if (loraPickOpen) renderLoraPickerList();
-    }
-
-    function renderLoraPickerList() {
-        if (!loraPickOpen) return;
+    /** The library list under the stack: what matches the search, minus what is already on it. */
+    function renderLoraBrowser() {
         loraPickList.replaceChildren();
         const chosen = new Set(loraStack(state).map((entry) => entry.file));
         const query = loraPickQuery.trim().toLowerCase();
-        const items = [...loraLibrary.values()]
-            .filter((item) => !chosen.has(String(item.file || "")))
-            .filter((item) => {
-                if (!query) return true;
-                return String(item.file || "").toLowerCase().includes(query)
-                    || String(item.name || item.label || "").toLowerCase().includes(query);
-            })
+        const available = [...loraLibrary.values()]
+            .filter((item) => !chosen.has(String(item.file || "")));
+        if (!query) {
+            // No query, no wall of 167 files: the box says what it is for, and typing is the way in.
+            loraBrowseLabel.textContent = loraLibrary.size
+                ? `add from models/loras (${available.length} not on the sheet) - type to search`
+                : "add from models/loras";
+            loraPickList.append(element("div", {
+                className: "mmx-muted",
+                textContent: loraLibrary.size
+                    ? "Search above, then click a result to put it on the sheet."
+                    : "reading the LoRA folder...",
+            }));
+            return;
+        }
+        const items = available
+            .filter((item) => String(item.file || "").toLowerCase().includes(query)
+                || String(item.name || item.label || "").toLowerCase().includes(query))
             .slice(0, 80);
+        loraBrowseLabel.textContent = items.length
+            ? `${items.length} match${items.length === 1 ? "" : "es"} - click one to add it`
+            : "no match";
         if (!items.length) {
             loraPickList.append(element("div", {
                 className: "mmx-muted",
-                textContent: chosen.size && !query
-                    ? "every LoRA in models/loras is already on the sheet."
-                    : "nothing matches that search.",
+                textContent: "nothing in models/loras matches that (or it is already on the sheet).",
             }));
             return;
         }
@@ -4675,7 +4700,7 @@ export function buildSheetInterface({ state, hooks = {} }) {
             ]));
         }
         for (const entry of stack) lorasHost.append(loraRow(entry));
-        renderLoraPickerList();
+        renderLoraBrowser();
     }
 
     /** One row: on/off, its own strength, and the facts about the file behind it. */
@@ -4698,7 +4723,13 @@ export function buildSheetInterface({ state, hooks = {} }) {
             persist();
             notify(`${loraTitle(entry)}: ${entry.on ? "on" : "off"}`);
         });
-        head.append(box, switchTrack());
+        // The visible half of the switch is a <span>, and the box behind it is a 0x0 transparent
+        // input: wrapped in a label (htmlFor -> the box) the whole control is clickable, which is
+        // what makes the track behave like a switch instead of like a picture of one.
+        const switchWrap = element("label", { className: "mmx-lora__switch", htmlFor: box.id });
+        switchWrap.title = "Take this LoRA out of the render without losing the row";
+        switchWrap.append(box, switchTrack());
+        head.append(switchWrap);
 
         const title = button("", () => toggleLoraCard(entry.file));
         title.classList.add("mmx-lora__title");
@@ -5018,13 +5049,9 @@ export function buildSheetInterface({ state, hooks = {} }) {
         notify(`Civitai info fetched for ${pending.length} LoRA(s)`);
     }
 
-    const loraAddButton = button("+ Add LoRA", () => {
-        renderLoraPicker(!loraPickOpen);
-        if (loraPickOpen && !loraLibrary.size) refreshLoras();
-    });
-    loraAddButton.classList.add("mmx-btn--primary");
-    loraAddButton.dataset.action = "lora-add";
-    loraAddButton.title = "Pick from models/loras - the stack applies to every cell";
+    // The tab's own header: SEARCH first (that is the way in), then the two whole-library actions.
+    // There is no "+ Add LoRA" button: the search box and the list under it are always there, so a
+    // click on a result is the add.
     const loraFetchButton = button("Fetch Civitai info", () => fetchAllLoraInfo());
     loraFetchButton.classList.add("mmx-btn--quiet");
     loraFetchButton.dataset.action = "lora-fetch-all";
@@ -5032,15 +5059,11 @@ export function buildSheetInterface({ state, hooks = {} }) {
     const loraRefreshButton = button("Refresh library", () => refreshLoras({ fresh: true }));
     loraRefreshButton.classList.add("mmx-btn--quiet");
     loraRefreshButton.dataset.action = "lora-refresh";
-    const lorasSearch = textInput("", "filter models/loras", (value) => {
-        loraPickQuery = value;
-        renderLoraPickerList();
-    }, "mmx-input mmx-loras__search");
-    lorasSearch.dataset.action = "lora-search";
+    loraRefreshButton.title = "Re-read models/loras (after adding a file by hand)";
     lorasHead.append(
-        loraAddButton, loraFetchButton, loraRefreshButton,
+        loraSearchBox,
         element("span", {}, { flex: "1 1 auto" }),
-        lorasSearch,
+        loraFetchButton, loraRefreshButton,
     );
 
     /** Load the library once (and again when asked): the tab is usable the moment it opens. */

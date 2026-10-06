@@ -140,8 +140,10 @@ There are two ways to render a sheet through a LoRA, and they compose:
 
 #### The LoRAs tab
 
-**LoRAs** in the rail. *+ Add LoRA* lists everything in `models/loras` (a search box filters it), and
-each row is the three things a Power Lora Loader gives you:
+**LoRAs** in the rail. The **search box is the way in**: type part of a name, and the list under
+the stack shows what matches in `models/loras` that is not already on the sheet - **click one and it
+is on the sheet**, at full strength, with its row collapsed and the search cleared. Each row is the
+three things a Power Lora Loader gives you:
 
 * **a switch** - one click takes a LoRA out of the render without losing the row (its strength, its
   notes and its hash stay);
@@ -149,7 +151,8 @@ each row is the three things a Power Lora Loader gives you:
   **Strength Min / Strength Max** if you set them in the card, and `-1` to `2` otherwise;
 * **the file** - the name you gave it, or the file's stem, with the full path under it.
 
-*info* opens the card behind the row:
+*info* opens the card behind the row (rows start **collapsed** - adding a LoRA is not a request to
+read its metadata):
 
 * **the sha256** of the file (read when the card opens - it is what Civitai is looked up by);
 * **View on Civitai** / *look up by hash* - one click asks Civitai's public API for the model version

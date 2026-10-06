@@ -430,6 +430,19 @@ mean.)*
 
 ### Fixed
 
+* **The LoRAs tab no longer leaks into every other tab.** Its container rule set `display: flex`
+  unscoped, which ties with the generic `.mmx-pane { display: none }` and - being later in the sheet
+  - wins: the stack was drawn on the reference page (and every other tab) underneath the pane that
+  belonged there. A pane's layout belongs on its own `.is-active` rule, and the jsdom suite now reads
+  the sheet back to prove that no pane rule shows a pane without one.
+* **The row's switch works.** The visible half of a switch is a `<span>` and the input behind it is
+  0x0 and transparent, so a row's switch was a picture of a control until the two were wrapped in a
+  `<label for=...>` (the trick the Settings head already used). Clicking the track now flips the LoRA.
+* **The LoRA browser closes itself, and the search no longer waits for a button.** The list is part
+  of the tab: type to filter `models/loras`, click a result to add it, and adding one clears the
+  search (which puts the list away). Rows arrive **collapsed** - the card is there to be opened, not
+  opened for you.
+
 * **The node's `report` output is the report again.** The builder appended its blur and preview
   lines to the *graph link* rather than to a string, so the STRING output held a formatted Python
   list repr (`"['0.0.0.sheet_grid', 2]\n\n…"`) instead of what `report.txt` says. The extra lines
