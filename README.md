@@ -3,7 +3,7 @@
 **Repo**: [The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder](https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder) ·
 **License**: GPL-3.0 · **ComfyUI node**: `MiniMaxH3CharacterSheet` · **Installs as**: a
 custom-node folder (any name), typically `ComfyUI-H3-Character-Sheet`
-**Version**: 2.0.0 · [`CHANGELOG.md`](CHANGELOG.md) ·
+**Version**: 2.1.0 · [`CHANGELOG.md`](CHANGELOG.md) ·
 [releases](https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/releases) ·
 [`docs/civitai-post-2.0.md`](docs/civitai-post-2.0.md) is the short public writeup for 2.0
 (features, model links, install steps); [`docs/civitai-post.md`](docs/civitai-post.md) is the
@@ -1453,7 +1453,7 @@ Requirements: a ComfyUI build with the MiniMax H3 core nodes
 
 ```bash
 pip install pytest
-PYTHONPATH=/path/to/ComfyUI pytest tests/ -q      # 290+ tests, no GPU needed
+PYTHONPATH=/path/to/ComfyUI pytest tests/ -q      # 714 tests, no GPU needed
 npm install && npm test                            # panel (jsdom) + wiring tests
 ```
 

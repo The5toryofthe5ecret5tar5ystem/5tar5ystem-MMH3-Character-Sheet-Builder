@@ -4,6 +4,63 @@ All notable changes to **5tar5ystem MMH3 Character Sheet Builder** are recorded 
 follows [semantic versioning](https://semver.org/): the node type (`MiniMaxH3CharacterSheet`) and
 the payload contract are what "breaking" refers to, not the panel's layout.
 
+## [2.1.0] - 2026-10-05
+
+**LoRAs, as a thing the sheet owns.** 2.0 made the sheet one render; this one makes the model that
+renders it a decision the panel can hold - a stack of LoRAs on the sheet, with the one fact a stack
+needs per file (what it is, and what Civitai says about it) a click away.
+
+The node has always accepted a LoRA loader wired into `model`, and that still works and still
+composes. What it could not do was *see* one: the stack lived in the graph, so a suite needed it
+wired on every board and nothing in the panel could offer a strength, a toggle or a name. The stack
+is data now - `payload.loras` - authored by a tab of its own and applied once, before either
+expansion builds.
+
+### Added
+
+* **A LoRAs tab, with the stack on the SHEET.** The stack is data - `payload.loras`, authored by a
+  tab of its own - and the node applies it once, before either expansion builds, so every cell and
+  every board of a suite samples through the same patched model. The tab is search-first: type part
+  of a name, click a result from `models/loras` and it is on the sheet. Each row is the three things
+  a Power Lora Loader gives you, plus the reading a browser tab would have cost: a **switch** (off
+  keeps the row, the render skips it), a **strength** (number box `-4`..`4` and a slider whose window
+  is the file's own saved range), the **file**, and an info card with the file's **sha256**, its
+  **Civitai** model version looked up by hash (name, base model, creator, trigger words - click to
+  copy, tags, description, sample image, page link) and the user's own **Name / Strength Min /
+  Strength Max / Additional Notes**, stored in `user/default/h3_character_sheet/loras.json` - never
+  in the LoRA file. Nothing is fetched until asked: opening the card reads the hash, *Fetch Civitai
+  info* walks the rows that have no answer yet one at a time, a file Civitai does not know is
+  remembered as such, an offline box renders exactly the same sheet, and a file that is not in
+  `models/loras` is a warning on the row and in the report rather than a lost render. New:
+  `lora_library.py` (listing, cached hashing, Civitai lookup, the metadata store, `apply_stack`),
+  `GET /h3-character-sheet/loras`, the `lora-info` / `lora-save` actions, `MAX_LORAS` + `SheetLora`
+  in `sheet_spec.py`, `tests/test_sheet_loras.py` (26 tests, no network) and a LoRAs block in the
+  panel's jsdom suite.
+* **The loader route is documented as supported.** A LoRA loader wired into `model` - core's
+  `LoraLoaderModelOnly`, rgthree's Power Lora Loader, a chain of them - applies to every cell and
+  every suite board, because the node loads no model of its own: it clones the patcher it is handed
+  once (that clone is where the live preview hangs itself) and hands that same copy to H3's own
+  nodes. Verified with a same-seed A/B render (no LoRA vs a style LoRA at 1.0: 62% of pixels
+  changed) and pinned by `tests/test_sheet_lora.py`, which fails if a future change re-loads or
+  re-wraps the model. The `model` tooltip, the node description, the Help tab and the README's
+  **LoRAs** section (both routes, and the one caveat that matters: an identity LoRA fights an
+  identity reference, so keep it at 0.4-0.6) all say so.
+
+### Fixed
+
+* **The LoRAs tab no longer leaks into every other tab.** Its container rule set `display: flex`
+  unscoped, which ties with the generic `.mmx-pane { display: none }` and - being later in the sheet
+  - wins: the stack was drawn on the reference page (and every other tab) underneath the pane that
+  belonged there. A pane's layout belongs on its own `.is-active` rule, and the jsdom suite now reads
+  the sheet back to prove that no pane rule shows a pane without one.
+* **The row's switch works.** The visible half of a switch is a `<span>` and the input behind it is
+  0x0 and transparent, so a row's switch was a picture of a control until the two were wrapped in a
+  `<label for=...>` (the trick the Settings head already used). Clicking the track now flips the LoRA.
+* **The LoRA browser closes itself, and the search no longer waits for a button.** The list is part
+  of the tab: type to filter `models/loras`, click a result to add it, and adding one clears the
+  search (which puts the list away). Rows arrive **collapsed** - the card is there to be opened, not
+  opened for you.
+
 ## [2.0.0] - 2026-10-05
 
 **The visual and workflow overhaul.** A major bump, because both halves of the pack changed shape:
@@ -399,51 +456,8 @@ mean.)*
   manifest block.
 * The sheet's `report.txt` now carries the builder's own lines - reference blurs, the preview
   switches, draft mode - through the payload (`SheetSpec.notes`).
-* **LoRAs work through the `model` input, and now the pack says so.** A LoRA loader -
-  `LoraLoaderModelOnly`, rgthree's Power Lora Loader, a chain of them - wired between the
-  checkpoint and the node applies to **every cell and every suite board**, because the node never
-  loads a model of its own: it clones the patcher it is handed once (that clone is where the live
-  preview hangs itself) and passes that same copy to H3's own nodes. Proven with a same-seed A/B
-  render (no LoRA vs a style LoRA at 1.0: 62% of pixels changed) and pinned by
-  `tests/test_sheet_lora.py`, which fails if a future change re-loads or re-wraps the model. The
-  `model` tooltip, the node description, the Help tab (the checkpoint requirement plus a *Getting a
-  good sheet* bullet) and a new **LoRAs** section in the README all spell out the wiring and the
-  one caveat that matters: an identity LoRA fights an identity reference, so keep it at 0.4-0.6.
-* **A LoRAs tab, with the stack on the SHEET.** The loader route above puts the stack in the graph,
-  where the panel cannot see it and a suite needs it wired on every board. Now the stack is data -
-  `payload.loras`, authored by a tab of its own - and the node applies it once, before either
-  expansion builds, so every cell and every board of a suite samples through the same patched model.
-  Each row is the three things a Power Lora Loader gives you, plus the reading a browser tab would
-  have cost: a **switch** (off keeps the row, the render skips it), a **strength** (number box
-  `-4`..`4` and a slider whose window is the file's own saved range), the **file**, and an info card
-  with the file's **sha256**, its **Civitai** model version looked up by hash (name, base model,
-  creator, trigger words - click to copy, tags, description, sample image, page link) and the user's
-  own **Name / Strength Min / Strength Max / Additional Notes**, stored in
-  `user/default/h3_character_sheet/loras.json`. Nothing is fetched until asked: opening the card
-  reads the hash, *Fetch Civitai info* walks the rows that have no answer yet one at a time, a file
-  Civitai does not know is remembered as such, an offline box renders exactly the same sheet, and a
-  file that is not in `models/loras` is a warning on the row and in the report rather than a lost
-  render. New: `lora_library.py` (listing, cached hashing, Civitai lookup, the metadata store,
-  `apply_stack`), `GET /h3-character-sheet/loras`, the `lora-info` / `lora-save` actions,
-  `MAX_LORAS` + `SheetLora` in `sheet_spec.py`, `tests/test_sheet_loras.py` (25 tests, no network)
-  and a LoRAs block in the panel's jsdom suite.
 
-### Fixed
-
-* **The LoRAs tab no longer leaks into every other tab.** Its container rule set `display: flex`
-  unscoped, which ties with the generic `.mmx-pane { display: none }` and - being later in the sheet
-  - wins: the stack was drawn on the reference page (and every other tab) underneath the pane that
-  belonged there. A pane's layout belongs on its own `.is-active` rule, and the jsdom suite now reads
-  the sheet back to prove that no pane rule shows a pane without one.
-* **The row's switch works.** The visible half of a switch is a `<span>` and the input behind it is
-  0x0 and transparent, so a row's switch was a picture of a control until the two were wrapped in a
-  `<label for=...>` (the trick the Settings head already used). Clicking the track now flips the LoRA.
-* **The LoRA browser closes itself, and the search no longer waits for a button.** The list is part
-  of the tab: type to filter `models/loras`, click a result to add it, and adding one clears the
-  search (which puts the list away). Rows arrive **collapsed** - the card is there to be opened, not
-  opened for you.
-
-* **The node's `report` output is the report again.** The builder appended its blur and preview
+### Fixed The builder appended its blur and preview
   lines to the *graph link* rather than to a string, so the STRING output held a formatted Python
   list repr (`"['0.0.0.sheet_grid', 2]\n\n…"`) instead of what `report.txt` says. The extra lines
   now travel in the payload and the output is the compositor's own report.
