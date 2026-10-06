@@ -660,11 +660,21 @@ class MiniMaxH3CharacterSheet(io.ComfyNode):
             description=(
                 "Render a character sheet from up to 9 picture / 3 video / 3 audio "
                 "references with roles, across a matrix of views, poses and "
-                "expressions, then composite it into one sheet for ref2va workflows."
+                "expressions, then composite it into one sheet for ref2va workflows. "
+                "It loads no model of its own: whatever MODEL it is handed - LoRAs "
+                "included - is what every cell of every board samples through."
             ),
             enable_expand=True,
             inputs=[
-                io.Model.Input("model", tooltip="MiniMax H3 UNET (UNETLoader)."),
+                io.Model.Input(
+                    "model",
+                    tooltip=(
+                        "MiniMax H3 UNET. Any MODEL works, LoRAs included: wire a LoRA "
+                        "loader (LoraLoaderModelOnly, a Power Lora Loader, a stack of "
+                        "them) between the checkpoint and this input and every cell - and "
+                        "every board of a suite - renders through those patches."
+                    ),
+                ),
                 io.Vae.Input("video_vae", tooltip="MiniMax H3 video VAE."),
                 io.Vae.Input("audio_vae", tooltip="MiniMax H3 audio VAE (needed for audio references)."),
                 io.Clip.Input("clip", tooltip="CLIPLoader type=minimax (qwen3vl)."),

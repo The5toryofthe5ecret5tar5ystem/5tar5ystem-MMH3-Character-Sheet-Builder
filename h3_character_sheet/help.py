@@ -137,7 +137,10 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         ),
         note=(
             "Any H3 ref2va checkpoint renders. The presets' 8 steps are for a TURBO build - "
-            "with a plain checkpoint raise the step count to 20-30."
+            "with a plain checkpoint raise the step count to 20-30. LoRAs belong here too: "
+            "wire a Lora Loader between this checkpoint and the node's model input and every "
+            "cell of every board renders through it (see the LoRA bullet in *Getting a good "
+            "sheet*)."
         ),
     ),
     Requirement(
@@ -477,6 +480,13 @@ SECTIONS: tuple[HelpSection, ...] = (
             "the render wires, so an unchecked tile takes no number.",
             "**10Eros' own advice**: with a TURBO file, do not also load a turbo LoRA, and "
             "skip cache/Spectrum nodes on reference (ref2va) runs - they cost accuracy.",
+            "**LoRAs**: wire any LoRA loader - core's *LoraLoaderModelOnly*, rgthree's "
+            "*Power Lora Loader*, or a chain of them at different strengths - between the "
+            "checkpoint and the node's **model** input. Nothing to switch on: this pack "
+            "never loads a model of its own, so the patches on the MODEL you hand it reach "
+            "H3's sampler as-is and apply to every cell, and to every board of a suite. "
+            "Keep an identity LoRA's strength low (0.4-0.6) when the sheet is also fed an "
+            "identity reference - the two otherwise argue about the face.",
             "**Checkpoints**: a model page often carries several numbered builds of the "
             "same hybrid, and each one is a full checkpoint. Take the build the page itself "
             "points at - a saved workflow keeps loading whatever file it was saved with, "

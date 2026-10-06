@@ -129,6 +129,34 @@ ComfyUI's own H3 previews (and KJNodes' preview override) use, so you may alread
 the LIVE strip plays real frames; without it the strip falls back to latent2rgb: blurrier, still
 looping, nothing to install, and the render is unaffected either way.
 
+### LoRAs
+
+Wire a LoRA loader **between the checkpoint and the node's `model` input** - core's
+`LoraLoaderModelOnly`, rgthree's **Power Lora Loader**, or a chain of them at different
+strengths. There is nothing to switch on and no special socket to find:
+
+```
+UNETLoader ─► LoraLoaderModelOnly (0.6) ─► Power Lora Loader ─► [ model ] MiniMax H3 Character Sheet Builder
+```
+
+The node loads no model of its own. It copies the patcher it is handed **once** (that copy is
+where the live preview hangs itself) and passes that same copy to H3's own nodes for every cell
+it builds - so the LoRA, the whole stack, and anything else already patched onto the MODEL
+(block swap, an attention backend, a patcher you built yourself) reach the sampler, in a per-cell
+sheet and in a **suite board exactly alike**: one loader covers all four boards.
+
+Two caveats, both about the LoRA rather than the wiring:
+
+* **An identity LoRA and an identity reference argue.** The sheet already conditions on your
+  reference pictures; a LoRA that carries a *different* face pulls the other way. Lower it to
+  0.4-0.6 rather than removing it, and check the first cell before queueing the whole sheet.
+* **On a TURBO checkpoint, don't stack a turbo LoRA on top** - the turbo delta is baked into
+  those weights already (see *Models you need* above). Style, motion and detail LoRAs are fine;
+  keep the total strength modest and let the steps do the rest.
+
+If the LoRA's own page names a checkpoint (a `fl2va` trainer, a specific hybrid), prefer that
+checkpoint: this pack renders the model you give it, whatever family it came from.
+
 ## How long it takes
 
 Measured on an **RTX 5090 (32 GB)** with a TURBO H3 checkpoint at 8 steps and `res_multistep` / `simple` -

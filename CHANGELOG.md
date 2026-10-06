@@ -399,6 +399,16 @@ mean.)*
   manifest block.
 * The sheet's `report.txt` now carries the builder's own lines - reference blurs, the preview
   switches, draft mode - through the payload (`SheetSpec.notes`).
+* **LoRAs work through the `model` input, and now the pack says so.** A LoRA loader -
+  `LoraLoaderModelOnly`, rgthree's Power Lora Loader, a chain of them - wired between the
+  checkpoint and the node applies to **every cell and every suite board**, because the node never
+  loads a model of its own: it clones the patcher it is handed once (that clone is where the live
+  preview hangs itself) and passes that same copy to H3's own nodes. Proven with a same-seed A/B
+  render (no LoRA vs a style LoRA at 1.0: 62% of pixels changed) and pinned by
+  `tests/test_sheet_lora.py`, which fails if a future change re-loads or re-wraps the model. The
+  `model` tooltip, the node description, the Help tab (the checkpoint requirement plus a *Getting a
+  good sheet* bullet) and a new **LoRAs** section in the README all spell out the wiring and the
+  one caveat that matters: an identity LoRA fights an identity reference, so keep it at 0.4-0.6.
 
 ### Fixed
 
