@@ -463,7 +463,9 @@ SECTIONS: tuple[HelpSection, ...] = (
         ),
         bullets=(
             "**The LoRAs tab** is the pack's own stack. **Type in the search box** and the list under "
-            "the stack shows what matches in `models/loras` that is not on the sheet yet - click a "
+            "the stack shows what matches in the LoRA folders - `models/loras` plus every folder "
+            "`extra_model_paths.yaml` registers, which is where a ComfyUI Desktop install usually "
+            "keeps them - that is not on the sheet yet - click a "
             "result and it is on the sheet, at full strength. Each row is a switch (off keeps the "
             "row, the render skips it), a strength (number box plus a slider) and the file, and rows "
             "start collapsed: *info* opens the card when you want to read it. The stack lives on the "
@@ -482,7 +484,9 @@ SECTIONS: tuple[HelpSection, ...] = (
             "model of its own - it copies the patcher it is handed once (the live preview hangs "
             "itself there) - so the patches reach every cell, and every board.",
             "**A missing file is a warning, not a failure**: the row says *not installed* and the "
-            "report names it; the rest of the stack still applies.",
+            "report names it; the rest of the stack still applies. The row's *info* card shows where "
+            "the file resolved to (its **On disk** line) - and when it is missing, the folders that "
+            "were searched, so a Desktop install can be diagnosed without guessing.",
             "**An identity LoRA fights an identity reference** - the sheet already conditions on "
             "your pictures. Keep it at 0.4-0.6 and check the first cell rather than removing it. "
             "On a TURBO checkpoint do not add a turbo LoRA on top (see *Getting a good sheet*).",

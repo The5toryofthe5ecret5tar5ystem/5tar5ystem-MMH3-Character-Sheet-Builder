@@ -4,6 +4,54 @@ All notable changes to **5tar5ystem MMH3 Character Sheet Builder** are recorded 
 follows [semantic versioning](https://semver.org/): the node type (`MiniMaxH3CharacterSheet`) and
 the payload contract are what "breaking" refers to, not the panel's layout.
 
+## [2.1.2] - 2026-10-14
+
+**Two 45 degree head-and-chest framings, and one file one spelling.** The 45 degree angle is
+where an identity either holds up or collapses, so it now exists at all three camera distances.
+
+### Added
+
+* **Portrait three-quarter (45 degrees)** - `portrait-three-quarter`, the chest-up framing at 45
+degrees.
+  The angle already existed as a tight head close-up (`face-three-quarter`) and as a full body
+  (`three-quarter`); the middle distance was the gap, so a sheet could hold the face at 45 degrees
+  or the whole figure at 45 degrees, and nothing in between. It sits beside *Portrait* in the tick
+  row, carries the expression axis like the portrait does, hides what a chest-up frame cannot show
+  (the groin, legwear, shoes) and claims the **medium** camera distance - so `continuation: auto`
+  chains it with the straight-on portrait and breaks from the head close-ups, instead of handing a
+  chest-up cell to a full-body one (the scale change that cuts feet off).
+* **Head three-quarter (45 degrees)** - `face-three-quarter`, a tight close-up of the head turned 45
+  degrees with both eyes to the lens. This one was built and deployed locally but never shipped:
+  it is new to the released pack, and it is the close-up of the same angle, so it chains with
+  *Face* / *Head profile* and deliberately breaks from the full-body 45.
+* The panel's tick row and its own `FRAMING_DISTANCES` mirror are now pinned against the backend
+  tables by test, and so is "every framing has a mark that is drawn" - the mirror had drifted once
+  and nothing caught it.
+
+### Fixed
+
+**One file, one spelling.** A LoRA that IS installed could still read as `not installed` on a
+Windows install, and on a ComfyUI Desktop setup it looked like the LoRA folder was hardcoded.
+
+### Fixed
+
+* **`not installed` on a file that is installed (ComfyUI Desktop / Windows).** The LoRAs tab keys
+  its library by the name ComfyUI's own listing returns, and that listing is `os.path.relpath`-based
+  - so on Windows a LoRA in a subfolder comes back as `Minimax\alpha.safetensors` while the sheet
+  (and the panel's own stack) write `Minimax/alpha.safetensors`. The row's lookup missed, the row
+  said `not installed`, and the file's saved name, strength range and Civitai answer looked lost -
+  even though the render applied the LoRA correctly. Every name is now normalised in one place
+  (`lora_library.normalise_name`), and the panel normalises the keys it reads too, so either
+  spelling is the same file. An older store written with Windows-spelled keys is read through the
+  same normaliser and rewritten normalised on the next save, instead of showing the file twice -
+  once of them as missing.
+* **Nothing was hardcoded, but the tab could not prove it.** `listing` now answers with `roots`
+  (every folder ComfyUI searches, `extra_model_paths.yaml` included) and with each file's resolved
+  `path`; the row tooltip and the *info* card show them, so a file that really is missing names the
+  places that were looked in. The library, the hash and the render all resolve through
+  `folder_paths`, which is what makes a Desktop install's out-of-app model folder work; the README
+  and the Help tab now say so instead of just naming `models/loras`.
+
 ## [2.1.1] - 2026-10-06
 
 **Suites render again.** A one-line registration bug, and the test gap that let it through.

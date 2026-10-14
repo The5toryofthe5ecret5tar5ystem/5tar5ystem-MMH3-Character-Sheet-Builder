@@ -134,6 +134,15 @@ VIEWS: tuple[SheetOption, ...] = (
         "this is not a face-only close-up.",
     ),
     SheetOption(
+        "portrait-three-quarter",
+        "Portrait three-quarter (45 degrees)",
+        "Medium close-up framed at the chest with the head and the shoulders turned 45 "
+        "degrees from the camera, three-quarter view: the near shoulder and the near cheek "
+        "are closer to the lens, the far side sits behind them, and both eyes are still "
+        "visible, looking into the lens - the top of the head and the chest are both inside "
+        "the frame, so this is not a face-only close-up and not a full body.",
+    ),
+    SheetOption(
         "front",
         "Full body (facing forward)",
         "Full body straight on, standing, weight even, arms clear of the body. "
@@ -181,6 +190,14 @@ VIEWS: tuple[SheetOption, ...] = (
         "Tight close-up of the head in profile at exactly 90 degrees: forehead, nose, "
         "lips, chin, jaw line, ear and the hairline are all inside the frame, gaze level "
         "and away from the camera - head and neck only, not a full body.",
+    ),
+    SheetOption(
+        "face-three-quarter",
+        "Head three-quarter (45 degrees)",
+        "Tight close-up of the head turned 45 degrees from the camera, three-quarter "
+        "view: the near cheek and jaw are closer to the lens, the far cheek turns away "
+        "behind them, and both eyes are visible, looking straight into the lens - head "
+        "and shoulders only, not a full body and not a straight-on face close-up.",
     ),
     SheetOption(
         "head-back",
@@ -290,6 +307,10 @@ VIEWS: tuple[SheetOption, ...] = (
 FRAMING_DISTANCES: dict[str, str] = {
     "face": "close",
     "face-profile": "close",
+    # The same head at 45 degrees: the camera did not move back, so it chains with the
+    # other head shots - NOT with the full-body ``three-quarter`` standing view, which is
+    # the same angle from much further away.
+    "face-three-quarter": "close",
     "head-back": "close",
     "eyes": "close",
     "hands": "close",
@@ -302,6 +323,11 @@ FRAMING_DISTANCES: dict[str, str] = {
     "groin": "close",
     "butt": "close",
     "portrait": "medium",
+    # The chest-up framing at 45 degrees - the middle distance of the angle that also
+    # exists as a close-up (``face-three-quarter``) and as a full body (``three-quarter``).
+    # The camera did not move back from ``portrait``, so it chains with it and breaks from
+    # the head close-ups, which are the same angle a scale closer.
+    "portrait-three-quarter": "medium",
     "front": "full",
     "three-quarter": "full",
     "three-quarter-back": "full",
@@ -320,7 +346,7 @@ POSE_FRAMINGS: tuple[str, ...] = (
 
 #: Framings where the face is the subject: the expression is always stated. The mouth crop
 #: counts: the expression IS the subject there, which is what a mouth board is for.
-FACE_FRAMINGS: tuple[str, ...] = ("face", "portrait", "face-profile", "eyes", "mouth")
+FACE_FRAMINGS: tuple[str, ...] = ("face", "portrait", "portrait-three-quarter", "face-profile", "face-three-quarter", "eyes", "mouth")
 
 #: Framings seen from the side, where an expression only reads in profile.
 PROFILE_FRAMINGS: tuple[str, ...] = ("profile", "face-profile")
@@ -372,7 +398,9 @@ VIEW_VARIANTS: dict[str, str] = {
     "over-shoulder": "pose",
     "face": "expression",
     "portrait": "expression",
+    "portrait-three-quarter": "expression",
     "face-profile": "expression",
+    "face-three-quarter": "expression",
     "eyes": "expression",
     "head-back": "single",
     "hands": "single",
@@ -890,7 +918,7 @@ class SheetCell:
         parts = [self.view_option.label]
         if self.view in ("front", "profile", "back"):
             parts.append(self.pose_option.label)
-        if self.view in ("face", "portrait"):
+        if self.view in ("face", "portrait", "portrait-three-quarter"):
             parts.append(self.expression_option.label)
         return " · ".join(parts)
 
@@ -2021,6 +2049,8 @@ ATTRIBUTES_HIDDEN_BY_VIEW: dict[str, tuple[str, ...]] = {
     "face": _HEAD_ONLY,
     # The same head, from the side: same ceiling on what the cell can contain.
     "face-profile": _HEAD_ONLY,
+    # And the same head at 45 degrees: still a head shot, nothing below the collar.
+    "face-three-quarter": _HEAD_ONLY,
     "eyes": _HEAD_ONLY,
     # The mouth crop is a head-only framing too (nothing below the collar is in frame), and
     # it is the one head crop where the eyes are out of shot.
@@ -2033,6 +2063,9 @@ ATTRIBUTES_HIDDEN_BY_VIEW: dict[str, tuple[str, ...]] = {
     "groin": ("face", "eyes", "glasses", "hair", "shoes"),
     "butt": ("face", "eyes", "glasses", "shoes"),
     "portrait": ("intimate", "legwear", "shoes"),
+    # The same chest-up framing, 45 degrees round: it stops above the groin exactly like
+    # the straight-on portrait, so the same claims are out of shot.
+    "portrait-three-quarter": ("intimate", "legwear", "shoes"),
     # A crop of the hands shows no body, but the sleeves are in frame - so clothing stays.
     "hands": ("body", "breasts", "intimate"),
     # Waist down: no face in the shot, and the guard in cell_references keeps the

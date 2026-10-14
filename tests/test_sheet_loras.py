@@ -22,8 +22,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import sys
 import types
 import urllib.error
+from pathlib import Path
 
 import pytest
 
@@ -216,6 +218,88 @@ def test_the_listing_carries_the_metadata_and_marks_a_file_that_is_gone(loras):
     assert by_file["gone.safetensors"]["missing"] is True
     assert answer["missing"] == 1 and answer["count"] == 3
     json.dumps(answer)  # the panel parses this
+
+
+# --------------------------------------------------------------------------- #
+# one file, one spelling (a ComfyUI Desktop report: selectable but "not installed")
+# --------------------------------------------------------------------------- #
+@pytest.fixture()
+def windows_comfy(tmp_path, monkeypatch):
+    """A stand-in ``folder_paths`` that spells names the way Windows does.
+
+    ComfyUI's listing is ``os.path.relpath``-based, so on Windows a LoRA in a subfolder comes back
+    as ``Minimax\\alpha.safetensors`` - while the panel and the sheet spec write
+    ``Minimax/alpha.safetensors``. Both name the same file.
+    """
+    root = tmp_path / "models" / "loras"
+    (root / "Minimax").mkdir(parents=True)
+    (root / "Minimax" / "alpha.safetensors").write_bytes(b"a" * 1024)
+    extra = tmp_path / "shared" / "loras"  # what extra_model_paths.yaml would register
+    extra.mkdir(parents=True)
+    (extra / "beta.safetensors").write_bytes(b"b" * 512)
+
+    module = types.ModuleType("folder_paths")
+    module.get_filename_list = lambda folder: [r"Minimax\alpha.safetensors", "beta.safetensors"]
+    module.get_folder_paths = lambda folder: [str(root), str(extra)]
+
+    def get_full_path(folder, filename):
+        name = str(filename or "").replace("\\", "/")
+        for base in (root, extra):
+            candidate = base / name
+            if candidate.is_file():
+                return str(candidate)
+        return None
+
+    module.get_full_path = get_full_path
+    monkeypatch.setitem(sys.modules, "folder_paths", module)
+    monkeypatch.setattr(lib, "_list_cache", None)  # the listing is cached for 15s
+    return module
+
+
+def test_a_windows_listing_is_read_as_one_spelling(windows_comfy):
+    names = lib.lora_files(fresh=True)
+    assert names == ["beta.safetensors", "Minimax/alpha.safetensors"]
+    assert "\\" not in " ".join(names), "no name keeps the backslash ComfyUI handed over"
+    alpha = lib.lora_path(r"Minimax\alpha.safetensors")
+    assert alpha is not None and alpha.name == "alpha.safetensors", "either spelling resolves"
+    assert lib.folder_of(r"Minimax\alpha.safetensors") == "Minimax"
+    assert lib.label_for(r"Minimax\alpha.safetensors") == "alpha"
+
+
+def test_the_listing_says_where_a_file_is_and_what_was_searched(windows_comfy):
+    answer = lib.listing()
+    by_file = {item["file"]: item for item in answer["items"]}
+    assert set(by_file) == {"beta.safetensors", "Minimax/alpha.safetensors"}
+    assert by_file["Minimax/alpha.safetensors"]["path"].endswith("loras/Minimax/alpha.safetensors")
+    assert by_file["Minimax/alpha.safetensors"].get("missing") is not True
+    assert len(answer["roots"]) == 2, "every folder ComfyUI knows is named"
+    assert all(Path(root).name == "loras" for root in answer["roots"])
+
+
+def test_a_store_written_on_windows_keeps_its_metadata(windows_comfy, store):
+    # An older build stored the key the way Windows spells it: same file, so the same record.
+    store.joinpath("loras.json").write_text(json.dumps({
+        "version": 1,
+        "loras": {r"Minimax\alpha.safetensors": {"name": "Alpha (mine)", "strengthMin": 0.2}},
+    }))
+    assert lib.record_for("Minimax/alpha.safetensors")["name"] == "Alpha (mine)"
+    answer = lib.listing()
+    by_file = {item["file"]: item for item in answer["items"]}
+    assert set(by_file) == {"beta.safetensors", "Minimax/alpha.safetensors"}
+    assert by_file["Minimax/alpha.safetensors"]["name"] == "Alpha (mine)"
+    assert by_file["Minimax/alpha.safetensors"]["strengthMin"] == 0.2
+    assert answer["missing"] == 0, "one file is not listed twice, once of them as missing"
+
+
+def test_writing_back_heals_a_windows_spelled_store(windows_comfy, store):
+    store.joinpath("loras.json").write_text(json.dumps({
+        "version": 1, "loras": {r"Minimax\alpha.safetensors": {"name": "Alpha (mine)"}},
+    }))
+    lib.save_metadata("Minimax/alpha.safetensors", {"notes": "0.8 is enough"})
+    raw = json.loads(store.joinpath("loras.json").read_text())
+    assert list(raw["loras"]) == ["Minimax/alpha.safetensors"], "one key, one spelling, on disk"
+    assert raw["loras"]["Minimax/alpha.safetensors"]["name"] == "Alpha (mine)"
+    assert raw["loras"]["Minimax/alpha.safetensors"]["notes"] == "0.8 is enough"
 
 
 # --------------------------------------------------------------------------- #

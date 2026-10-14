@@ -3,7 +3,7 @@
 **Repo**: [The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder](https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder) ·
 **License**: GPL-3.0 · **ComfyUI node**: `MiniMaxH3CharacterSheet` · **Installs as**: a
 custom-node folder (any name), typically `ComfyUI-H3-Character-Sheet`
-**Version**: 2.1.1 · [`CHANGELOG.md`](CHANGELOG.md) ·
+**Version**: 2.1.2 · [`CHANGELOG.md`](CHANGELOG.md) ·
 [releases](https://github.com/The5toryofthe5ecret5tar5ystem/5tar5ystem-MMH3-Character-Sheet-Builder/releases) ·
 [`docs/civitai-post-2.0.md`](docs/civitai-post-2.0.md) is the short public writeup for 2.0
 (features, model links, install steps); [`docs/civitai-post.md`](docs/civitai-post.md) is the
@@ -173,6 +173,14 @@ a file Civitai does not know is remembered as such instead of being asked again.
 model (the report names what was applied: `LoRA stack: Minimax/x.safetensors@0.8`). A file that is
 not in `models/loras` is a **warning in the report and in the panel** (`not installed` on the row),
 never a failed render, and the rest of the stack still applies.
+
+**Where the files come from.** The tab lists what ComfyUI itself lists: the install's
+`models/loras` *and* every folder `extra_model_paths.yaml` registers, so a **ComfyUI Desktop**
+install that keeps its models outside the app folder needs no copying. Every row's *info* card
+shows the path the file resolved to, and a row that says `not installed` names the folders that
+were searched. Naming is separator-proof as well: ComfyUI hands a Windows name back with
+backslashes (`Minimax\alpha.safetensors`) while the sheet stores forward slashes, and the two
+spellings are read as the same file.
 
 Two caveats, both about the LoRA rather than the wiring:
 
@@ -591,10 +599,12 @@ setting nobody chose.
    `Cells n` and `Results n`, so the panel stays usable without scrolling through a
    wall of knobs.
 3. In **Cells** - tick views / poses / expressions and press **Build cells**:
-   * Views: face close up, portrait (chest + face), full body front, full body
+   * Views: face close up, portrait (chest + face), **portrait 3/4 (45 deg chest-up)**, full body
+     front, full body
      90 deg side, full body from behind, **3/4 front**, **3/4 back**, **full body from
      above (high angle)**, **full body from below (low angle)**, **over the shoulder**,
-     **head profile**, **back of the head and hair**, **hands**, **eyes**, **legs and
+     **head profile**, **head 3/4 (45 deg close-up)**, **back of the head and hair**,
+     **hands**, **eyes**, **legs and
      footwear**, **mouth**, **feet**, **breasts**, **groin**, **butt** - the last five are the
      detail crops, see [Detail crops](#detail-crops)
    * Poses: neutral, A-pose, T-pose, **sitting, kneeling, crouching, lying on the back,

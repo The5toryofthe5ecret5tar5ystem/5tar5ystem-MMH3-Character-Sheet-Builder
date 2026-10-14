@@ -1314,7 +1314,10 @@ ok.push("blur area: face / face + hair / whole head, as chips under the picture,
     const library = {
         ok: true,
         items: [
-            { file: "Minimax/alpha.safetensors", folder: "Minimax", label: "alpha", name: "Alpha v2",
+            // Spelled the way ComfyUI's own listing spells it on Windows (os.path.relpath), with
+            // the resolved path: the row below writes forward slashes, and the two are one file.
+            { file: "Minimax\\alpha.safetensors", folder: "Minimax", label: "alpha", name: "Alpha v2",
+              path: "C:\\ComfyUI\\models\\loras\\Minimax\\alpha.safetensors",
               strengthMin: 0.2, strengthMax: 1.4, notes: "8 steps", sha256: "", civitai: null,
               civitaiError: "" },
             { file: "MM-H3 - Fingering v4.safetensors", folder: "", label: "MM-H3 - Fingering v4",
@@ -1323,6 +1326,8 @@ ok.push("blur area: face / face + hair / whole head, as chips under the picture,
         ],
         count: 2,
         store: "/user/default/h3_character_sheet/loras.json",
+        // Every folder ComfyUI searches, extra_model_paths.yaml included.
+        roots: ["C:\\ComfyUI\\models\\loras", "D:\\shared\\models\\loras"],
     };
     const loraState = core.readState("");
     loraState.loras = [
@@ -1366,6 +1371,18 @@ ok.push("blur area: face / face + hair / whole head, as chips under the picture,
     assert.equal(rows()[0].dataset.file, "Minimax/alpha.safetensors");
     assert.match(rows()[0].textContent, /Alpha v2/, "the stored name is the row's title");
     assert.match(rows()[1].textContent, /not installed/, "a file the library does not have says so");
+    // The separator bug a ComfyUI Desktop user hit: ComfyUI's own listing spells a Windows name
+    // with backslashes while the sheet writes forward slashes. Keying the library on the raw string
+    // showed an INSTALLED file as "not installed" (and its saved name, range and Civitai answer
+    // looked lost), so every lookup goes through one normalised spelling.
+    assert.doesNotMatch(rows()[0].textContent, /not installed/,
+        "the same file spelled the other way round is installed, not missing");
+    assert.match(rows()[0].querySelector(".mmx-lora__title").title, /found at .*alpha\.safetensors/,
+        "and the row says where it actually is");
+    assert.match(rows()[1].querySelector(".mmx-badge--warn").title, /searched:/,
+        "a row that really is missing names the folders that were searched");
+    assert.match(loraPanel.container.textContent, /1 extra_model_paths folder/,
+        "the tab says how many extra model folders ComfyUI reported");
     // The switch is a LABEL around the invisible box, so the track the user sees is the control.
     const box = rows()[0].querySelector('[data-action="lora-toggle"]');
     const number = rows()[0].querySelector('[data-action="lora-strength"]');
@@ -1404,6 +1421,8 @@ ok.push("blur area: face / face + hair / whole head, as chips under the picture,
     assert.equal(infos.at(-1).fetch, false, "opening the card hashes the file, it does not call Civitai");
     let card = loraPanel.container.querySelector(".mmx-lora__card");
     assert.ok(card, "the card opens under its own row");
+    assert.match(card.textContent, /On disk/, "the card says where the file actually is");
+    assert.match(card.textContent, /Minimax\\alpha\.safetensors/, "down to the resolved path");
     assert.match(card.textContent, new RegExp("a".repeat(64)), "and shows the digest");
     assert.match(card.textContent, /look up by hash/, "Civitai is a button, never automatic");
     click(card.querySelector('[data-action="lora-civitai"]'));
@@ -1509,6 +1528,31 @@ ok.push("blur area: face / face + hair / whole head, as chips under the picture,
     assert.ok(core.PANEL_CSS.includes(".mmx-lora__switch"),
         "the row's switch needs its label styling, or the track is not clickable");
     ok.push("a pane's layout lives on its is-active rule (the LoRA stack cannot leak to other tabs)");
+}
+
+// --- every framing has a mark, and every mark is drawn ---------------------------------------
+// A framing a user cannot see is a framing they cannot tick: adding a view is two edits (the row
+// entry and its symbol), and forgetting the second leaves an empty square that reads as a glitch -
+// the same family as the white-square glyph bug. The chest-up 45 that this batch added is pinned
+// here as well, because its whole risk is claiming the wrong camera distance.
+{
+    const views = core.VIEWS.map(([key]) => key);
+    assert.equal(new Set(views).size, views.length, "a framing is in the row twice");
+    const unmarked = views.filter((key) => !core.VIEW_MARKS[key]);
+    assert.deepEqual(unmarked, [], `framings with no mark: ${unmarked}`);
+    const undrawn = [...new Set(views.map((key) => core.VIEW_MARKS[key]))]
+        .filter((id) => !core.GLYPH_SPRITE.includes(`<symbol id="${id}" `));
+    assert.deepEqual(undrawn, [], `marks with no drawing: ${undrawn}`);
+    // 45 degrees exists at three distances now; the chest-up one belongs beside the portrait and
+    // must not inherit the full-body distance (that is the hand-over that drags a cell back to a
+    // standing wide shot).
+    assert.equal(views.indexOf("portrait-three-quarter"), views.indexOf("portrait") + 1,
+        "the chest-up 45 sits beside the straight-on portrait");
+    assert.equal(core.FRAMING_DISTANCES["portrait-three-quarter"], "medium");
+    assert.equal(core.FRAMING_DISTANCES["portrait-three-quarter"],
+        core.FRAMING_DISTANCES.portrait,
+        "and it chains with the portrait, not with the head close-ups or the full body");
+    ok.push("the chest-up 45 sits with the portrait, and every framing has a mark that is drawn");
 }
 
 console.log("h3sheet_core: PASS");

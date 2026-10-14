@@ -27,6 +27,7 @@
 export const VIEWS = [
     ["face", "Face close up"],
     ["portrait", "Portrait"],
+    ["portrait-three-quarter", "Portrait 3/4"],
     ["front", "Full body front"],
     ["profile", "Full body side"],
     ["back", "Full body back"],
@@ -36,6 +37,7 @@ export const VIEWS = [
     ["low-angle", "Full body low angle"],
     ["over-shoulder", "Over the shoulder"],
     ["face-profile", "Head profile"],
+    ["face-three-quarter", "Head 3/4"],
     ["head-back", "Back of head"],
     ["hands", "Hands"],
     ["eyes", "Eyes"],
@@ -339,12 +341,32 @@ export const CONTINUITY_LABELS = [
 export const CONTINUITY_FRAMES = 5;
 
 //: Camera distance per view, mirroring FRAMING_DISTANCES in sheet_spec.py.
+//: The whole backend table, not just the original five: the panel labels a cell's
+//: continuation from here, so a view missing from this map reads as "framing changed"
+//: and disagrees with the node, which chains it.
 export const FRAMING_DISTANCES = {
     face: "close",
+    "face-profile": "close",
+    "face-three-quarter": "close",
+    "head-back": "close",
+    eyes: "close",
+    hands: "close",
+    legs: "close",
+    mouth: "close",
+    feet: "close",
+    breasts: "close",
+    groin: "close",
+    butt: "close",
     portrait: "medium",
+    "portrait-three-quarter": "medium",
     front: "full",
+    "three-quarter": "full",
+    "three-quarter-back": "full",
     profile: "full",
     back: "full",
+    "high-angle": "full",
+    "low-angle": "full",
+    "over-shoulder": "full",
 };
 
 /** How far the camera is for a view ("" when unknown - never matches another cell). */
@@ -414,7 +436,7 @@ export const KNOB_COLUMNS = 3;
  * build makes that a glance instead of an investigation; a test keeps it in step with the
  * import, so bumping one without the other fails the suite rather than confusing a user.
  */
-export const PANEL_BUILD = "h3sheet_v88";
+export const PANEL_BUILD = "h3sheet_v91";
 
 /**
  * The pack's own sample render, shown in a fresh node's reference canvas (see canvasCard).
@@ -1318,6 +1340,8 @@ export const GLYPH_SPRITE = `
 <symbol id="mk-figure-side" viewBox="0 0 32 32"><rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".55"/><circle cx="18" cy="7.5" r="2.8" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M17 10.4v8.6M17 13.6h-3.6M17 19l-2.4 8M17 19l2.4 8" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></symbol>
 <symbol id="mk-figure-back" viewBox="0 0 32 32"><rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".55"/><circle cx="16" cy="7.5" r="2.8" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M16 10.4v8.6M12.4 12.8h7.2M16 19l-2.8 8M16 19l2.8 8" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/><path d="M13.4 16.6h5.2" stroke="currentColor" stroke-width="1" opacity=".7"/></symbol>
 <symbol id="mk-head-side" viewBox="0 0 32 32"><rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".55"/><path d="M12 26c-2-2-3-5-3-9 0-5 3-9 7.5-9S23 12 23 16c0 3-1.4 5-3.6 6.4l.4 3.6Z" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="19" cy="15" r="1" fill="currentColor"/></symbol>
+<symbol id="mk-head-three-quarter" viewBox="0 0 32 32"><rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".55"/><ellipse cx="15.4" cy="16" rx="6.9" ry="9.4" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="12.6" cy="14.4" r="1" fill="currentColor"/><circle cx="18.2" cy="14.6" r="1" fill="currentColor"/><path d="M20.4 15.6c1.2.9 1.5 2 .8 3.2" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/><path d="M13.6 20.6c1.5.9 2.9.9 4.2 0" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></symbol>
+<symbol id="mk-bust-three-quarter" viewBox="0 0 32 32"><rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".55"/><ellipse cx="15.6" cy="13.2" rx="5.2" ry="6.6" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="13.3" cy="12.2" r=".9" fill="currentColor"/><circle cx="17.7" cy="12.4" r=".9" fill="currentColor"/><path d="M19.2 13.2c.9.7 1.1 1.5.5 2.4" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><path d="M12.6 17.2c1.2.7 2.4.7 3.4 0" fill="none" stroke="currentColor" stroke-width=".9" stroke-linecap="round"/><path d="M8.6 28c.7-4.7 3.6-7.4 7.3-7.4s6.6 2.7 7.3 7.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
 <symbol id="mk-head-back" viewBox="0 0 32 32"><rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".55"/><path d="M11 27c-1.6-2-2.6-5-2.6-9 0-5 3.4-9 7.6-9s7.6 4 7.6 9c0 4-1 7-2.6 9Z" fill="none" stroke="currentColor" stroke-width="1.3"/></symbol>
 <symbol id="mk-eyes" viewBox="0 0 32 32"><rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".55"/><path d="M7 16c2.5-4 5-4 7 0-2 4-4.5 4-7 0Z" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M18 16c2.5-4 5-4 7 0-2 4-4.5 4-7 0Z" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="10.5" cy="16" r="1.1" fill="currentColor"/><circle cx="21.5" cy="16" r="1.1" fill="currentColor"/></symbol>
 <symbol id="mk-mouth" viewBox="0 0 32 32"><rect x="3" y="2" width="26" height="28" rx="3" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".55"/><path d="M9 16c3.5-4.5 10.5-4.5 14 0-3.5 4.5-10.5 4.5-14 0Z" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M10.5 16h11" stroke="currentColor" stroke-width="1" opacity=".8"/></symbol>
@@ -1341,6 +1365,7 @@ export const GLYPH_SPRITE = `
 export const VIEW_MARKS = {
     face: "mk-head",
     portrait: "mk-bust",
+    "portrait-three-quarter": "mk-bust-three-quarter",
     front: "mk-figure",
     profile: "mk-figure-side",
     back: "mk-figure-back",
@@ -1350,6 +1375,7 @@ export const VIEW_MARKS = {
     "low-angle": "mk-figure",
     "over-shoulder": "mk-figure-back",
     "face-profile": "mk-head-side",
+    "face-three-quarter": "mk-head-three-quarter",
     "head-back": "mk-head-back",
     hands: "mk-hands",
     eyes: "mk-eyes",
@@ -4537,6 +4563,10 @@ export function buildSheetInterface({ state, hooks = {} }) {
     //: already stored for each file. Fetched once when the tab opens, and on demand after that.
     let loraLibrary = new Map();
     let loraLibraryNote = "reading models/loras...";
+    //: The folders ComfyUI searched, as the server named them (its own models/loras plus every
+    //: folder extra_model_paths.yaml registered). Shown when a file cannot be found: on a Desktop
+    //: install the LoRAs usually live in one of these rather than inside the app folder.
+    let loraRoots = [];
     //: Which row is talking to the backend right now ("" = idle), so the tab can say so.
     let loraBusy = "";
     //: The card that is expanded, as a file name: it survives a re-render, because refreshing the
@@ -4551,14 +4581,23 @@ export function buildSheetInterface({ state, hooks = {} }) {
     }, "mmx-input mmx-loras__search");
     loraSearchBox.dataset.action = "lora-search";
 
+    /** ONE spelling for one file. ComfyUI's listing is path-based, so on Windows it hands back
+     * ``Minimax\alpha.safetensors`` while the panel (and the sheet's payload) write
+     * ``Minimax/alpha.safetensors`` - the same file either way. Keying a lookup on the raw
+     * string is what made an installed LoRA read as "not installed", so every lookup in this
+     * tab goes through here. */
+    function loraKey(file) {
+        return String(file || "").trim().replace(/\\/g, "/").replace(/^\.\//, "");
+    }
+
     /** The library's record for one file, or null when this install does not have it. */
     function loraRecord(file) {
-        return loraLibrary.get(String(file || "")) || null;
+        return loraLibrary.get(loraKey(file)) || null;
     }
 
     /** A file's name without its folder or extension - the fallback label. */
     function loraStem(file) {
-        const base = String(file || "").split("/").pop() || "";
+        const base = loraKey(file).split("/").pop() || "";
         return base.replace(/\.(safetensors|ckpt|pt|sft)$/i, "");
     }
 
@@ -4593,7 +4632,7 @@ export function buildSheetInterface({ state, hooks = {} }) {
     }
 
     function addLora(file) {
-        const name = String(file || "").trim();
+        const name = loraKey(file);
         if (!name) return;
         const stack = loraStack(state);
         if (stack.some((entry) => entry.file === name)) {
@@ -4634,10 +4673,10 @@ export function buildSheetInterface({ state, hooks = {} }) {
     /** The library list under the stack: what matches the search, minus what is already on it. */
     function renderLoraBrowser() {
         loraPickList.replaceChildren();
-        const chosen = new Set(loraStack(state).map((entry) => entry.file));
+        const chosen = new Set(loraStack(state).map((entry) => loraKey(entry.file)));
         const query = loraPickQuery.trim().toLowerCase();
         const available = [...loraLibrary.values()]
-            .filter((item) => !chosen.has(String(item.file || "")));
+            .filter((item) => !chosen.has(loraKey(item.file)));
         if (!query) {
             // No query, no wall of 167 files: the box says what it is for, and typing is the way in.
             loraBrowseLabel.textContent = loraLibrary.size
@@ -4666,12 +4705,12 @@ export function buildSheetInterface({ state, hooks = {} }) {
             return;
         }
         for (const item of items) {
-            const row = button("", () => addLora(item.file));
+            const row = button("", () => addLora(loraKey(item.file)));
             row.classList.add("mmx-loras__pick");
-            row.dataset.file = String(item.file || "");
+            row.dataset.file = loraKey(item.file);
             row.append(
                 element("span", { className: "mmx-loras__pickname", textContent: String(item.name || item.label || loraStem(item.file)) }),
-                element("span", { className: "mmx-loras__pickfile", textContent: String(item.file || "") }),
+                element("span", { className: "mmx-loras__pickfile", textContent: loraKey(item.file) }),
             );
             if (item.civitai?.found) {
                 row.append(element("span", { className: "mmx-badge", textContent: "civitai" }));
@@ -4740,11 +4779,16 @@ export function buildSheetInterface({ state, hooks = {} }) {
             element("span", { className: "mmx-lora__file", textContent: entry.file }),
         );
         if (missing) {
+            const looked = loraRoots.length ? `\nsearched:\n${loraRoots.join("\n")}` : "";
             title.append(element("span", {
                 className: "mmx-badge mmx-badge--warn",
                 textContent: "not installed",
-                title: `models/loras has no ${entry.file} - the render will skip it and say so`,
+                title: `no ${entry.file} in models/loras, or in any folder extra_model_paths.yaml `
+                    + `adds - the render will skip it and say so.${looked}`,
             }));
+        } else if (record?.path) {
+            title.title = "Show what this file is: its hash, and what Civitai has to say about it"
+                + `\nfound at ${record.path}`;
         }
         head.append(title);
 
@@ -4803,7 +4847,9 @@ export function buildSheetInterface({ state, hooks = {} }) {
 
     /** The card behind a row: the file's own facts, and the fields the user owns. */
     function loraCard(entry) {
-        const record = loraRecord(entry.file) || {};
+        const found = loraRecord(entry.file);
+        const record = found || {};
+        const missing = !found || found.missing === true;
         const civitai = record.civitai && typeof record.civitai === "object" ? record.civitai : null;
         const card = element("div", { className: "mmx-lora__card" });
         card.dataset.file = entry.file;
@@ -4817,6 +4863,11 @@ export function buildSheetInterface({ state, hooks = {} }) {
             return row;
         };
         line("File", entry.file);
+        // Where the file actually is. On a Desktop install this is what makes "not installed"
+        // legible: the row says the file is not in the folders ComfyUI searches, and this line
+        // names the folders that were searched instead.
+        if (record.path) line("On disk", String(record.path));
+        else if (missing && loraRoots.length) line("Searched", loraRoots.join("  \u00b7  "));
         const hash = String(record.sha256 || "");
         if (hash) {
             const copy = button("copy", () => {
@@ -4962,8 +5013,8 @@ export function buildSheetInterface({ state, hooks = {} }) {
                         notify(String(answer?.error || "could not save"));
                         return;
                     }
-                    const item = loraLibrary.get(entry.file);
-                    if (item) loraLibrary.set(entry.file, { ...item, ...(answer.record || {}) });
+                    const item = loraLibrary.get(loraKey(entry.file));
+                    if (item) loraLibrary.set(loraKey(entry.file), { ...item, ...(answer.record || {}) });
                     renderLoras();
                     notify(`saved: ${entry.file}`);
                 })
@@ -5000,8 +5051,8 @@ export function buildSheetInterface({ state, hooks = {} }) {
                     renderLoras();
                     return null;
                 }
-                const item = loraLibrary.get(file) || { file, folder: "", label: loraStem(file) };
-                loraLibrary.set(file, {
+                const item = loraLibrary.get(loraKey(file)) || { file: loraKey(file), folder: "", label: loraStem(file) };
+                loraLibrary.set(loraKey(file), {
                     ...item,
                     sha256: String(answer.sha256 || item.sha256 || ""),
                     ...(answer.civitai !== undefined ? { civitai: answer.civitai } : {}),
@@ -5077,11 +5128,16 @@ export function buildSheetInterface({ state, hooks = {} }) {
         return Promise.resolve(hooks.listLoras({ fresh }))
             .then((data) => {
                 const items = Array.isArray(data?.items) ? data.items : [];
-                loraLibrary = new Map(items.map((item) => [String(item.file || ""), item]));
+                // Keyed by the NORMALISED name: a server on Windows may still spell a name with
+                // backslashes, and the row lookup must not care which one it gets.
+                loraLibrary = new Map(items.map((item) => [loraKey(item.file), item]));
+                loraRoots = Array.isArray(data?.roots) ? data.roots.map(String).filter(Boolean) : [];
                 const missing = items.filter((item) => item.missing).length;
+                const extra = loraRoots.length > 1
+                    ? ` (+${loraRoots.length - 1} extra_model_paths folder(s))` : "";
                 loraLibraryNote = items.length
-                    ? `${items.length} LoRA(s) in models/loras${missing ? ` \u00b7 ${missing} with no file on disk` : ""}`
-                    : "no LoRAs in models/loras.";
+                    ? `${items.length} LoRA(s) in models/loras${extra}${missing ? ` \u00b7 ${missing} with no file on disk` : ""}`
+                    : `no LoRAs in models/loras${extra}.`;
                 renderLoras();
                 return data;
             })

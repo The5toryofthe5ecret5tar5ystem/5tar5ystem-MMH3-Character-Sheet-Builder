@@ -10,7 +10,10 @@ the *sheet* instead of in the graph, so one list of LoRAs covers every cell and 
 
 Four jobs, and one rule for all of them - **never fail a render**:
 
-* ``lora_files()`` / ``listing()``: the installed LoRAs, straight from ComfyUI's own loras folder.
+* ``lora_files()`` / ``listing()``: the installed LoRAs, straight from ComfyUI's own listing - the
+  install's ``models/loras`` *and* every folder ``extra_model_paths.yaml`` registered, which is
+  where a ComfyUI Desktop install usually keeps them. Names are normalised to forward slashes
+  (ComfyUI hands back ``Minimax\alpha.safetensors`` on Windows) so one file has one spelling.
 * ``sha256_of()`` / ``file_hash()``: the digest Civitai looks files up by, cached in the store
   against the file's size and mtime, so it is computed once per file (a re-download re-hashes
   itself).
@@ -83,6 +86,39 @@ _list_cache: tuple[float, list[str]] | None = None
 # --------------------------------------------------------------------------- #
 # where things live
 # --------------------------------------------------------------------------- #
+def normalise_name(value: Any) -> str:
+    """One LoRA name, spelled the one way this module keys everything by.
+
+    ComfyUI's listing is ``os.path.relpath``-based, so on Windows it hands back
+    ``Minimax\\alpha.safetensors`` - while the panel and the sheet spec write ``Minimax/alpha``.
+    Both name the same file, and keying a lookup on the raw string made a file that IS installed
+    read as *not installed* (and its saved name, notes and Civitai answer look lost). A leading
+    ``./`` is never part of a name either.
+    """
+    return str(value if value is not None else "").strip().replace("\\", "/").lstrip("./").strip()
+
+
+def folder_of(value: Any) -> str:
+    """A LoRA's subfolder inside the models tree (``Minimax``), or "" for the top level."""
+    parent = str(Path(normalise_name(value)).parent).replace("\\", "/")
+    return "" if parent in (".", "/") else parent
+
+
+def lora_roots() -> list[str]:
+    """Every folder ComfyUI searches for LoRAs, in order (``extra_model_paths.yaml`` included).
+
+    The panel shows these when a file cannot be found: "not installed" is only useful next to
+    the places that were looked in, and on a Desktop install the file is usually in one of these
+    rather than inside the app's own ``models/loras``.
+    """
+    try:
+        import folder_paths  # noqa: PLC0415 - ComfyUI is not importable in every context
+
+        return [str(Path(path)) for path in folder_paths.get_folder_paths(LORA_FOLDER)]
+    except Exception:  # noqa: BLE001 - no ComfyUI: no folders to name
+        return []
+
+
 def store_path() -> Path:
     """Where the LoRA metadata lives (never raises; callers may create the parents)."""
     try:
@@ -95,7 +131,13 @@ def store_path() -> Path:
 
 
 def lora_files(*, fresh: bool = False) -> list[str]:
-    """Every installed LoRA, relative to ``models/loras`` (ComfyUI's own listing)."""
+    """Every installed LoRA, from every folder ComfyUI knows, as ``folder/name`` names.
+
+    This is ComfyUI's own listing (``folder_paths.get_filename_list``), so the install's
+    ``models/loras`` and every root from ``extra_model_paths.yaml`` are in it - the pack never
+    invents a folder. Names are normalised (see :func:`normalise_name`), which is also what keeps
+    one file from appearing twice on a Windows install.
+    """
     global _list_cache
     now = time.monotonic()
     if not fresh and _list_cache is not None and now - _list_cache[0] < LIST_TTL:
@@ -108,20 +150,29 @@ def lora_files(*, fresh: bool = False) -> list[str]:
     except Exception as exc:  # noqa: BLE001 - no ComfyUI, no loras folder: an empty list
         log.debug("Character sheet: cannot list loras (%s)", exc)
         names = []
-    names = sorted({name.strip() for name in names if str(name).strip()}, key=str.lower)
+    cleaned = {normalise_name(name) for name in names}
+    names = sorted({name for name in cleaned if name}, key=str.lower)
     _list_cache = (now, names)
     return names
 
 
 def lora_path(file: Any) -> Path | None:
-    """The full path of one LoRA, or ``None`` when this install does not have it."""
-    name = str(file or "").strip()
+    """The full path of one LoRA, or ``None`` when this install does not have it.
+
+    ``folder_paths.get_full_path`` searches every root ComfyUI was configured with, so a Desktop
+    install that keeps its LoRAs outside the app folder resolves here exactly like a portable one.
+    """
+    name = normalise_name(file)
     if not name:
         return None
     try:
         import folder_paths  # noqa: PLC0415
 
         resolved = folder_paths.get_full_path(LORA_FOLDER, name)
+        if not resolved:
+            # Core normalises the separator itself, but a name that arrived the other way round
+            # (a hand-typed one, or an old workflow) deserves the same chance.
+            resolved = folder_paths.get_full_path(LORA_FOLDER, str(file or "").strip())
     except Exception:  # noqa: BLE001
         resolved = None
     if not resolved:
@@ -134,7 +185,13 @@ def lora_path(file: Any) -> Path | None:
 # the store
 # --------------------------------------------------------------------------- #
 def _read_store() -> dict[str, dict[str, Any]]:
-    """The stored records keyed by file, or ``{}`` when there are none / they are unreadable."""
+    """The stored records keyed by the file's normalised name, or ``{}`` when there are none.
+
+    A store written by an older build on Windows holds keys like ``Minimax\\alpha.safetensors``.
+    Reading it through :func:`normalise_name` means that file's name, strength range and Civitai
+    answer are found again - instead of showing up beside the install's own spelling as a second,
+    "not installed", entry. The next write puts the normalised keys on disk.
+    """
     try:
         raw = json.loads(store_path().read_text())
     except Exception:  # noqa: BLE001 - missing, unreadable or invalid JSON = no metadata
@@ -142,7 +199,12 @@ def _read_store() -> dict[str, dict[str, Any]]:
     records = raw.get("loras") if isinstance(raw, dict) else None
     if not isinstance(records, dict):
         return {}
-    return {str(key): dict(value) for key, value in records.items() if isinstance(value, dict)}
+    out: dict[str, dict[str, Any]] = {}
+    for key, value in records.items():
+        name = normalise_name(key)
+        if name and isinstance(value, dict):
+            out[name] = dict(value)  # a repeated name keeps the last mention, like the spec does
+    return out
 
 
 def _write_store(records: Mapping[str, Mapping[str, Any]]) -> None:
@@ -157,7 +219,7 @@ def _write_store(records: Mapping[str, Mapping[str, Any]]) -> None:
 
 def record_for(file: Any) -> dict[str, Any]:
     """One file's stored metadata (a copy, so a caller cannot edit the store by accident)."""
-    return dict(_read_store().get(str(file or "").strip(), {}))
+    return dict(_read_store().get(normalise_name(file), {}))
 
 
 def _clean_name(value: Any) -> str:
@@ -188,7 +250,7 @@ def save_metadata(file: Any, fields: Mapping[str, Any]) -> dict[str, Any]:
     name a user set earlier. Unknown keys are ignored rather than stored: this file is read by
     humans too.
     """
-    name = str(file or "").strip()
+    name = normalise_name(file)
     if not name:
         return {"ok": False, "error": "A lora file name is required."}
     records = _read_store()
@@ -232,10 +294,12 @@ def file_hash(file: Any, *, force: bool = False) -> dict[str, Any]:
     The digest is cached in the store beside the file's size and mtime, so renaming or moving a
     LoRA inside ``models/loras`` keeps its metadata and a re-downloaded file re-hashes itself.
     """
-    name = str(file or "").strip()
+    name = normalise_name(file)
     path = lora_path(name)
     if path is None:
-        return {"ok": False, "file": name, "error": f"{name or 'that file'} is not in models/{LORA_FOLDER}."}
+        roots = ", ".join(lora_roots())
+        where = f"models/{LORA_FOLDER}" + (f" or a folder from extra_model_paths.yaml ({roots})" if roots else "")
+        return {"ok": False, "file": name, "error": f"{name or 'that file'} is not in {where}."}
     try:
         stat = path.stat()
     except OSError as exc:
@@ -369,7 +433,7 @@ def fetch_info(file: Any, *, force: bool = False) -> dict[str, Any]:
     THE only function here that uses the network, and it is reached from a button - the pack never
     calls Civitai on its own, and a panel mount never costs a request.
     """
-    name = str(file or "").strip()
+    name = normalise_name(file)
     hashed = file_hash(name, force=force)
     if not hashed.get("ok"):
         return {**hashed, "found": False}
@@ -424,7 +488,7 @@ def label_for(file: str, record: Mapping[str, Any] | None = None) -> str:
     named = _clean_name(record.get("name"))
     if named:
         return named
-    stem = Path(str(file)).name
+    stem = Path(normalise_name(file)).name
     for suffix in (".safetensors", ".ckpt", ".pt", ".sft"):
         if stem.lower().endswith(suffix):
             stem = stem[: -len(suffix)]
@@ -433,17 +497,24 @@ def label_for(file: str, record: Mapping[str, Any] | None = None) -> str:
 
 
 def listing(*, fresh: bool = False) -> dict[str, Any]:
-    """The installed LoRAs plus whatever metadata is already stored (no hashing, no network)."""
+    """The installed LoRAs plus whatever metadata is already stored (no hashing, no network).
+
+    ``file`` is the normalised name (``Minimax/alpha.safetensors``) and ``path`` is where that file
+    is on this install - which on a ComfyUI Desktop setup is often not under the app's own
+    ``models/loras`` but in a folder ``extra_model_paths.yaml`` registered. ``roots`` names every
+    folder that was searched, so a file that really is missing can say what was looked in.
+    """
     records = _read_store()
     items: list[dict[str, Any]] = []
     for file in lora_files(fresh=fresh):
         record = records.get(file) or {}
-        public = _public_record(record)
+        resolved = lora_path(file)
         items.append({
             "file": file,
-            "folder": str(Path(file).parent).replace("\\", "/").replace(".", ""),
+            "folder": folder_of(file),
+            "path": str(resolved) if resolved else "",
             "label": label_for(file, record),
-            **public,
+            **_public_record(record),
         })
     for file, record in records.items():
         if any(item["file"] == file for item in items):
@@ -453,7 +524,8 @@ def listing(*, fresh: bool = False) -> dict[str, Any]:
         public = _public_record(record)
         items.append({
             "file": file,
-            "folder": str(Path(file).parent).replace("\\", "/").replace(".", ""),
+            "folder": folder_of(file),
+            "path": "",
             "label": label_for(file, record),
             "missing": True,
             **public,
@@ -465,6 +537,8 @@ def listing(*, fresh: bool = False) -> dict[str, Any]:
         "count": len(items),
         "missing": sum(1 for item in items if item.get("missing")),
         "store": str(store_path()),
+        # The folders ComfyUI searches, in order (the install's own plus any extra_model_paths).
+        "roots": lora_roots(),
     }
 
 
@@ -503,8 +577,11 @@ def apply_stack(model: Any, stack: Iterable[Any], *, clip: Any = None) -> tuple[
             continue
         path = lora_path(name)
         if path is None:
+            roots = ", ".join(lora_roots())
             warnings.append(
-                f"LoRA {name!r} is not in models/{LORA_FOLDER}; it was skipped."
+                f"LoRA {name!r} is not in models/{LORA_FOLDER}"
+                + (f" or {roots}" if roots else "")
+                + "; it was skipped."
             )
             continue
         try:
@@ -537,10 +614,13 @@ __all__ = [
     "civitai_lookup",
     "fetch_info",
     "file_hash",
+    "folder_of",
     "label_for",
     "listing",
     "lora_files",
     "lora_path",
+    "lora_roots",
+    "normalise_name",
     "record_for",
     "save_metadata",
     "sha256_of",

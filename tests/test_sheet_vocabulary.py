@@ -9,6 +9,9 @@ chain rule or silently ignores a tick, and neither shows up as an error at rende
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 import pytest
 
 from h3cs import sheet_spec as ss
@@ -59,12 +62,81 @@ def test_the_turnaround_gained_the_angles_between_front_and_back():
 
 
 def test_the_head_detail_framings_are_close_ups():
-    for key in ("face-profile", "head-back"):
+    for key in ("face-profile", "face-three-quarter", "head-back"):
         assert ss.framing_distance(key) == "close", f"{key} is a head shot, not a full body"
     # And they must not be told about an outfit the frame cannot hold.
     for hidden in ("clothing", "body", "legwear", "shoes"):
         assert hidden in ss.attributes_hidden_by("face-profile")
+        assert hidden in ss.attributes_hidden_by("face-three-quarter")
         assert hidden in ss.attributes_hidden_by("head-back")
+
+
+def test_the_head_three_quarter_is_the_close_up_twin_of_the_body_three_quarter():
+    """The same 45 degrees exists at two camera distances, and the pair is the whole risk.
+
+    A close-up that inherits the full-body distance either chains across a scale change
+    (the hand-over drags the new cell back to a standing wide shot) or is described in
+    words that ask for the wrong frame - the two failures the distance table exists to
+    prevent, so both are pinned here.
+    """
+    head = ss._VIEW_BY_KEY["face-three-quarter"]
+    assert ss.framing_distance("face-three-quarter") == "close"
+    assert ss.framing_distance("three-quarter") == "full"
+    assert ss.VIEW_VARIANTS["face-three-quarter"] == "expression"
+    assert "close-up" in head.prompt.lower(), "the wording has to ask for a close-up"
+    assert "45 degrees" in head.prompt
+    assert "not a full body" in head.prompt
+    # 45 degrees is an angle a front-facing reference picture DOES cover, so the hairstyle
+    # sentence that protects the side and back views stays off it - exactly like the
+    # full-body view at the same angle.
+    assert "face-three-quarter" not in ss._HAIR_HOLDS_BY_VIEW
+
+
+def test_the_portrait_three_quarter_is_the_chest_up_twin_of_the_45_degree_family():
+    """45 degrees now exists at all three camera distances, and each one claims its own.
+
+    ``face-three-quarter`` is a head close-up, ``three-quarter`` is a full body, and this is
+    the chest-up in between - the one the sheet was missing. Claiming the wrong distance is
+    how a continuation drags a cell across a scale change, so the three are pinned together.
+    """
+    bust = ss._VIEW_BY_KEY["portrait-three-quarter"]
+    assert ss.framing_distance("portrait-three-quarter") == "medium"
+    assert ss.framing_distance("portrait") == ss.framing_distance("portrait-three-quarter")
+    assert ss.framing_distance("face-three-quarter") == "close"
+    assert ss.framing_distance("three-quarter") == "full"
+    # A chest-up framing shows the face, so an expression is stated in it.
+    assert "portrait-three-quarter" in ss.FACE_FRAMINGS
+    assert ss.VIEW_VARIANTS["portrait-three-quarter"] == "expression"
+    assert "45 degrees" in bust.prompt
+    assert "not a face-only close-up" in bust.prompt
+    assert "not a full body" in bust.prompt
+    # It stops above the groin exactly like the straight-on chest-up.
+    for hidden in ("intimate", "legwear", "shoes"):
+        assert hidden in ss.attributes_hidden_by("portrait-three-quarter")
+    # 45 degrees is an angle a front-facing reference picture DOES cover, so the hairstyle
+    # guard for the side and back views stays off it.
+    assert "portrait-three-quarter" not in ss._HAIR_HOLDS_BY_VIEW
+
+
+def test_the_panel_offers_every_view_and_the_same_camera_distances():
+    """The panel keeps its own copies of the tick row and of ``FRAMING_DISTANCES``.
+
+    Labels are UI text, so the row is its own list - which is exactly how it drifted once
+    (a view existed in every backend table while the panel's distance map still had only the
+    original five, so a chained cell was labelled "framing change" and the node chained it
+    anyway). Both copies are pinned here, by name.
+    """
+    src = (Path(__file__).resolve().parents[1] / "web" / "js" / "h3sheet_core.mjs").read_text()
+    row = re.search(r"export const VIEWS = \[(.*?)\n\];", src, re.S)
+    assert row, "the panel's view row moved: this test reads it by name"
+    panel = re.findall(r'\["([\w-]+)"', row.group(1))
+    assert sorted(panel) == sorted(ss.VIEW_KEYS), "the tick row and the vocabulary disagree"
+    assert len(panel) == len(set(panel)), "a view is ticked twice"
+
+    mirror = re.search(r"export const FRAMING_DISTANCES = \{(.*?)\n\};", src, re.S)
+    assert mirror, "the panel's distance mirror moved: this test reads it by name"
+    pairs = dict(re.findall(r'"?([\w-]+)"?\s*:\s*"(\w+)"', mirror.group(1)))
+    assert pairs == ss.FRAMING_DISTANCES, "the panel labels continuation from this table"
 
 
 def test_the_detail_crops_get_a_single_cell():

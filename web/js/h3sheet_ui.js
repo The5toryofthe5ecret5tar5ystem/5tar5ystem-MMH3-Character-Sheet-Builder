@@ -27,7 +27,7 @@ import {
     NODE_WIDTH,
     REF_GROUPS,
     enforceWidgetWidth,
-} from "./h3sheet_core.mjs?boot=h3sheet_v88";
+} from "./h3sheet_core.mjs?boot=h3sheet_v91";
 
 const CLASS = "MiniMaxH3CharacterSheet";
 const DOM_WIDGET = "h3_character_sheet_ui";
@@ -406,8 +406,11 @@ function mountPanel(node) {
         // The guide + which model files this install actually has (help.py). One request,
         // no GPU: the check is a folder listing.
         listHelp: () => sheetAction(node, { action: "help" }),
-        // The LoRAs tab's library: models/loras plus whatever metadata is stored for each file
-        // (lora_library.listing). A folder listing and a JSON read - no hashing, no network.
+        // The LoRAs tab's library: every folder ComfyUI knows for LoRAs - the install's own
+        // models/loras and anything extra_model_paths.yaml registered - plus whatever metadata
+        // is stored for each file (lora_library.listing). A folder listing and a JSON read: no
+        // hashing, no network. The answer also names the folders that were searched, so a row
+        // that says "not installed" can show where the pack looked.
         listLoras: ({ fresh = false } = {}) => listLoras(node, fresh),
         // Hash one LoRA - and, when the row asks for it, ask Civitai about it. Posted directly
         // like the preset store: "not in models/loras" and "Civitai has no model version with

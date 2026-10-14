@@ -827,7 +827,7 @@ def test_a_side_or_back_view_holds_the_hairstyle():
         assert angle in prompt, f"{view}: the angle is named"
     # The angles the reference DOES cover keep their prompt: a sentence that says "the hair does
     # not change" on a front view is noise the prompt does not need.
-    for view in ("face", "portrait", "front", "three-quarter"):
+    for view in ("face", "portrait", "front", "three-quarter", "face-three-quarter"):
         spec = _two_ref_spec(view=view)
         prompt = ss.build_cell_prompt(spec, spec.cells[0])
         assert holds not in prompt, f"{view}: the reference already shows this angle"
